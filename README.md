@@ -1,4 +1,4 @@
-# Talent Exchange — 5,000-Person Prototype
+# TalentX — 5,000-Person Prototype
 
 A standalone, responsive virtual talent-market prototype. Open `index.html` directly in a modern browser; no server or installation is required.
 
