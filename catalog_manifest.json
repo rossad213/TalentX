@@ -1,0 +1,24 @@
+{
+  "generated_records": 5000,
+  "category_counts": {
+    "Athlete": 1500,
+    "Singer": 1000,
+    "Actor": 2000,
+    "Creator": 500
+  },
+  "globally_unique_normalized_names": 5000,
+  "unique_ids": 5000,
+  "unique_tickers": 5000,
+  "missing_required_identity_fields": 0,
+  "csv_records": 5000,
+  "source_record_counts": {
+    "Fjelstul World Cup Database": 1480,
+    "Curated prototype anchor": 50,
+    "TMDB 5000 music-crew sample": 608,
+    "Pantheon 1.0 historical biographies": 872,
+    "TMDB 5000 credits sample": 1990
+  },
+  "market_fields": "Simulated and deterministic for prototype use",
+  "source_fields": "Derived from the source snapshots named on each record; not guaranteed current",
+  "qa_status": "Passed catalog count, category count, unique name, unique ID, unique ticker, required identity field, and CSV row checks"
+}

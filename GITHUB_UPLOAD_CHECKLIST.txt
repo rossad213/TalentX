@@ -1,0 +1,8 @@
+TalentX GitHub upload checklist
+
+1. Upload all files in this folder to the ROOT of your GitHub repository.
+2. The file named .nojekyll is intentionally empty and may be hidden by macOS Finder.
+3. To show hidden files on a Mac, press Command + Shift + period (.).
+4. GitHub itself will display .nojekyll after upload.
+5. If your upload method skips hidden files, create it directly on GitHub:
+   Add file > Create new file > type .nojekyll as the filename > Commit changes.
