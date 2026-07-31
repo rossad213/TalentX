@@ -1,0 +1,233 @@
+{
+  "marketSegments": [
+    "Current",
+    "Legacy",
+    "Under Review"
+  ],
+  "careerStatuses": {
+    "Athlete": [
+      "Active",
+      "Injured / Temporarily inactive",
+      "Free agent",
+      "Suspended",
+      "Retirement announced",
+      "Retired — Legacy",
+      "Status under review"
+    ],
+    "Music": [
+      "Active",
+      "Recently active",
+      "Touring",
+      "On hiatus",
+      "Group inactive",
+      "Legacy artist",
+      "Status under review"
+    ],
+    "Actor": [
+      "Active",
+      "Upcoming project",
+      "Currently filming",
+      "On hiatus",
+      "Retired — Legacy",
+      "Status under review"
+    ],
+    "Creator": [
+      "Active",
+      "Recently active",
+      "On hiatus",
+      "Legacy",
+      "Status under review"
+    ]
+  },
+  "categories": {
+    "Athlete": {
+      "label": "Athletes",
+      "disciplines": [
+        "American Football",
+        "Baseball",
+        "Basketball",
+        "Combat Sports",
+        "Cricket",
+        "Golf",
+        "Gymnastics",
+        "Hockey",
+        "Motorsport",
+        "Rugby",
+        "Soccer",
+        "Swimming",
+        "Tennis",
+        "Track & Field"
+      ],
+      "filters": [
+        "sport",
+        "league_or_tour",
+        "team",
+        "position_or_role",
+        "country",
+        "career_status",
+        "price_range",
+        "career_score"
+      ]
+    },
+    "Music": {
+      "label": "Music",
+      "disciplines": [
+        "Afrobeats",
+        "Afrobeats / Pop",
+        "Afrobeats / R&B",
+        "Alternative / Folk",
+        "Alternative Pop",
+        "Country",
+        "Country / Folk",
+        "Country / Hip-Hop",
+        "Country / Rock",
+        "Hip-Hop",
+        "Hip-Hop / Pop",
+        "Hip-Hop / R&B",
+        "Jazz Pop",
+        "K-Pop",
+        "Latin / Alternative",
+        "Latin / Reggaeton",
+        "Pop",
+        "Pop / Country",
+        "Pop / R&B",
+        "Pop / Rock",
+        "R&B",
+        "R&B / Pop",
+        "Regional Mexican",
+        "Rock / Pop"
+      ],
+      "filters": [
+        "genre",
+        "solo_or_group",
+        "country",
+        "career_status",
+        "recent_activity",
+        "price_range"
+      ]
+    },
+    "Actor": {
+      "label": "Actors",
+      "disciplines": [
+        "Film",
+        "Film & Stage",
+        "Film & Television",
+        "Television & Film"
+      ],
+      "filters": [
+        "medium",
+        "role",
+        "country",
+        "career_status",
+        "upcoming_project",
+        "price_range"
+      ]
+    },
+    "Creator": {
+      "label": "Creators",
+      "disciplines": [
+        "Comedy",
+        "Comedy / Lifestyle",
+        "Commentary",
+        "Entertainment",
+        "Entertainment / Philanthropy",
+        "Gaming / Entertainment",
+        "Gaming / Lifestyle",
+        "Interview / Lifestyle",
+        "Lifestyle",
+        "Narrative Entertainment",
+        "Science / Engineering",
+        "Streaming / Entertainment",
+        "Technology",
+        "Technology / Interviews"
+      ],
+      "filters": [
+        "platform",
+        "niche",
+        "country",
+        "career_status",
+        "recent_activity",
+        "price_range"
+      ]
+    }
+  },
+  "pricingModels": {
+    "active": {
+      "weights": {
+        "performance": 0.3,
+        "potential": 0.25,
+        "achievements": 0.2,
+        "audience": 0.15,
+        "availability": 0.1
+      },
+      "description": "Current performance, future potential, achievements, audience demand, and availability."
+    },
+    "legacy": {
+      "weights": {
+        "legacy": 0.35,
+        "audience": 0.25,
+        "postCareer": 0.2,
+        "recognition": 0.15,
+        "liquidity": 0.05
+      },
+      "description": "Career legacy, audience demand, post-career activity, historical recognition, and liquidity."
+    },
+    "rookie": {
+      "weights": {
+        "draftCapital": 0.35,
+        "preProPerformance": 0.2,
+        "opportunity": 0.15,
+        "positionValue": 0.1,
+        "development": 0.08,
+        "availability": 0.07,
+        "audience": 0.05
+      },
+      "description": "An explainable opening-price model for drafted rookies. Draft capital fades as professional performance evidence accumulates.",
+      "draftWeightDecay": {
+        "ipo": 0.35,
+        "seasonStart": 0.25,
+        "midRookieSeason": 0.15,
+        "afterYearOne": 0.08,
+        "afterYearTwoMax": 0.03
+      }
+    }
+  },
+  "careerStages": {
+    "Athlete": [
+      "Prospect",
+      "Pre-Draft",
+      "Drafted",
+      "Rookie IPO",
+      "Active Rookie",
+      "Early Career",
+      "Established",
+      "Veteran",
+      "Retired — Legacy",
+      "Stage under review"
+    ],
+    "Music": [
+      "Emerging",
+      "Breakout",
+      "Established",
+      "Veteran / Legacy",
+      "Active career",
+      "Stage under review"
+    ],
+    "Actor": [
+      "Emerging",
+      "Breakout",
+      "Established",
+      "Veteran / Legacy",
+      "Active career",
+      "Stage under review"
+    ],
+    "Creator": [
+      "Emerging",
+      "Breakout",
+      "Established",
+      "Veteran / Legacy",
+      "Active career",
+      "Stage under review"
+    ]
+  }
+}

@@ -1,39 +1,84 @@
-# TalentX — 5,000-Person Prototype
+# TalentX v2.1 — Current-First Market + Rookie IPO
 
-A standalone, responsive virtual talent-market prototype. Open `index.html` directly in a modern browser; no server or installation is required.
+TalentX is a virtual market for following the career trajectories of athletes, music artists, actors, and creators.
 
-## Catalog
+This version changes the catalog from a historical 5,000-person snapshot into a lifecycle-aware structure and adds an explainable Rookie IPO pricing system:
 
-- 1,500 athletes
-- 2,000 actors
-- 1,000 music figures
-- 500 creators and creative personalities
-- 5,000 globally unique normalized names
+- **Current market:** 200 current-first prototype seed profiles across sports and entertainment
+- **Legacy market:** 2,636 historical profiles
+- **Under Review:** 2,315 profiles that are excluded from the Current market until status is verified
+- **Total included:** 5,151 unique profiles
+- **Rookie IPO:** draft-position and position-aware opening-price calculator with draft-weight decay
 
-## Main features
+## Run the preview
 
-- Full-catalog search and category filtering
-- 50-row pagination for responsive rendering
-- Individual profiles with source-snapshot fields
-- Simulated prices, charts, career scores, volume, and daily changes
-- Virtual buy/sell orders with limited local price impact
-- Portfolio, watchlist, and transaction history
-- Browser-local persistence with `localStorage`
-- Data and pricing methodology page
+GitHub Pages:
 
-## Important distinction
+1. Upload the contents of this folder to the root of the TalentX repository.
+2. Keep `index.html` and `.nojekyll` at the repository root.
+3. In GitHub, open **Settings → Pages**.
+4. Publish from `main` and `/ (root)`.
 
-Names and selected biographical or credit fields come from the source snapshots identified on each record. Those fields may be historical or incomplete and are not guaranteed current. Every financial-style field—including price, percentage change, chart, score, volume, demand premium, and momentum—is simulated for product testing. No security, ownership interest, royalty, endorsement, or claim on a person's career is offered.
+Local preview:
 
-## Files
+```bash
+python3 -m http.server
+```
 
-- `index.html`: complete standalone application with the catalog embedded
-- `talent_catalog_5000.json`: complete machine-readable catalog
-- `talent_catalog_5000.csv`: compact tabular catalog
-- `build_catalog.py`: deterministic catalog generator
-- `catalog_manifest.json`: counts and QA summary
-- `SOURCES_AND_LIMITATIONS.md`: attribution and production limitations
+Then open `http://localhost:8000`.
 
-## Rebuilding
+Do not double-click `index.html`; browsers may block the JSON files when loaded from `file://`.
 
-The generator expects separately obtained source snapshots at the paths configured in `build_catalog.py`. Raw third-party source files are not bundled. Review each source's license and terms before rebuilding, distributing, or using the data commercially.
+## Important data notice
+
+The 200 current-seed names are real people selected for product prototyping, but the preview is **not connected to live rosters, rankings, music charts, project feeds, or creator-platform APIs**. Each Current listing is visibly labeled as requiring a live production source.
+
+The historical catalog is never presented as verified current data. It is routed to either:
+
+- `Legacy`
+- `Under Review`
+
+All prices, career scores, daily changes, charts, volumes, portfolios, and transactions are simulated.
+
+## Main files
+
+```text
+TalentX/
+├── .nojekyll
+├── index.html
+├── styles.css
+├── app.js
+├── data/
+│   ├── current_seed.json
+│   ├── legacy_catalog_v2.json
+│   ├── taxonomy.json
+│   └── catalog_manifest.json
+├── database/
+│   └── schema.sql
+├── docs/
+│   ├── RETIREMENT_AND_STATUS_POLICY.md
+│   ├── ROOKIE_IPO_POLICY.md
+│   └── SCALING_ARCHITECTURE.md
+└── scripts/
+    ├── migrate_catalog.py
+    └── validate_catalog.py
+```
+
+## Retirement rule
+
+Retirement does not send a person's price to zero. TalentX changes the asset from the **Active Career Model** to the **Legacy Career Model** after verifying the retirement event.
+
+See `docs/RETIREMENT_AND_STATUS_POLICY.md`.
+
+## Scaling rule
+
+The static JSON structure is suitable for product prototyping only. A catalog with hundreds of thousands or millions of people must use a backend database, server-side search and filtering, cursor pagination, and scheduled data-ingestion jobs.
+
+See `docs/SCALING_ARCHITECTURE.md`.
+
+
+## Rookie IPO rule
+
+Drafted athletes can be listed using a separate Rookie IPO model before enough professional performance exists. The calculator is available in **Data & Rules**. The production schema stores the immutable IPO inputs and a separate schedule that fades draft capital from 35% at listing to no more than 3% after year two.
+
+See `docs/ROOKIE_IPO_POLICY.md`.

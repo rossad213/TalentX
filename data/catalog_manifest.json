@@ -1,0 +1,42 @@
+{
+  "buildDate": "2026-07-31",
+  "totalRecords": 5151,
+  "currentSeedRecords": 200,
+  "legacyRecords": 2636,
+  "underReviewRecords": 2315,
+  "categories": {
+    "Athlete": 1593,
+    "Music": 1029,
+    "Actor": 2016,
+    "Creator": 513
+  },
+  "currentDisciplines": {
+    "Basketball": 12,
+    "American Football": 12,
+    "Soccer": 16,
+    "Baseball": 10,
+    "Hockey": 10,
+    "Tennis": 10,
+    "Golf": 8,
+    "Motorsport": 8,
+    "Combat Sports": 8,
+    "Swimming": 2,
+    "Track & Field": 3,
+    "Gymnastics": 1,
+    "Cricket": 6,
+    "Rugby": 4
+  },
+  "notes": [
+    "Current seed records are real people selected for product prototyping, but are not connected to live roster or career-status feeds.",
+    "Historical records are not presented as current. They are routed to Legacy or Under Review.",
+    "All prices, scores, changes, volume and chart history are simulated.",
+    "Rookie opening prices now use draft capital, position value, pre-professional performance, opportunity, development, availability, and audience inputs. No Current record is automatically labeled a rookie without verified stage data."
+  ],
+  "version": "2.1-rookie-ipo",
+  "features": [
+    "career-stage filtering",
+    "draft-weight decay rules",
+    "rookie IPO pricing calculator",
+    "rookie pricing database schema"
+  ]
+}

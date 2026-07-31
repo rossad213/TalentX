@@ -1,0 +1,23 @@
+TALENTX V2 GITHUB UPDATE
+
+1. Download and unzip this package.
+2. Open your TalentX GitHub repository.
+3. Upload the CONTENTS of this folder to the repository root.
+4. When GitHub asks about existing files, replace:
+   - index.html
+   - README.md
+   - .nojekyll
+5. Add the new files and folders:
+   - styles.css
+   - app.js
+   - data/
+   - docs/
+   - database/
+   - scripts/
+6. Commit the changes.
+7. GitHub Pages should rebuild automatically.
+
+Important:
+- Keep index.html and .nojekyll at the repository root.
+- Do not upload the outer talentx-v2-current-market folder as a nested folder.
+- The Current market is a prototype seed and is not yet connected to live verification feeds.
