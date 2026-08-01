@@ -104,8 +104,79 @@ function avatar(r,large=false){
 function segmentClass(s){
   return s==='Current'?'current':s==='Legacy'?'legacy':'review';
 }
-function trendSvg(r,height=130){
-  const a=(r.trend||[]).map(Number); if(!a.length) return '';
+function displayTrend(r){
+  const base=(r.trend||[]).map(Number).filter(v=>Number.isFinite(v));
+  if(!base.length) return [];
+  const current=Number(localPrice(r));
+  const last=Number(base[base.length-1]||0);
+  if(Number.isFinite(current)&&current>0&&Number.isFinite(last)&&last>0){
+    const scale=current/last;
+    return base.map(v=>Number((v*scale).toFixed(2)));
+  }
+  return base;
+}
+function chartStats(r){
+  const a=displayTrend(r); if(!a.length) return '';
+  const open=a[0], high=Math.max(...a), low=Math.min(...a), current=a[a.length-1];
+  const delta=current-open;
+  const pct=open?((delta/open)*100):0;
+  const stats=[
+    ['Open', money(open)],
+    ['High', money(high)],
+    ['Low', money(low)],
+    ['Current', money(current)],
+    ['Change', `${delta>=0?'+':'-'}${money(Math.abs(delta))}`],
+    ['Return', `${pct>=0?'+':''}${pct.toFixed(2)}%`]
+  ];
+  return `<div class="chart-stats">${stats.map(([label,value])=>`<div class="chart-stat"><small>${label}</small><strong class="${label==='Change'||label==='Return'?(delta>=0?'positive':'negative'):''}">${value}</strong></div>`).join('')}</div>`;
+}
+function detailedTrendSvg(r,height=250){
+  const a=displayTrend(r); if(!a.length) return `<div class="chart-empty">No chart history yet.</div>`;
+  const up=a[a.length-1]>=a[0];
+  const color=up?'#58ef78':'#ff5e79';
+  const W=1000,H=340,padL=18,padR=108,padT=18,padB=38;
+  const min=Math.min(...a),max=Math.max(...a),range=Math.max(1,(max-min)*1.12);
+  const floor=min-(range*0.04),ceil=floor+range;
+  const usableW=W-padL-padR, usableH=H-padT-padB;
+  const x=i=>padL+(a.length===1?usableW:(i/(a.length-1))*usableW);
+  const y=v=>padT+((ceil-v)/(ceil-floor))*usableH;
+  const points=a.map((v,i)=>`${x(i).toFixed(2)},${y(v).toFixed(2)}`);
+  const linePoints=points.join(' ');
+  const fillPoints=`${padL},${H-padB} ${linePoints} ${x(a.length-1)},${H-padB}`;
+  const ticks=[0,.25,.5,.75,1].map(t=>Number((ceil-(range*t)).toFixed(2)));
+  const current=a[a.length-1], open=a[0], high=Math.max(...a), low=Math.min(...a);
+  const highIndex=a.indexOf(high), lowIndex=a.indexOf(low);
+  const currentY=y(current), currentX=x(a.length-1);
+  const priceTagY=Math.max(padT+12,Math.min(H-padB-12,currentY));
+  const priceTagX=Math.min(W-76,currentX+18);
+  const tickLines=ticks.map((v,idx)=>`<g><line x1="${padL}" y1="${y(v).toFixed(2)}" x2="${W-padR+8}" y2="${y(v).toFixed(2)}" class="stock-grid-line ${idx===ticks.length-1?'stock-grid-line--base':''}"></line><text x="${W-padR+14}" y="${(y(v)+4).toFixed(2)}" class="stock-y-label">${money(v)}</text></g>`).join('');
+  const xLabels=[{p:0,label:'Open'},{p:.5,label:'Mid'},{p:1,label:'Now'}].map(item=>`<text x="${(padL+usableW*item.p).toFixed(2)}" y="${H-10}" text-anchor="${item.p===0?'start':item.p===1?'end':'middle'}" class="stock-x-label">${item.label}</text>`).join('');
+  const delta=current-open, pct=open?((delta/open)*100):0;
+  return `<div class="stock-chart-wrap" style="height:${height}px">
+    <svg class="stock-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Simulated price chart for ${esc(r.name)}">
+      <defs>
+        <linearGradient id="stock-fill-${esc(r.id)}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${color}" stop-opacity="0.30"></stop>
+          <stop offset="1" stop-color="${color}" stop-opacity="0.02"></stop>
+        </linearGradient>
+      </defs>
+      ${tickLines}
+      <polygon points="${fillPoints}" fill="url(#stock-fill-${esc(r.id)})"></polygon>
+      <line x1="${padL}" x2="${W-padR+8}" y1="${currentY.toFixed(2)}" y2="${currentY.toFixed(2)}" class="stock-price-line"></line>
+      <polyline points="${linePoints}" class="stock-line" style="stroke:${color}"></polyline>
+      <circle cx="${currentX.toFixed(2)}" cy="${currentY.toFixed(2)}" r="6" class="stock-current-marker" style="fill:${color}"></circle>
+      <circle cx="${x(highIndex).toFixed(2)}" cy="${y(high).toFixed(2)}" r="4" class="stock-extreme-marker stock-high-marker"></circle>
+      <circle cx="${x(lowIndex).toFixed(2)}" cy="${y(low).toFixed(2)}" r="4" class="stock-extreme-marker stock-low-marker"></circle>
+      <rect x="${priceTagX.toFixed(2)}" y="${(priceTagY-14).toFixed(2)}" width="74" height="28" rx="8" class="stock-price-tag-box"></rect>
+      <text x="${(priceTagX+37).toFixed(2)}" y="${(priceTagY+4).toFixed(2)}" text-anchor="middle" class="stock-price-tag-text">${money(current)}</text>
+      ${xLabels}
+    </svg>
+  </div>
+  <div class="stock-chart-footer"><span class="${delta>=0?'positive':'negative'}">${delta>=0?'+':''}${pct.toFixed(2)}% simulated trend</span><span>High ${money(high)}</span><span>Low ${money(low)}</span></div>`;
+}
+function trendSvg(r,height=130,detailed=false){
+  if(detailed) return detailedTrendSvg(r,height);
+  const a=displayTrend(r); if(!a.length) return '';
   const min=Math.min(...a),max=Math.max(...a),range=Math.max(1,max-min);
   const pts=a.map((v,i)=>`${(i/(a.length-1))*100},${100-((v-min)/range)*86-7}`).join(' ');
   const up=a[a.length-1]>=a[0];
@@ -254,7 +325,7 @@ function profile(){
       <div class="profile-head"><div class="profile-id">${avatar(r,true)}<div><h1>${esc(r.name)} <span class="ticker">${esc(r.ticker)}</span></h1><p>${esc(r.role)} · ${esc(r.discipline)} · ${esc(r.leagueOrMedium)}${r.teamOrPlatform&&r.teamOrPlatform!=='—'?`<br>${esc(r.teamOrPlatform)}`:''}</p></div></div>
       <div class="profile-price"><strong>${money(localPrice(r))}</strong><span class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}% simulated</span></div></div>
       <div class="badge-row"><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)} market</span><span class="status-badge">${esc(r.careerStatus)}</span><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span><span class="quality-badge">${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}% price confidence</span></div>
-      <div class="profile-chart">${trendSvg(r,210)}</div>
+      <div class="profile-chart detailed">${trendSvg(r,260,true)}${chartStats(r)}</div>
       <div class="tab-row">${['overview','pricing','data'].map(t=>`<button class="${profileTab===t?'active':''}" onclick="setProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>
       ${profileTab==='overview'?`<div class="grid info-grid"><div class="info-box"><small>Market segment</small><strong>${esc(r.marketSegment)}</strong></div><div class="info-box"><small>Career model</small><strong>${esc(r.modelType)}</strong></div><div class="info-box"><small>Career stage</small><strong>${esc(r.careerStage||'Stage under review')}</strong></div><div class="info-box"><small>Career score</small><strong>${Number(r.careerScore).toFixed(1)} / 100</strong></div><div class="info-box"><small>Country</small><strong>${esc(r.country)}</strong></div><div class="info-box"><small>Role</small><strong>${esc(r.role)}</strong></div><div class="info-box"><small>Virtual volume</small><strong>${compact(r.volume)}</strong></div></div><p class="page-sub" style="margin-top:18px">${esc(r.description)}</p>`:''}
       ${profileTab==='pricing'?`<div class="grid info-grid"><div class="info-box"><small>Fundamental value</small><strong>${money(r.fundamentalValue)}</strong></div><div class="info-box"><small>Pricing confidence</small><strong>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</strong></div><div class="info-box"><small>Pricing evidence</small><strong>${esc(r.pricingDataStatus||'Model status not listed')}</strong></div><div class="info-box"><small>Model version</small><strong>${esc(r.pricingModelVersion||'Legacy prototype')}</strong></div><div class="info-box"><small>Demand premium</small><strong>${r.demandPremiumPct>=0?'+':''}${Number(r.demandPremiumPct).toFixed(2)}%</strong></div><div class="info-box"><small>Momentum</small><strong>${r.momentumPct>=0?'+':''}${Number(r.momentumPct).toFixed(2)}%</strong></div></div>${r.rookiePricing?rookieProfilePricing(r):metricGrid(metrics)}${Array.isArray(r.pricingEvidence)&&r.pricingEvidence.length?`<div class="source-box"><small>Pricing evidence</small><strong>${r.pricingEvidence.length} cited source${r.pricingEvidence.length===1?'':'s'}</strong><small>${r.pricingEvidence.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">Open source</a>`).join(' · ')}</small></div>`:''}<div class="formula" style="margin-top:16px">${r.rookiePricing?'Rookie IPO price = draft capital + pre-professional performance + immediate opportunity + position value + development + availability + audience. Draft weight fades as professional evidence arrives.':r.marketSegment==='Legacy'?'Legacy price = weighted legacy score on a non-linear price curve + tightly controlled market activity':'Active price = 30% performance + 25% achievements + 20% potential + 15% audience + 10% availability. High prices require evidence; roster-only records are capped.'}</div>`:''}
