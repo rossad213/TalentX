@@ -135,7 +135,25 @@ linear-gradient(145deg,#12243a,#08131f)}
 .profile-price{text-align:right}
 .profile-price strong{display:block;font-size:31px}
 .badge-row{display:flex;gap:7px;flex-wrap:wrap;margin:14px 0}
-.profile-chart{height:210px;margin-top:18px}
+.profile-chart{height:auto;margin-top:18px;padding:14px;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#0a1724,#0a1520)}
+.profile-chart.detailed{overflow:hidden}
+.stock-chart-wrap{position:relative;width:100%;min-height:260px}
+.stock-chart{width:100%;height:100%;display:block;overflow:visible}
+.stock-grid-line{stroke:rgba(135,156,178,.16);stroke-width:1}
+.stock-grid-line--base{stroke:rgba(135,156,178,.22)}
+.stock-y-label,.stock-x-label{fill:#8ea1b7;font-size:15px;font-weight:700}
+.stock-price-line{stroke:rgba(255,255,255,.18);stroke-width:1.6;stroke-dasharray:6 6}
+.stock-line{fill:none;stroke-width:4.5;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 12px rgba(88,239,120,.18))}
+.stock-current-marker{stroke:#061019;stroke-width:3;filter:drop-shadow(0 0 10px rgba(255,255,255,.2))}
+.stock-extreme-marker{fill:#d6e2ef;stroke:#08131f;stroke-width:2}
+.stock-price-tag-box{fill:#132738;stroke:rgba(88,239,120,.35);stroke-width:1.4}
+.stock-price-tag-text{fill:#eef4fa;font-size:15px;font-weight:900}
+.stock-chart-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;color:#9fb0c2;font-size:11px;font-weight:700}
+.chart-stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-top:12px}
+.chart-stat{padding:10px 11px;border:1px solid var(--line);border-radius:12px;background:#0c1a28}
+.chart-stat small{display:block;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.08em}
+.chart-stat strong{display:block;margin-top:6px;font-size:14px}
+.chart-empty{display:grid;place-items:center;height:100%;color:var(--muted);font-size:13px}
 .tab-row{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:16px;margin-top:18px}
 .tab-row button{border:0;background:transparent;color:#9dabbc;padding:8px 11px;border-radius:9px;font-weight:800}
 .tab-row button.active{background:#14283d;color:white}
@@ -213,3 +231,6 @@ linear-gradient(145deg,#12243a,#08131f)}
 .ipo-breakdown span{color:#d3dce6}.ipo-breakdown span small{display:block;color:var(--muted);margin-top:2px}
 @media(max-width:900px){.rookie-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.rookie-form,.ipo-result-head{grid-template-columns:1fr}}
+
+@media (max-width:1100px){.chart-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:720px){.chart-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-y-label,.stock-x-label{font-size:13px}}
