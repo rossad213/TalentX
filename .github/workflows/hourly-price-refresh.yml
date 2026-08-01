@@ -1,0 +1,131 @@
+name: Hourly price refresh and deploy TalentX
+
+on:
+  schedule:
+    # Avoid the busiest top-of-hour period while still refreshing once per hour.
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: talentx-pages
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install catalog dependencies
+        run: python -m pip install --upgrade -r requirements.txt
+
+      - name: Restore latest full catalog and newer hourly overlay
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _weekly _hourly
+          mkdir -p _weekly _hourly
+
+          weekly_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+          weekly_run_id="$(printf '%s' "$weekly_meta" | jq -r '.workflow_runs[0].id // empty')"
+          weekly_created_at="$(printf '%s' "$weekly_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+          if [ -z "$weekly_run_id" ]; then
+            echo "No successful full-catalog workflow run is available. Run the full workflow first."
+            exit 1
+          fi
+
+          gh run download "$weekly_run_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _weekly
+          weekly_data_dir="$(dirname "$(find _weekly -name current_catalog.json -print -quit)")"
+          if [ -z "$weekly_data_dir" ] || [ ! -f "$weekly_data_dir/current_catalog.json" ]; then
+            echo "The weekly artifact does not contain current_catalog.json. Run the updated full workflow once."
+            exit 1
+          fi
+          rm -rf data
+          mkdir -p data
+          cp -R "$weekly_data_dir"/. data/
+
+          hourly_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/hourly-price-refresh.yml/runs?status=success&per_page=1")"
+          hourly_run_id="$(printf '%s' "$hourly_meta" | jq -r '.workflow_runs[0].id // empty')"
+          hourly_created_at="$(printf '%s' "$hourly_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+
+          if [ -n "$hourly_run_id" ] && [ "$hourly_created_at" \> "$weekly_created_at" ]; then
+            gh run download "$hourly_run_id" -R "$GITHUB_REPOSITORY" -n talentx-hourly-catalog -D _hourly
+            for filename in current_catalog.json current_catalog.csv catalog_manifest.json current_source_manifest.json pricing_enrichment_manifest.json hourly_refresh_manifest.json; do
+              source_file="$(find _hourly -name "$filename" -print -quit)"
+              if [ -n "$source_file" ]; then
+                cp "$source_file" "data/$filename"
+              fi
+            done
+            echo "Restored hourly overlay from run $hourly_run_id over weekly run $weekly_run_id."
+          else
+            echo "Using weekly run $weekly_run_id as the hourly baseline."
+          fi
+
+          echo "WEEKLY_BASELINE_RUN_ID=$weekly_run_id" >> "$GITHUB_ENV"
+
+      - name: Refresh recent-event prices
+        run: >-
+          python scripts/hourly_price_refresh.py
+          --workers 20
+          --request-timeout 10
+          --lookback-hours 10
+          --max-athletes 1800
+          --max-hourly-move-pct 8
+          --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
+
+      - name: Validate current catalog
+        run: python scripts/validate_current_catalog.py --minimum 10000
+
+      - name: Upload hourly catalog state
+        uses: actions/upload-artifact@v4
+        with:
+          name: talentx-hourly-catalog
+          path: |
+            data/current_catalog.json
+            data/current_catalog.csv
+            data/catalog_manifest.json
+            data/current_source_manifest.json
+            data/pricing_enrichment_manifest.json
+            data/hourly_refresh_manifest.json
+          retention-days: 10
+
+      - name: Prepare static Pages site
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp index.html app.js styles.css .nojekyll _site/
+          cp -R data _site/data
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: refresh
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
