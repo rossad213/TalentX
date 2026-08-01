@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Regression checks for TalentX pricing-model integrity."""
+"""Regression and distribution checks for TalentX pricing integrity."""
 from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from pricing_model import ACTIVE_WEIGHTS, LEGACY_WEIGHTS, active_score, fundamen
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 TOLERANCE = 0.11
+MODEL_VERSION = "3.2-achievements-weighted"
 
 
 def load(path: Path) -> list[dict[str, Any]]:
@@ -26,7 +28,10 @@ def load(path: Path) -> list[dict[str, Any]]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--minimum-current", type=int, default=0)
+    parser.add_argument("--minimum-enriched", type=int, default=0)
+    parser.add_argument("--max-identical-score-rate", type=float, default=0.08)
     args = parser.parse_args()
+
     current = load(DATA / "current_catalog.json") or load(DATA / "current_seed.json")
     historical = load(DATA / "legacy_catalog_v2.json")
     errors: list[str] = []
@@ -35,9 +40,22 @@ def main() -> int:
         errors.append("Active weights must use 25% achievements and 20% potential")
     if ACTIVE_WEIGHTS.get("achievements", 0) <= ACTIVE_WEIGHTS.get("potential", 0):
         errors.append("Achievements must outweigh potential in the active-career model")
+    if abs(sum(ACTIVE_WEIGHTS.values()) - 1.0) > 1e-9:
+        errors.append("Active pricing weights must total 100%")
 
     if len(current) < args.minimum_current:
         errors.append(f"Current catalog has {len(current):,}; expected at least {args.minimum_current:,}")
+
+    enriched = [
+        record for record in current
+        if str(record.get("pricingDataStatus", "")).startswith("Evidence enriched")
+    ]
+    provisional = [
+        record for record in current
+        if str(record.get("pricingDataStatus", "")).startswith("Provisional")
+    ]
+    if len(enriched) < args.minimum_enriched:
+        errors.append(f"Only {len(enriched):,} evidence-enriched records; expected at least {args.minimum_enriched:,}")
 
     for record in current + historical:
         segment = record.get("marketSegment")
@@ -51,30 +69,70 @@ def main() -> int:
             expected_fundamental = fundamental_from_score(expected_score)
             if str(record.get("pricingDataStatus", "")).startswith("Provisional"):
                 expected_fundamental = min(expected_fundamental, 62.0)
-        if abs(float(record.get("careerScore", -999)) - expected_score) > TOLERANCE:
-            errors.append(f"Score mismatch: {record.get('name')} expected {expected_score}, found {record.get('careerScore')}")
-        if abs(float(record.get("fundamentalValue", -999)) - expected_fundamental) > TOLERANCE:
-            errors.append(f"Fundamental mismatch: {record.get('name')} expected {expected_fundamental}, found {record.get('fundamentalValue')}")
-        if str(record.get("pricingDataStatus", "")).startswith("Provisional") and float(record.get("fundamentalValue", 999)) > 62.01:
+        try:
+            actual_score = float(record.get("careerScore", -999))
+            actual_fundamental = float(record.get("fundamentalValue", -999))
+        except (TypeError, ValueError):
+            errors.append(f"Non-numeric price fields: {record.get('name')}")
+            continue
+        if abs(actual_score - expected_score) > TOLERANCE:
+            errors.append(f"Score mismatch: {record.get('name')} expected {expected_score}, found {actual_score}")
+        if abs(actual_fundamental - expected_fundamental) > TOLERANCE:
+            errors.append(f"Fundamental mismatch: {record.get('name')} expected {expected_fundamental}, found {actual_fundamental}")
+        if str(record.get("pricingDataStatus", "")).startswith("Provisional") and actual_fundamental > 62.01:
             errors.append(f"Unsupported star valuation: {record.get('name')} exceeds provisional cap")
-        if record.get("pricingModelVersion") != "3.2-achievements-weighted":
+        if record.get("pricingModelVersion") != MODEL_VERSION:
             errors.append(f"Wrong model version: {record.get('name')}")
-        if len(errors) >= 40:
+        if len(errors) >= 50:
             break
 
-    by_name = {str(r.get("name")): r for r in current}
-    dak = by_name.get("Dak Prescott")
-    incoom = by_name.get("Thomas Incoom")
-    if dak and incoom and float(dak.get("marketPrice", 0)) <= float(incoom.get("marketPrice", 0)):
-        errors.append(
-            f"Regression failed: Dak Prescott ({dak.get('marketPrice')}) must price above Thomas Incoom ({incoom.get('marketPrice')})"
-        )
+    if current:
+        rounded_scores = [round(float(record.get("careerScore", 0)), 1) for record in current]
+        common_score, common_count = Counter(rounded_scores).most_common(1)[0]
+        identical_rate = common_count / len(rounded_scores)
+        if identical_rate > args.max_identical_score_rate:
+            errors.append(
+                f"Pricing is over-clustered: {common_count:,} records ({identical_rate:.1%}) share score {common_score}"
+            )
+        if len(set(rounded_scores)) < 80 and len(current) >= 1000:
+            errors.append(f"Only {len(set(rounded_scores))} distinct career scores across {len(current):,} current records")
+
+    # Evidence-enriched records must include a traceable explanation.
+    for record in enriched:
+        summary = record.get("pricingEvidenceSummary")
+        evidence = record.get("pricingEvidence")
+        if not isinstance(summary, dict) or not isinstance(evidence, list) or not evidence:
+            errors.append(f"Evidence-enriched record lacks audit details: {record.get('name')}")
+            if len(errors) >= 50:
+                break
+
+    by_name = {str(record.get("name")): record for record in current}
+    comparisons = [
+        ("Dak Prescott", "Thomas Incoom"),
+        ("Justin Herbert", "Kyle Allen"),
+        ("Trevor Lawrence", "Trey Lance"),
+        ("Josh Jacobs", "Ty Johnson"),
+    ]
+    comparison_output: list[str] = []
+    for higher_name, lower_name in comparisons:
+        higher = by_name.get(higher_name)
+        lower = by_name.get(lower_name)
+        if not higher or not lower:
+            continue
+        higher_price = float(higher.get("marketPrice", 0))
+        lower_price = float(lower.get("marketPrice", 0))
+        comparison_output.append(f"{higher_name}: ${higher_price:.2f} | {lower_name}: ${lower_price:.2f}")
+        if higher_price <= lower_price:
+            errors.append(
+                f"Regression failed: {higher_name} (${higher_price:.2f}) must price above {lower_name} (${lower_price:.2f})"
+            )
 
     print(f"Checked {len(current) + len(historical):,} records against model weights.")
+    print(f"Evidence enriched: {len(enriched):,}; provisional: {len(provisional):,}")
     print(f"Active weights: {ACTIVE_WEIGHTS}")
     print(f"Legacy weights: {LEGACY_WEIGHTS}")
-    if dak and incoom:
-        print(f"Dak Prescott: ${dak.get('marketPrice')} | Thomas Incoom: ${incoom.get('marketPrice')}")
+    for line in comparison_output:
+        print(line)
 
     if errors:
         print("\nPRICING VALIDATION ERRORS")
