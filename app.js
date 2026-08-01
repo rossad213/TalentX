@@ -45,7 +45,7 @@ let filters={
   page:1
 };
 
-const PRICING_MODEL_VERSION='3.2-achievements-weighted';
+const PRICING_MODEL_VERSION='3.3-evidence-ranked-inputs';
 const defaultState={cash:25000,holdings:{},watchlist:[],prices:{},transactions:[],pricingModelVersion:PRICING_MODEL_VERSION};
 let state=loadState();
 
@@ -92,9 +92,10 @@ function openProfile(id){
 }
 function note(){
   const automated=Number(manifest?.automatedRosterVerifiedRecords||0);
+  const enriched=Number(manifest?.pricingEnrichedRecords||0);
   const statusText=automated
-    ? `${automated.toLocaleString()} athlete profiles were included from point-in-time current-roster feeds during the latest automated build. Status can change after the timestamp shown on each profile.`
-    : `This local preview contains the 200-person fallback seed. The GitHub Pages workflow generates the 10,000-name current-roster expansion before deployment.`;
+    ? `${automated.toLocaleString()} athlete profiles were included from point-in-time current-roster feeds. ${enriched.toLocaleString()} currently have statistics-and-awards pricing evidence; the remainder are visibly conservative provisional listings. Status and evidence can change after the timestamps shown.`
+    : `This local preview contains the 200-person fallback seed. The GitHub Pages workflow generates and evidence-enriches the larger current catalog before deployment.`;
   return `<div class="notice"><strong>TalentX data notice:</strong> ${statusText} All prices, scores, changes, charts, volumes, portfolios, and trades are simulated.</div>`;
 }
 function avatar(r,large=false){
@@ -205,7 +206,7 @@ function rowHtml(r){
     <td><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span></td>
     <td><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)}</span></td>
     <td>${money(localPrice(r))}</td><td class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}%</td>
-    <td>${Number(r.careerScore).toFixed(1)}</td><td>${Math.round(r.dataConfidence*100)}%</td>
+    <td>${Number(r.careerScore).toFixed(1)}</td><td>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</td>
   </tr>`;
 }
 function market(){
@@ -236,7 +237,7 @@ function market(){
       <option value="name" ${filters.sort==='name'?'selected':''}>Name A–Z</option>
     </select>
   </div>
-  <section class="card table-card"><div class="table-wrap"><table class="market-table"><thead><tr><th>Person</th><th>Category</th><th>Sport / genre / niche</th><th>League / medium</th><th>Career stage</th><th>Market</th><th>Price</th><th>Move</th><th>Score</th><th>Confidence</th></tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="10"><div class="empty">No records match these filters.</div></td></tr>`}</tbody></table></div>
+  <section class="card table-card"><div class="table-wrap"><table class="market-table"><thead><tr><th>Person</th><th>Category</th><th>Sport / genre / niche</th><th>League / medium</th><th>Career stage</th><th>Market</th><th>Price</th><th>Move</th><th>Score</th><th>Price confidence</th></tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="10"><div class="empty">No records match these filters.</div></td></tr>`}</tbody></table></div>
   <div class="pagination"><span>Showing ${arr.length?start+1:0}–${Math.min(start+PAGE_SIZE,arr.length)} of ${arr.length.toLocaleString()}</span><div class="pagination-controls"><button onclick="changePage(-1)" ${filters.page<=1?'disabled':''}>← Previous</button><span>Page ${filters.page} of ${pages}</span><button onclick="changePage(1)" ${filters.page>=pages?'disabled':''}>Next →</button></div></div></section>`;
 }
 function changePage(delta){filters.page=Math.max(1,filters.page+delta);render();window.scrollTo({top:0,behavior:'smooth'})}
@@ -252,7 +253,7 @@ function profile(){
     <article class="card profile-card">
       <div class="profile-head"><div class="profile-id">${avatar(r,true)}<div><h1>${esc(r.name)} <span class="ticker">${esc(r.ticker)}</span></h1><p>${esc(r.role)} · ${esc(r.discipline)} · ${esc(r.leagueOrMedium)}${r.teamOrPlatform&&r.teamOrPlatform!=='—'?`<br>${esc(r.teamOrPlatform)}`:''}</p></div></div>
       <div class="profile-price"><strong>${money(localPrice(r))}</strong><span class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}% simulated</span></div></div>
-      <div class="badge-row"><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)} market</span><span class="status-badge">${esc(r.careerStatus)}</span><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span><span class="quality-badge">${Math.round(r.dataConfidence*100)}% data confidence</span></div>
+      <div class="badge-row"><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)} market</span><span class="status-badge">${esc(r.careerStatus)}</span><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span><span class="quality-badge">${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}% price confidence</span></div>
       <div class="profile-chart">${trendSvg(r,210)}</div>
       <div class="tab-row">${['overview','pricing','data'].map(t=>`<button class="${profileTab===t?'active':''}" onclick="setProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>
       ${profileTab==='overview'?`<div class="grid info-grid"><div class="info-box"><small>Market segment</small><strong>${esc(r.marketSegment)}</strong></div><div class="info-box"><small>Career model</small><strong>${esc(r.modelType)}</strong></div><div class="info-box"><small>Career stage</small><strong>${esc(r.careerStage||'Stage under review')}</strong></div><div class="info-box"><small>Career score</small><strong>${Number(r.careerScore).toFixed(1)} / 100</strong></div><div class="info-box"><small>Country</small><strong>${esc(r.country)}</strong></div><div class="info-box"><small>Role</small><strong>${esc(r.role)}</strong></div><div class="info-box"><small>Virtual volume</small><strong>${compact(r.volume)}</strong></div></div><p class="page-sub" style="margin-top:18px">${esc(r.description)}</p>`:''}
