@@ -155,12 +155,12 @@
     "active": {
       "weights": {
         "performance": 0.3,
-        "potential": 0.25,
-        "achievements": 0.2,
+        "achievements": 0.25,
+        "potential": 0.2,
         "audience": 0.15,
         "availability": 0.1
       },
-      "description": "Current performance, future potential, achievements, audience demand, and availability."
+      "description": "Current performance, verified career achievements, future potential, audience demand, and availability."
     },
     "legacy": {
       "weights": {
