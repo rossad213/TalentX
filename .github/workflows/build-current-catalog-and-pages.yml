@@ -52,6 +52,9 @@ jobs:
           --request-timeout 12
           --minimum-enriched 2500
 
+      - name: Reprice current, legacy, and under-review catalogs
+        run: python scripts/reprice_catalogs.py
+
       - name: Validate evidence-weighted pricing
         run: >-
           python scripts/validate_pricing_model.py
