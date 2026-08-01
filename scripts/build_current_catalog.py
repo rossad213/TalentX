@@ -32,6 +32,8 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from pricing_model import apply_pricing_to_records, load_overrides, provisional_active_metrics
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
 SEED_FILE = DATA_DIR / "current_seed.json"
@@ -39,6 +41,7 @@ OUTPUT_FILE = DATA_DIR / "current_catalog.json"
 CSV_FILE = DATA_DIR / "current_catalog.csv"
 MANIFEST_FILE = DATA_DIR / "catalog_manifest.json"
 SOURCE_MANIFEST_FILE = DATA_DIR / "current_source_manifest.json"
+PRICING_OVERRIDES_FILE = DATA_DIR / "pricing_overrides.json"
 
 USER_AGENT = "TalentX-Catalog-Builder/3.0 (+https://github.com/rossad213/TalentX)"
 ESPN_SITE = "https://site.api.espn.com/apis/site/v2/sports"
@@ -228,6 +231,39 @@ def experience_years(item: dict[str, Any]) -> int | None:
     return None
 
 
+def athlete_age(item: dict[str, Any]) -> int | None:
+    value = item.get("age")
+    if value is not None:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            pass
+    dob = item.get("dateOfBirth") or item.get("birthDate")
+    if isinstance(dob, str) and len(dob) >= 10:
+        try:
+            born = datetime.fromisoformat(dob[:10]).date()
+            today = datetime.now(timezone.utc).date()
+            return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+        except ValueError:
+            pass
+    return None
+
+
+def draft_evidence(item: dict[str, Any]) -> dict[str, Any]:
+    draft = item.get("draft")
+    if not isinstance(draft, dict):
+        return {}
+    output: dict[str, Any] = {}
+    mapping = {"year": "draftYear", "round": "draftRound", "selection": "draftPick", "overall": "draftPick"}
+    for source, target in mapping.items():
+        if draft.get(source) is not None:
+            try:
+                output[target] = int(draft[source])
+            except (TypeError, ValueError):
+                output[target] = draft[source]
+    return output
+
+
 def career_stage(exp: int | None) -> str:
     if exp is None:
         return "Stage Under Review"
@@ -275,6 +311,9 @@ def extract_espn_roster(data: dict[str, Any], *, cfg: dict[str, str], team: dict
                 "role": position_from(item, inherited_position),
                 "country": country_from(item),
                 "experienceYears": experience_years(item),
+                "age": athlete_age(item),
+                "starter": bool(item.get("starter") or item.get("isStarter")),
+                **draft_evidence(item),
                 "sourceName": "ESPN current team roster endpoint",
                 "sourceUrl": source_url,
                 "sourceLeagueSlug": cfg["league"],
@@ -398,6 +437,8 @@ def collect_nhl(workers: int = 16) -> SourceResult:
                             "role": clean_text(item.get("positionCode"), inherited),
                             "country": clean_text(item.get("birthCountry"), "Not listed"),
                             "experienceYears": None,
+                            "age": athlete_age(item),
+                            "starter": False,
                             "sourceName": "NHL current roster API",
                             "sourceUrl": url,
                             "sourceLeagueSlug": "nhl",
@@ -444,46 +485,7 @@ def unique_ticker(name: str, source_key: str, used: set[str]) -> str:
 
 def build_market_fields(raw: dict[str, Any], verified_at: str, used_tickers: set[str]) -> dict[str, Any]:
     source_key = f"{raw['sourceNamespace']}:{raw['sourceRecordId']}:{raw['discipline']}"
-    digest = hashlib.sha256(source_key.encode()).digest()
-    rng = random.Random(int.from_bytes(digest[:8], "big"))
-
-    performance = round(rng.uniform(45, 94), 1)
-    achievements = round(rng.uniform(35, 92), 1)
-    potential = round(rng.uniform(40, 96), 1)
-    audience = round(rng.uniform(30, 96), 1)
-    availability = round(rng.uniform(58, 97), 1)
-    consistency = round(rng.uniform(45, 94), 1)
     exp = raw.get("experienceYears")
-    if exp == 0:
-        potential = max(potential, round(rng.uniform(72, 96), 1))
-        achievements = min(achievements, round(rng.uniform(35, 65), 1))
-
-    score = round(
-        performance * 0.30
-        + potential * 0.25
-        + achievements * 0.20
-        + audience * 0.15
-        + availability * 0.10,
-        1,
-    )
-    fundamental = round(6 + score * 1.62, 2)
-    demand = round(rng.uniform(-4.5, 10.5), 2)
-    momentum = round(rng.uniform(-5.5, 6.5), 2)
-    market = round(max(2.0, fundamental * (1 + demand / 100) * (1 + momentum / 100)), 2)
-    daily = round(rng.uniform(-5.8, 6.2), 2)
-    volume = rng.randint(15_000, 1_200_000)
-
-    trend: list[float] = []
-    value = market / (1 + daily / 100 if abs(daily) < 99 else 1)
-    for _ in range(18):
-        value *= 1 + rng.uniform(-0.022, 0.025)
-        trend.append(round(max(1.0, value), 2))
-    trend[-1] = market
-
-    legacy = round(achievements * 0.72 + consistency * 0.28, 1)
-    post_career = round(rng.uniform(42, 91), 1)
-    recognition = round(achievements * 0.63 + audience * 0.37, 1)
-    liquidity = round(rng.uniform(35, 88), 1)
     stage = career_stage(exp)
     name = raw["name"]
     role = raw.get("role") or "Player"
@@ -491,7 +493,7 @@ def build_market_fields(raw: dict[str, Any], verified_at: str, used_tickers: set
     ticker = unique_ticker(name, source_key, used_tickers)
     profile_id = f"live-{raw['sourceNamespace']}-{normalize(raw['discipline'])}-{raw['sourceRecordId']}"
 
-    return {
+    record = {
         "id": profile_id,
         "name": name,
         "ticker": ticker,
@@ -512,41 +514,30 @@ def build_market_fields(raw: dict[str, Any], verified_at: str, used_tickers: set
         "sourceNamespace": raw["sourceNamespace"],
         "sourceLeagueSlug": raw.get("sourceLeagueSlug", ""),
         "dataConfidence": round(float(raw.get("statusConfidence", 0.92)), 2),
-        "activeMetrics": {
-            "performance": performance,
-            "achievements": achievements,
-            "potential": potential,
-            "audience": audience,
-            "availability": availability,
-            "consistency": consistency,
-        },
-        "legacyMetrics": {
-            "legacy": legacy,
-            "audience": audience,
-            "postCareer": post_career,
-            "recognition": recognition,
-            "liquidity": liquidity,
-        },
+        "activeMetrics": provisional_active_metrics(raw),
+        "legacyMetrics": {},
         "modelType": "Active career model",
-        "careerScore": score,
-        "fundamentalValue": fundamental,
-        "marketPrice": market,
-        "dailyChange": daily,
-        "demandPremiumPct": demand,
-        "momentumPct": momentum,
-        "volume": volume,
-        "trend": trend,
         "avatar": initials(name),
         "description": (
             f"Current {raw['leagueOrMedium']} roster listing for {role} with {team}. "
-            "Identity and active-roster status come from the cited source; all TalentX market values are simulated."
+            "Roster identity is source-backed. Pricing stays provisional until performance, awards, age, availability and audience evidence are enriched."
         ),
         "searchText": " ".join(
             [name, "Athlete", raw["discipline"], raw["leagueOrMedium"], team, role, raw.get("country", ""), "Active", "Current", stage]
         ).lower(),
         "careerStage": stage,
         "experienceYears": exp,
+        "age": raw.get("age"),
+        "starter": bool(raw.get("starter")),
+        "draftYear": raw.get("draftYear"),
+        "draftRound": raw.get("draftRound"),
+        "draftPick": raw.get("draftPick"),
+        "pricingDataStatus": "Provisional — roster, experience and role evidence only",
+        "pricingConfidence": 0.48 if exp is not None else 0.38,
     }
+    # Pricing is applied after curated-seed merging so every current record goes
+    # through the same audited model and evidence overrides.
+    return record
 
 
 def load_seed() -> list[dict[str, Any]]:
@@ -573,7 +564,8 @@ def merge_seed(seed: list[dict[str, Any]], live: list[dict[str, Any]]) -> list[d
                 "careerStatus", "marketSegment", "verificationStatus", "lastVerifiedAt",
                 "statusSource", "sourceName", "sourceUrl", "sourceRecordId",
                 "sourceNamespace", "sourceLeagueSlug", "dataConfidence", "teamOrPlatform",
-                "role", "country", "careerStage", "experienceYears",
+                "role", "country", "careerStage", "experienceYears", "age", "starter",
+                "draftYear", "draftRound", "draftPick",
             ):
                 if field in found:
                     updated[field] = found[field]
@@ -615,7 +607,8 @@ def write_outputs(records: list[dict[str, Any]], source_results: list[SourceResu
         "id", "name", "ticker", "primaryCategory", "discipline", "leagueOrMedium",
         "teamOrPlatform", "role", "country", "careerStatus", "marketSegment",
         "careerStage", "lastVerifiedAt", "verificationStatus", "sourceName",
-        "sourceUrl", "sourceRecordId", "dataConfidence", "marketPrice", "careerScore",
+        "sourceUrl", "sourceRecordId", "dataConfidence", "pricingConfidence",
+        "pricingDataStatus", "pricingModelVersion", "marketPrice", "careerScore",
     ]
     with CSV_FILE.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=csv_fields, extrasaction="ignore")
@@ -636,7 +629,7 @@ def write_outputs(records: list[dict[str, Any]], source_results: list[SourceResu
             previous = {}
     manifest = {
         **previous,
-        "version": "3.0-current-10000",
+        "version": "3.2-current-10000-achievements-weighted",
         "generatedAt": built_at,
         "currentSeedRecords": len(records),
         "currentCatalogRecords": len(records),
@@ -649,7 +642,9 @@ def write_outputs(records: list[dict[str, Any]], source_results: list[SourceResu
         "sourceErrorCount": len(source_errors),
         "currentCatalogFile": "data/current_catalog.json",
         "currentCatalogCsv": "data/current_catalog.csv",
-        "marketDataMode": "Simulated",
+        "marketDataMode": "Simulated evidence-weighted pricing",
+        "pricingModelVersion": "3.2-achievements-weighted",
+        "pricingRule": "High valuations require curated or verified evidence; roster-only records are conservative and capped.",
         "statusDataMode": "Automated point-in-time roster snapshot",
     }
     MANIFEST_FILE.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -748,6 +743,8 @@ def main() -> int:
 
     live_records = [build_market_fields(raw, verified_at, used_tickers) for raw in selected_raw]
     records = merge_seed(seed, live_records)
+    overrides = load_overrides(PRICING_OVERRIDES_FILE)
+    records = apply_pricing_to_records(records, overrides)
     errors = validate_records(records, len(seed), min(args.target_additions, len(additional_raw)))
     if errors:
         print("Validation failed:\n- " + "\n- ".join(errors), file=sys.stderr)
