@@ -1,23 +1,37 @@
-TALENTX V2 GITHUB UPDATE
+TALENTX V3 — UPLOAD AND RUN THE 10,000-NAME CURRENT CATALOG
 
-1. Download and unzip this package.
-2. Open your TalentX GitHub repository.
-3. Upload the CONTENTS of this folder to the repository root.
-4. When GitHub asks about existing files, replace:
-   - index.html
-   - README.md
-   - .nojekyll
-5. Add the new files and folders:
-   - styles.css
-   - app.js
-   - data/
-   - docs/
-   - database/
-   - scripts/
-6. Commit the changes.
-7. GitHub Pages should rebuild automatically.
+1. Download and unzip the TalentX v3 package.
+2. Open the unzipped folder. Upload the CONTENTS, not the outer folder.
+3. On a Mac, press Command + Shift + . so Finder shows hidden files.
+4. Confirm you can see both:
+      .github
+      .nojekyll
+5. In github.com/rossad213/TalentX, choose Add file > Upload files.
+6. Drag every item from inside the package into the upload area.
+7. Commit directly to main with this message:
+      Add 10,000-name current roster pipeline
+8. Open Settings > Pages.
+9. Under Build and deployment, change Source to:
+      GitHub Actions
+10. Open the Actions tab.
+11. Select "Build current catalog and deploy TalentX".
+12. If a run did not begin automatically, click Run workflow > Run workflow.
+13. Wait for both jobs to turn green:
+      build
+      deploy
+14. Refresh https://rossad213.github.io/TalentX/
 
-Important:
-- Keep index.html and .nojekyll at the repository root.
-- Do not upload the outer talentx-v2-current-market folder as a nested folder.
-- The Current market is a prototype seed and is not yet connected to live verification feeds.
+WHAT THE ACTION DOES
+- Fetches point-in-time current team rosters.
+- Adds exactly 10,000 new roster-sourced athletes beyond the seed when enough verified records are returned.
+- Generates the JSON and CSV catalog on the GitHub runner.
+- Validates count, uniqueness, active status, and source metadata.
+- Makes the generated JSON/CSV available as an Actions artifact for 14 days.
+- Deploys only after validation passes.
+- Refreshes the roster snapshot once per day.
+
+IMPORTANT
+- Do not leave Pages set to "Deploy from a branch" for this version.
+- The .github folder is required. Without it, the live 10,000-name build will not run.
+- The downloaded current_catalog files contain the 200-person fallback for local preview. The workflow replaces them in the deployed artifact.
+- All prices, scores, charts, movements, and trades are simulated.

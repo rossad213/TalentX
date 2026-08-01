@@ -1,0 +1,7 @@
+{
+  "generatedAt": null,
+  "targetAdditions": 10000,
+  "totalRecords": 200,
+  "mode": "Fallback preview. The GitHub Actions workflow builds the live current catalog from roster endpoints before deployment.",
+  "sources": []
+}

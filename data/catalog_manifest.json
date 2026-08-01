@@ -32,11 +32,22 @@
     "All prices, scores, changes, volume and chart history are simulated.",
     "Rookie opening prices now use draft capital, position value, pre-professional performance, opportunity, development, availability, and audience inputs. No Current record is automatically labeled a rookie without verified stage data."
   ],
-  "version": "2.1-rookie-ipo",
+  "version": "3.0-current-10000-workflow",
   "features": [
     "career-stage filtering",
     "draft-weight decay rules",
     "rookie IPO pricing calculator",
-    "rookie pricing database schema"
-  ]
+    "rookie pricing database schema",
+    "automated current-roster catalog build",
+    "daily roster refresh",
+    "GitHub Actions Pages deployment",
+    "10,000-name current-athlete expansion"
+  ],
+  "currentCatalogRecords": 200,
+  "newCurrentTarget": 10000,
+  "automatedRosterVerifiedRecords": 0,
+  "currentCatalogFile": "data/current_catalog.json",
+  "currentCatalogCsv": "data/current_catalog.csv",
+  "marketDataMode": "Simulated",
+  "statusDataMode": "Fallback seed until GitHub Actions build runs"
 }

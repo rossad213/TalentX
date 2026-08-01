@@ -84,7 +84,11 @@ function openProfile(id){
   selectedId=id; route='profile'; profileTab='overview'; setActiveNav(); render(); window.scrollTo({top:0,behavior:'smooth'});
 }
 function note(){
-  return `<div class="notice"><strong>Prototype notice:</strong> Current-seed names are real people selected for product design, but their status is not yet connected to live roster, chart, project, or platform feeds. All prices, scores, changes, charts, volumes, portfolios, and trades are simulated.</div>`;
+  const automated=Number(manifest?.automatedRosterVerifiedRecords||0);
+  const statusText=automated
+    ? `${automated.toLocaleString()} athlete profiles were included from point-in-time current-roster feeds during the latest automated build. Status can change after the timestamp shown on each profile.`
+    : `This local preview contains the 200-person fallback seed. The GitHub Pages workflow generates the 10,000-name current-roster expansion before deployment.`;
+  return `<div class="notice"><strong>TalentX data notice:</strong> ${statusText} All prices, scores, changes, charts, volumes, portfolios, and trades are simulated.</div>`;
 }
 function avatar(r,large=false){
   return `<div class="avatar ${large?'large':''}">${esc(r.avatar||'TX')}</div>`;
@@ -119,11 +123,11 @@ function dashboard(){
   return `${note()}
   <div class="grid hero-grid">
     <section class="card hero">
-      <div class="eyebrow">Current-first TalentX v2</div>
+      <div class="eyebrow">Current-first TalentX v3</div>
       <h1>Follow careers while<br><span class="gradient">they are still being written.</span></h1>
-      <p>The main market now prioritizes active athletes, music artists, actors, and creators. Historical profiles move into a separate Legacy market, and uncertain profiles stay out of the active market until their status is verified.</p>
+      <p>The main market prioritizes current talent. The deployed catalog is rebuilt from current team-roster feeds, while historical profiles remain in a separate Legacy market and uncertain profiles remain Under Review.</p>
       <div class="button-row"><button class="btn primary" onclick="setSegment('Current')">Explore current talent</button><button class="btn secondary" onclick="go('rules')">See retirement rules</button></div>
-      <div class="stats"><div class="stat"><small>Current seed</small><strong>${manifest.currentSeedRecords.toLocaleString()}</strong></div><div class="stat"><small>Legacy catalog</small><strong>${manifest.legacyRecords.toLocaleString()}</strong></div><div class="stat"><small>Under review</small><strong>${manifest.underReviewRecords.toLocaleString()}</strong></div></div>
+      <div class="stats"><div class="stat"><small>Current catalog</small><strong>${Number(manifest.currentCatalogRecords||manifest.currentSeedRecords||currentRecords.length).toLocaleString()}</strong></div><div class="stat"><small>Legacy catalog</small><strong>${manifest.legacyRecords.toLocaleString()}</strong></div><div class="stat"><small>Under review</small><strong>${manifest.underReviewRecords.toLocaleString()}</strong></div></div>
     </section>
     <section class="card featured">
       <div class="section-head"><h3>Featured current listing</h3><button class="link" onclick="openProfile('${esc(feature.id)}')">View →</button></div>
@@ -137,8 +141,8 @@ function dashboard(){
   <section class="section"><div class="section-head"><h2>Browse career categories</h2></div><div class="grid category-grid">
     ${['Athlete','Music','Actor','Creator'].map(c=>`<article class="card category-card" onclick="setCategory('${c}')"><span class="count">${counts[c]}</span><div class="icon">${ICONS[c]}</div><h3>${c==='Music'?'Music':c+'s'}</h3><p>${c==='Athlete'?'Filter by sport, league or tour, team, role, country, and career status.':c==='Music'?'Filter by genre, solo or group, region, activity, and career status.':c==='Actor'?'Filter by film, television, stage, voice, project activity, and status.':'Filter by platform, niche, country, activity, and status.'}</p></article>`).join('')}
   </div></section>
-  <section class="section"><div class="section-head"><h2>Sports in the current seed</h2><button class="link" onclick="setCategory('Athlete')">All sports →</button></div><div class="grid discipline-grid">
-    ${sports.map(([name,count])=>`<article class="card discipline" onclick="setDiscipline('${esc(name)}')"><strong>${esc(name)}</strong><span>${count} current-seed listing${count===1?'':'s'}</span></article>`).join('')}
+  <section class="section"><div class="section-head"><h2>Sports in the current catalog</h2><button class="link" onclick="setCategory('Athlete')">All sports →</button></div><div class="grid discipline-grid">
+    ${sports.map(([name,count])=>`<article class="card discipline" onclick="setDiscipline('${esc(name)}')"><strong>${esc(name)}</strong><span>${count.toLocaleString()} current listing${count===1?'':'s'}</span></article>`).join('')}
   </div></section>`;
 }
 async function ensureHistorical(){
@@ -208,7 +212,7 @@ function market(){
   const arr=filteredRecords();
   const pages=Math.max(1,Math.ceil(arr.length/PAGE_SIZE)); filters.page=Math.min(filters.page,pages);
   const start=(filters.page-1)*PAGE_SIZE; const rows=arr.slice(start,start+PAGE_SIZE);
-  return `${note()}<div class="eyebrow">${esc(filters.segment)} market</div><h1 class="page-title">Talent market</h1><p class="page-sub">The default market shows current-seed talent. Legacy and under-review records load separately so historical profiles do not crowd the active experience.</p>
+  return `${note()}<div class="eyebrow">${esc(filters.segment)} market</div><h1 class="page-title">Talent market</h1><p class="page-sub">The Current market uses the latest generated roster snapshot. Legacy and Under Review records load separately so historical profiles do not crowd the active experience.</p>
   <div class="controls"><div class="pills">${['Current','Legacy','Under Review'].map(s=>`<button class="pill ${filters.segment===s?'active':''}" onclick="setSegment('${s}')">${s}</button>`).join('')}</div></div>
   <div class="controls">
     <select class="select" onchange="setFilter('category',this.value)"><option value="All">All categories</option>${['Athlete','Music','Actor','Creator'].map(c=>`<option value="${c}" ${filters.category===c?'selected':''}>${c==='Music'?'Music':c+'s'}</option>`).join('')}</select>
@@ -246,7 +250,7 @@ function profile(){
       <div class="tab-row">${['overview','pricing','data'].map(t=>`<button class="${profileTab===t?'active':''}" onclick="setProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>
       ${profileTab==='overview'?`<div class="grid info-grid"><div class="info-box"><small>Market segment</small><strong>${esc(r.marketSegment)}</strong></div><div class="info-box"><small>Career model</small><strong>${esc(r.modelType)}</strong></div><div class="info-box"><small>Career stage</small><strong>${esc(r.careerStage||'Stage under review')}</strong></div><div class="info-box"><small>Career score</small><strong>${Number(r.careerScore).toFixed(1)} / 100</strong></div><div class="info-box"><small>Country</small><strong>${esc(r.country)}</strong></div><div class="info-box"><small>Role</small><strong>${esc(r.role)}</strong></div><div class="info-box"><small>Virtual volume</small><strong>${compact(r.volume)}</strong></div></div><p class="page-sub" style="margin-top:18px">${esc(r.description)}</p>`:''}
       ${profileTab==='pricing'?`<div class="grid info-grid"><div class="info-box"><small>Fundamental value</small><strong>${money(r.fundamentalValue)}</strong></div><div class="info-box"><small>Demand premium</small><strong>${r.demandPremiumPct>=0?'+':''}${Number(r.demandPremiumPct).toFixed(2)}%</strong></div><div class="info-box"><small>Momentum</small><strong>${r.momentumPct>=0?'+':''}${Number(r.momentumPct).toFixed(2)}%</strong></div></div>${r.rookiePricing?rookieProfilePricing(r):metricGrid(metrics)}<div class="formula" style="margin-top:16px">${r.rookiePricing?'Rookie IPO price = draft capital + pre-professional performance + immediate opportunity + position value + development + availability + audience. Draft weight fades as professional evidence arrives.':r.marketSegment==='Legacy'?'Legacy price = legacy score anchor + audience demand + post-career relevance + controlled market activity':'Active price = current career score anchor + audience demand + career momentum + controlled market activity'}</div>`:''}
-      ${profileTab==='data'?`<div class="grid info-grid"><div class="info-box"><small>Verification</small><strong>${esc(r.verificationStatus)}</strong></div><div class="info-box"><small>Last verified</small><strong>${esc(r.lastVerifiedAt||'Not connected')}</strong></div><div class="info-box"><small>Status source</small><strong>${esc(r.statusSource)}</strong></div></div><div class="source-box"><small>Identity/source snapshot</small><strong>${esc(r.sourceName)}</strong>${sourceLink}<small>Before production launch, every Current listing should have a live status source and a timestamp. Historical source records remain outside the Current market until verified.</small></div>`:''}
+      ${profileTab==='data'?`<div class="grid info-grid"><div class="info-box"><small>Verification</small><strong>${esc(r.verificationStatus)}</strong></div><div class="info-box"><small>Last verified</small><strong>${esc(r.lastVerifiedAt||'Not connected')}</strong></div><div class="info-box"><small>Status source</small><strong>${esc(r.statusSource)}</strong></div></div><div class="source-box"><small>Identity/source snapshot</small><strong>${esc(r.sourceName)}</strong>${sourceLink}<small>Roster verification is a point-in-time snapshot, not a permanent guarantee. TalentX refreshes the catalog on a schedule; market prices and scores remain simulated.</small></div>`:''}
     </article>
   </section>
   <aside class="card trade-card"><h2>Virtual order</h2><p>You own <strong>${shares}</strong> shares. Trades only affect your browser’s simulated market.</p>
@@ -415,8 +419,15 @@ function render(){
 }
 async function init(){
   try{
+    const loadCurrent=async()=>{
+      const generated=await fetch('./data/current_catalog.json');
+      if(generated.ok) return generated.json();
+      const fallback=await fetch('./data/current_seed.json');
+      if(!fallback.ok) throw new Error('current catalog');
+      return fallback.json();
+    };
     const [cur,tax,man]=await Promise.all([
-      fetch('./data/current_seed.json').then(r=>{if(!r.ok)throw new Error('current seed');return r.json()}),
+      loadCurrent(),
       fetch('./data/taxonomy.json').then(r=>{if(!r.ok)throw new Error('taxonomy');return r.json()}),
       fetch('./data/catalog_manifest.json').then(r=>{if(!r.ok)throw new Error('manifest');return r.json()})
     ]);

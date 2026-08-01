@@ -1,0 +1,16 @@
+TALENTX V3 PACKAGE VERIFICATION
+
+Completed checks before packaging:
+- Python scripts compile successfully.
+- app.js passes Node syntax checking.
+- JSON data files parse successfully.
+- GitHub Actions workflow parses as valid YAML.
+- ESPN roster parser and simulated market-field builder pass a local fixture smoke test.
+- The static site and fallback current catalog load through a local HTTP server.
+- The ZIP includes hidden .github, .nojekyll, and .gitignore entries.
+
+IMPORTANT:
+- The downloadable package contains the 200-person fallback catalog for offline preview.
+- The 10,000 additional current-athlete records are generated on a network-enabled GitHub Actions runner from point-in-time roster endpoints.
+- The workflow refuses to deploy if it cannot produce at least 10,000 automated roster-sourced profiles.
+- All TalentX prices, scores, charts, movement, volume, portfolios, and trades are simulated.
