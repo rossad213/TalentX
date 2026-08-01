@@ -65,16 +65,11 @@ jobs:
       - name: Validate generated current catalog
         run: python scripts/validate_current_catalog.py --minimum 10000
 
-      - name: Upload generated catalog files
+      - name: Upload complete generated data baseline
         uses: actions/upload-artifact@v4
         with:
           name: talentx-current-catalog
-          path: |
-            data/current_catalog.json
-            data/current_catalog.csv
-            data/catalog_manifest.json
-            data/current_source_manifest.json
-            data/pricing_enrichment_manifest.json
+          path: data/
           retention-days: 14
 
       - name: Prepare static Pages site
