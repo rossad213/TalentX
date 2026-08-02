@@ -6,14 +6,18 @@
   <meta name="theme-color" content="#061019">
   <meta name="description" content="TalentX current-first virtual talent market prototype with explainable rookie IPO pricing.">
   <title>TalentX — Current Talent Market & Rookie IPO</title>
+  <link rel="icon" type="image/x-icon" href="./assets/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="./assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="./assets/favicon-192.png">
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <div class="brand" onclick="go('dashboard')" role="button" tabindex="0">
-      <div class="brand-mark">TX</div>
-      <div><strong>TalentX</strong><small>THE MARKET FOR TALENT</small></div>
+    <div class="brand" onclick="go('dashboard')" role="button" tabindex="0" aria-label="Go to TalentX dashboard">
+      <img class="brand-logo" src="./assets/talentx-logo.png" alt="TalentX logo">
+      <div class="brand-copy"><strong>TalentX</strong><small>THE MARKET FOR TALENT</small></div>
     </div>
     <nav class="nav">
       <button data-route="dashboard" onclick="go('dashboard')">⌂ <span>Dashboard</span></button>
@@ -38,7 +42,7 @@
       <div class="top-actions">
         <span class="status-dot"></span>
         <span class="top-label">Current-first catalog</span>
-        <div class="user-avatar">TX</div>
+        <img class="user-avatar user-avatar-logo" src="./assets/favicon-32.png" alt="TalentX">
       </div>
     </header>
     <div id="app" class="content">
