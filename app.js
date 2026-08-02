@@ -45,7 +45,7 @@ let filters={
   page:1
 };
 
-const PRICING_MODEL_VERSION='3.3-evidence-ranked-inputs';
+const PRICING_MODEL_VERSION='3.4-rookie-transition';
 const defaultState={cash:25000,holdings:{},watchlist:[],prices:{},transactions:[],pricingModelVersion:PRICING_MODEL_VERSION};
 let state=loadState();
 
@@ -418,7 +418,9 @@ function calculateRookieIpo(values){
 function rookieProfilePricing(r){
   const p=r.rookiePricing||{};
   const rows={draftCapital:p.draftCapitalScore,preProPerformance:p.preProPerformanceScore,opportunity:p.opportunityScore,positionValue:p.positionValueScore,development:p.developmentScore,availability:p.availabilityScore,audience:p.audienceScore};
-  return `<div class="source-box"><small>Rookie IPO</small><strong>${p.draftSport||r.leagueOrMedium} · Pick ${p.overallPick||'—'} · ${p.position||r.role}</strong><small>Opening price ${money(p.ipoPrice||r.fundamentalValue)}. Draft capital is strongest at listing and fades as professional performance data accumulates.</small></div>${metricGrid(Object.fromEntries(Object.entries(rows).filter(([,v])=>v!==undefined)))}`;
+  const draftPct=Number(p.draftInfluencePct??100),proPct=Number(p.professionalEvidencePct??(100-draftPct)),games=Number(p.professionalGames||0);
+  const stage=p.transitionStage||`${draftPct}% draft anchor · ${proPct}% professional evidence`;
+  return `<div class="source-box"><small>Rookie IPO transition</small><strong>${p.draftSport||r.leagueOrMedium} · Pick ${p.overallPick||'—'} · ${p.position||r.role}</strong><small>IPO anchor ${money(p.ipoPrice||r.fundamentalValue)} · current blended value ${money(r.fundamentalValue)} · ${games} professional game${games===1?'':'s'}.</small><small>${esc(stage)}. Draft position establishes the opening value, then fades as real professional performance accumulates.</small></div>${metricGrid(Object.fromEntries(Object.entries(rows).filter(([,v])=>v!==undefined)))}`;
 }
 function readRookieInputs(){
   const val=id=>Number(document.getElementById(id)?.value||0);
