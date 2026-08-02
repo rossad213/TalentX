@@ -38,12 +38,15 @@ CATALOG = DATA / "current_catalog.json"
 CATALOG_CSV = DATA / "current_catalog.csv"
 CATALOG_MANIFEST = DATA / "catalog_manifest.json"
 PRICING_OVERRIDES = DATA / "pricing_overrides.json"
+DRAFT_METADATA_OVERRIDES = DATA / "draft_metadata_overrides.json"
 ENRICHMENT_MANIFEST = DATA / "pricing_enrichment_manifest.json"
 
 ESPN_OVERVIEW = "https://site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{athlete_id}/overview"
+ESPN_ATHLETE_PROFILE = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/athletes/{athlete_id}"
+ESPN_CORE_ATHLETE = "https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/athletes/{athlete_id}?lang=en&region=us"
 ESPN_AWARDS = "https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/athletes/{athlete_id}/awards?limit=100"
 NHL_LANDING = "https://api-web.nhle.com/v1/player/{athlete_id}/landing"
-USER_AGENT = "TalentX-Pricing-Enricher/3.3 (+https://github.com/rossad213/TalentX)"
+USER_AGENT = "TalentX-Pricing-Enricher/3.4 (+https://github.com/rossad213/TalentX)"
 
 SPORT_PATH = {
     "American Football": "football",
@@ -102,6 +105,126 @@ def number(value: Any) -> float | None:
     except ValueError:
         match = re.search(r"-?\d+(?:\.\d+)?", text)
         return float(match.group()) if match else None
+
+
+def positive_int(value: Any) -> int | None:
+    parsed = number(value)
+    if parsed is None or parsed < 0:
+        return None
+    return int(round(parsed))
+
+
+def extract_profile_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract age, experience and draft information from varied athlete payloads."""
+    output: dict[str, Any] = {}
+    draft_candidates: list[dict[str, Any]] = []
+
+    def parse_draft(candidate: dict[str, Any]) -> None:
+        normalized = {norm_key(key): value for key, value in candidate.items()}
+        aliases = {
+            "draftYear": ("draftyear", "year"),
+            "draftRound": ("draftround", "round"),
+            "draftPick": ("draftpick", "overallpick", "overall", "selection", "pick"),
+        }
+        for target, keys in aliases.items():
+            if output.get(target) is not None:
+                continue
+            for key in keys:
+                if key in normalized:
+                    value = positive_int(normalized[key])
+                    if value is not None:
+                        output[target] = value
+                        break
+        display = " ".join(
+            str(candidate.get(key) or "")
+            for key in ("displayText", "displayName", "description", "shortDisplayName", "text")
+        )
+        if display:
+            year_match = re.search(r"\b(19|20)\d{2}\b", display)
+            round_match = re.search(r"(?:round|r)\s*([1-9]\d*)", display, re.I)
+            pick_match = re.search(r"(?:pick|overall|selection)\s*(?:no\.?\s*)?#?\s*([1-9]\d*)", display, re.I)
+            if year_match and output.get("draftYear") is None:
+                output["draftYear"] = int(year_match.group())
+            if round_match and output.get("draftRound") is None:
+                output["draftRound"] = int(round_match.group(1))
+            if pick_match and output.get("draftPick") is None:
+                output["draftPick"] = int(pick_match.group(1))
+
+    def walk(node: Any, parent_key: str = "") -> None:
+        if isinstance(node, dict):
+            normalized_keys = {norm_key(key) for key in node}
+            if "draft" in norm_key(parent_key) or normalized_keys.intersection(
+                {"draftyear", "draftround", "draftpick", "overallpick", "selection"}
+            ):
+                draft_candidates.append(node)
+            experience = node.get("experience")
+            if output.get("experienceYears") is None:
+                if isinstance(experience, dict):
+                    output["experienceYears"] = positive_int(experience.get("years") or experience.get("value"))
+                elif experience is not None:
+                    output["experienceYears"] = positive_int(experience)
+                for key in ("experienceYears", "yearsPro"):
+                    if output.get("experienceYears") is None and node.get(key) is not None:
+                        output["experienceYears"] = positive_int(node.get(key))
+            if output.get("age") is None and node.get("age") is not None:
+                output["age"] = positive_int(node.get("age"))
+            for key, value in node.items():
+                walk(value, str(key))
+        elif isinstance(node, list):
+            for value in node:
+                walk(value, parent_key)
+
+    walk(payload)
+    for candidate in draft_candidates:
+        parse_draft(candidate)
+    return {key: value for key, value in output.items() if value is not None}
+
+
+def merge_profile_evidence(record: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    for key, value in evidence.items():
+        if record.get(key) in (None, ""):
+            record[key] = value
+    return record
+
+
+def professional_games_from_stats(recent: dict[str, float], career: dict[str, float]) -> int:
+    aliases = ("gamesPlayed", "games", "appearances", "gp")
+    for stats in (career, recent):
+        value = get(stats, *aliases)
+        if value > 0:
+            return max(0, int(round(value)))
+    return 0
+
+
+def load_draft_metadata(path: Path) -> dict[tuple[str, str], dict[str, Any]]:
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    records = payload.get("records", []) if isinstance(payload, dict) else payload
+    if not isinstance(records, list):
+        raise ValueError("draft_metadata_overrides.json must contain a records array")
+    output: dict[tuple[str, str], dict[str, Any]] = {}
+    source = payload.get("source") if isinstance(payload, dict) else None
+    for item in records:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        enriched = dict(item)
+        if source and not enriched.get("sourceUrl"):
+            enriched["sourceUrl"] = source
+        output[(norm_key(item["name"]), norm_key(item.get("league", "")))] = enriched
+    return output
+
+
+def apply_draft_metadata(record: dict[str, Any], metadata: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
+    result = dict(record)
+    item = metadata.get((norm_key(result.get("name")), norm_key(result.get("leagueOrMedium"))))
+    if not item:
+        return result
+    for field in ("draftYear", "draftRound", "draftPick"):
+        if item.get(field) is not None:
+            result[field] = item[field]
+    result["draftMetadataSource"] = item.get("sourceUrl")
+    return result
 
 
 def merge_stat_map(target: dict[str, float], names: Iterable[Any], values: Iterable[Any]) -> None:
@@ -506,6 +629,8 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
     awards_score = 0.0
     awards_names: list[str] = []
     evidence_urls: list[str] = []
+    if result.get("draftMetadataSource"):
+        evidence_urls.append(str(result["draftMetadataSource"]))
     errors: list[str] = []
     news_count = 0
 
@@ -515,15 +640,35 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
         if not sport or not league:
             return {"record": result, "ok": False, "reason": "unsupported ESPN sport/league"}
         overview_url = ESPN_OVERVIEW.format(sport=sport, league=league, athlete_id=athlete_id)
+        profile_url = ESPN_ATHLETE_PROFILE.format(sport=sport, league=league, athlete_id=athlete_id)
         awards_url = ESPN_AWARDS.format(sport=sport, league=league, athlete_id=athlete_id)
         try:
             overview = fetch_json(overview_url, timeout)
             recent, career = extract_stat_maps(overview)
+            merge_profile_evidence(result, extract_profile_evidence(overview))
             news = overview.get("news")
             news_count = len(news) if isinstance(news, list) else 0
             evidence_urls.append(overview_url)
         except Exception as exc:  # noqa: BLE001 - source failures are recorded, not fatal per record
             errors.append(f"overview {type(exc).__name__}")
+        # Roster endpoints often omit draft fields. Only rookie/early-career
+        # records need the extra identity request used to establish an IPO anchor.
+        experience = positive_int(result.get("experienceYears"))
+        if experience is None or experience <= 1 or result.get("draftPick") is not None:
+            try:
+                profile_payload = fetch_json(profile_url, timeout)
+                merge_profile_evidence(result, extract_profile_evidence(profile_payload))
+                evidence_urls.append(profile_url)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"profile {type(exc).__name__}")
+            if result.get("draftPick") is None:
+                core_url = ESPN_CORE_ATHLETE.format(sport=sport, league=league, athlete_id=athlete_id)
+                try:
+                    core_payload = fetch_json(core_url, timeout)
+                    merge_profile_evidence(result, extract_profile_evidence(core_payload))
+                    evidence_urls.append(core_url)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"core profile {type(exc).__name__}")
         try:
             awards_payload = fetch_json(awards_url, timeout)
             awards_score, awards_names = award_points(awards_payload)
@@ -534,6 +679,7 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
         url = NHL_LANDING.format(athlete_id=athlete_id)
         try:
             landing = fetch_json(url, timeout)
+            merge_profile_evidence(result, extract_profile_evidence(landing))
             flattened: dict[str, float] = {}
             recursively_collect_numbers(landing, flattened)
             # NHL payloads expose seasonTotals/careerTotals under nested keys.
@@ -547,13 +693,19 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
     else:
         return {"record": result, "ok": False, "reason": "not an automated roster record"}
 
-    if not recent and not career and awards_score <= 0:
+    has_draft_evidence = positive_int(result.get("draftPick")) is not None
+    if not recent and not career and awards_score <= 0 and not has_draft_evidence:
         return {"record": result, "ok": False, "reason": "; ".join(errors) or "no usable evidence"}
 
+    games = professional_games_from_stats(recent, career)
+    result["professionalGames"] = games
     signals = signal_bundle(result, recent, career, awards_score)
     return {
         "record": result,
         "ok": True,
+        "hasProfessionalEvidence": bool(recent or career or awards_score > 0),
+        "hasDraftEvidence": has_draft_evidence,
+        "professionalGames": games,
         "recent": recent,
         "career": career,
         "signals": signals,
@@ -572,7 +724,7 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     cohorts: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     leagues: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for item in results:
-        if not item.get("ok"):
+        if not item.get("ok") or not item.get("hasProfessionalEvidence"):
             continue
         record = item["record"]
         cohorts[cohort_key(record)].append(item)
@@ -592,6 +744,39 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not item.get("ok"):
             record["pricingDataStatus"] = "Provisional — roster, experience and role evidence only"
             record["pricingEnrichmentError"] = item.get("reason")
+            enriched.append(record)
+            continue
+
+        record["professionalGames"] = int(item.get("professionalGames") or 0)
+        if item.get("hasDraftEvidence") and not item.get("hasProfessionalEvidence"):
+            # Drafted players with no professional sample receive a true Rookie
+            # IPO anchor. The active metrics remain conservative until games exist.
+            existing_metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+            record["activeMetrics"] = existing_metrics or {
+                "performance": 36.0,
+                "achievements": 14.0,
+                "potential": 92.0,
+                "audience": 48.0,
+                "availability": 82.0,
+                "consistency": 38.0,
+            }
+            record["pricingDataStatus"] = "Rookie IPO — verified draft position; awaiting professional statistics"
+            record["pricingConfidence"] = 0.82
+            record["pricingEvidence"] = item.get("evidenceUrls", [])
+            record["pricingEvidenceSummary"] = {
+                "cohort": f"{cohort_key(record)[0]} · {cohort_key(record)[1]}",
+                "recentStatFields": 0,
+                "careerStatFields": 0,
+                "awardNames": item.get("awards", []),
+                "draftYear": record.get("draftYear"),
+                "draftRound": record.get("draftRound"),
+                "draftPick": record.get("draftPick"),
+                "professionalGames": 0,
+                "percentiles": {},
+                "rawSignals": {key: round(value, 4) for key, value in item["signals"].items()},
+            }
+            if item.get("errors"):
+                record["pricingEvidenceWarnings"] = item["errors"]
             enriched.append(record)
             continue
 
@@ -658,6 +843,10 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "recentStatFields": len(item.get("recent", {})),
             "careerStatFields": len(item.get("career", {})),
             "awardNames": item.get("awards", []),
+            "draftYear": record.get("draftYear"),
+            "draftRound": record.get("draftRound"),
+            "draftPick": record.get("draftPick"),
+            "professionalGames": record.get("professionalGames", 0),
             "percentiles": {key: round(value, 4) for key, value in pcts.items()},
             "rawSignals": {key: round(value, 4) for key, value in signals.items()},
         }
@@ -674,7 +863,8 @@ def rewrite_csv(records: list[dict[str, Any]]) -> None:
         "careerStage", "lastVerifiedAt", "verificationStatus", "sourceName",
         "sourceUrl", "sourceRecordId", "dataConfidence", "pricingConfidence",
         "pricingDataStatus", "pricingModelVersion", "marketPrice", "careerScore",
-        "fundamentalValue",
+        "fundamentalValue", "draftYear", "draftRound", "draftPick",
+        "professionalGames",
     ]
     with CATALOG_CSV.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -695,6 +885,8 @@ def main() -> int:
     records = json.loads(CATALOG.read_text(encoding="utf-8"))
     if not isinstance(records, list):
         raise SystemExit("current_catalog.json must be an array")
+    draft_metadata = load_draft_metadata(DRAFT_METADATA_OVERRIDES)
+    records = [apply_draft_metadata(record, draft_metadata) for record in records]
 
     automated_indexes = [
         index for index, record in enumerate(records)
@@ -732,6 +924,7 @@ def main() -> int:
 
     enriched_count = sum(1 for record in repriced if str(record.get("pricingDataStatus", "")).startswith("Evidence enriched"))
     provisional_count = sum(1 for record in repriced if str(record.get("pricingDataStatus", "")).startswith("Provisional"))
+    rookie_count = sum(1 for record in repriced if isinstance(record.get("rookiePricing"), dict))
     if enriched_count < args.minimum_enriched:
         raise SystemExit(
             f"Only {enriched_count:,} records received usable evidence; minimum is {args.minimum_enriched:,}. "
@@ -753,13 +946,14 @@ def main() -> int:
         if record.get("pricingEnrichmentError")
     )
     manifest = {
-        "version": "3.3-evidence-ranked-inputs",
+        "version": "3.4-rookie-transition-inputs",
         "generatedAt": generated_at,
         "elapsedSeconds": round(time.time() - started, 1),
         "catalogRecords": len(repriced),
         "automatedRecordsAttempted": len(automated_indexes),
         "pricingEnrichedRecords": enriched_count,
         "pricingProvisionalRecords": provisional_count,
+        "rookieTransitionRecords": rookie_count,
         "minimumRequired": args.minimum_enriched,
         "enrichedByLeague": dict(league_counts.most_common()),
         "topFailureReasons": dict(error_counts.most_common(12)),
@@ -780,11 +974,12 @@ def main() -> int:
             existing = {}
         existing.update(
             {
-                "version": "3.3-current-10000-evidence-ranked",
+                "version": "3.4-current-10000-rookie-transition",
                 "pricingEvidenceGeneratedAt": generated_at,
                 "pricingEnrichedRecords": enriched_count,
                 "pricingProvisionalRecords": provisional_count,
-                "pricingInputMethod": "Position-and-league normalized statistics and awards",
+                "rookieTransitionRecords": rookie_count,
+                "pricingInputMethod": "Position-and-league normalized statistics and awards plus draft-based rookie IPO transitions",
                 "pricingEnrichmentManifest": "data/pricing_enrichment_manifest.json",
             }
         )
@@ -794,6 +989,7 @@ def main() -> int:
     prices = [float(record.get("marketPrice", 0)) for record in repriced]
     print(f"Evidence-enriched records: {enriched_count:,}")
     print(f"Provisional records: {provisional_count:,}")
+    print(f"Rookie transition records: {rookie_count:,}")
     if scores:
         print(f"Career-score range: {min(scores):.1f}–{max(scores):.1f}; median {statistics.median(scores):.1f}")
     if prices:

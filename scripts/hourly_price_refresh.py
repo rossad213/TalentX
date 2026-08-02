@@ -24,14 +24,19 @@ from typing import Any, Iterable
 
 from enrich_current_catalog import (
     ESPN_OVERVIEW,
+    ESPN_ATHLETE_PROFILE,
+    ESPN_CORE_ATHLETE,
     NHL_LANDING,
     SPORT_PATH,
     cohort_key,
+    extract_profile_evidence,
+    merge_profile_evidence,
     extract_stat_maps,
     fetch_json,
     number,
     percentile,
     potential_prior,
+    professional_games_from_stats,
     recursively_collect_numbers,
     signal_bundle,
 )
@@ -378,17 +383,35 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
         try:
             payload = fetch_json(url, timeout)
             recent, career = extract_stat_maps(payload)
+            merge_profile_evidence(result, extract_profile_evidence(payload))
             news = payload.get("news")
             news_count = len(news) if isinstance(news, list) else 0
             evidence_urls.append(url)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"overview {type(exc).__name__}")
+        if result.get("draftPick") is None and float(result.get("experienceYears") or 0) <= 1:
+            profile_url = ESPN_ATHLETE_PROFILE.format(sport=sport, league=league, athlete_id=athlete_id)
+            try:
+                profile_payload = fetch_json(profile_url, timeout)
+                merge_profile_evidence(result, extract_profile_evidence(profile_payload))
+                evidence_urls.append(profile_url)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"profile {type(exc).__name__}")
+            if result.get("draftPick") is None:
+                core_url = ESPN_CORE_ATHLETE.format(sport=sport, league=league, athlete_id=athlete_id)
+                try:
+                    core_payload = fetch_json(core_url, timeout)
+                    merge_profile_evidence(result, extract_profile_evidence(core_payload))
+                    evidence_urls.append(core_url)
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"core profile {type(exc).__name__}")
     elif namespace == "nhl":
         if not athlete_id:
             return {"record": result, "ok": False, "reason": "missing NHL player id"}
         url = NHL_LANDING.format(athlete_id=athlete_id)
         try:
             payload = fetch_json(url, timeout)
+            merge_profile_evidence(result, extract_profile_evidence(payload))
             flattened: dict[str, float] = {}
             recursively_collect_numbers(payload, flattened)
             recent = {key: value for key, value in flattened.items() if "seasontotals" in key or "featuredstats" in key}
@@ -402,9 +425,12 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
     if not recent and not career:
         return {"record": result, "ok": False, "reason": "; ".join(errors) or "no updated statistics"}
 
+    games = professional_games_from_stats(recent, career)
+    result["professionalGames"] = games
     return {
         "record": result,
         "ok": True,
+        "professionalGames": games,
         "recent": recent,
         "career": career,
         "signals": signal_bundle(result, recent, career, award_score),
@@ -481,6 +507,7 @@ def apply_hourly_metrics(
     )
     confidence = clamp(max(float(record.get("pricingConfidence") or 0), 0.62 + completeness * 0.055), 0.62, 0.92)
 
+    record["professionalGames"] = int(item.get("professionalGames") or 0)
     record["activeMetrics"] = {
         "performance": round(performance, 1),
         "achievements": round(achievements, 1),
@@ -498,6 +525,10 @@ def apply_hourly_metrics(
         "recentStatFields": len(item.get("recent", {})),
         "careerStatFields": len(item.get("career", {})),
         "awardNames": item.get("awards", []),
+        "draftYear": record.get("draftYear"),
+        "draftRound": record.get("draftRound"),
+        "draftPick": record.get("draftPick"),
+        "professionalGames": record.get("professionalGames", 0),
         "percentiles": {key: round(value, 4) for key, value in pcts.items()},
         "rawSignals": {key: round(float(signals.get(key, 0)), 4) for key in SIGNAL_KEYS},
     }
@@ -537,7 +568,8 @@ def rewrite_csv(records: list[dict[str, Any]]) -> None:
         "careerStage", "lastVerifiedAt", "verificationStatus", "sourceName",
         "sourceUrl", "sourceRecordId", "dataConfidence", "pricingConfidence",
         "pricingDataStatus", "pricingModelVersion", "marketPrice", "careerScore",
-        "fundamentalValue", "hourlyChangePct", "lastPriceEventAt",
+        "fundamentalValue", "draftYear", "draftRound", "draftPick",
+        "professionalGames", "hourlyChangePct", "lastPriceEventAt",
     ]
     with CATALOG_CSV.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -686,7 +718,7 @@ def main() -> int:
     CATALOG_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     hourly_manifest = {
-        "version": "1.0-hourly-event-pricing",
+        "version": "1.1-hourly-rookie-transition",
         "generatedAt": refreshed_at,
         "weeklyBaselineRunId": str(args.baseline_run_id or ""),
         "elapsedSeconds": round(time.time() - started, 1),
@@ -706,7 +738,8 @@ def main() -> int:
         "largestMoves": sorted(changes, key=lambda item: abs(float(item["changePct"])), reverse=True)[:100],
         "method": (
             "Scoreboards identify live/recently completed games; box scores identify participants; only those athletes receive "
-            "updated recent-stat evidence and repricing. Existing cohort distributions provide normalization until the next full weekly rebuild."
+            "updated recent-stat evidence and repricing. Drafted rookies automatically reduce their IPO influence as professional games accumulate. "
+            "Existing cohort distributions provide normalization until the next full weekly rebuild."
         ),
     }
     HOURLY_MANIFEST.write_text(json.dumps(hourly_manifest, ensure_ascii=False, indent=2), encoding="utf-8")

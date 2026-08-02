@@ -8,12 +8,19 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from pricing_model import ACTIVE_WEIGHTS, LEGACY_WEIGHTS, active_score, fundamental_from_score, legacy_score
+from pricing_model import (
+    ACTIVE_WEIGHTS,
+    LEGACY_WEIGHTS,
+    MODEL_VERSION,
+    ROOKIE_WEIGHTS,
+    active_pricing_components,
+    fundamental_from_score,
+    legacy_score,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 TOLERANCE = 0.11
-MODEL_VERSION = "3.2-achievements-weighted"
 
 
 def load(path: Path) -> list[dict[str, Any]]:
@@ -42,6 +49,10 @@ def main() -> int:
         errors.append("Achievements must outweigh potential in the active-career model")
     if abs(sum(ACTIVE_WEIGHTS.values()) - 1.0) > 1e-9:
         errors.append("Active pricing weights must total 100%")
+    if abs(sum(ROOKIE_WEIGHTS.values()) - 1.0) > 1e-9:
+        errors.append("Rookie IPO weights must total 100%")
+    if ROOKIE_WEIGHTS.get("draftCapital") != 0.35:
+        errors.append("Draft capital must remain the strongest Rookie IPO input at 35%")
 
     if len(current) < args.minimum_current:
         errors.append(f"Current catalog has {len(current):,}; expected at least {args.minimum_current:,}")
@@ -65,10 +76,9 @@ def main() -> int:
             expected_fundamental = fundamental_from_score(expected_score, legacy=True, under_review=segment == "Under Review")
         else:
             metrics = record.get("activeMetrics") or {}
-            expected_score = active_score(metrics)
-            expected_fundamental = fundamental_from_score(expected_score)
-            if str(record.get("pricingDataStatus", "")).startswith("Provisional"):
-                expected_fundamental = min(expected_fundamental, 62.0)
+            components = active_pricing_components(record, metrics)
+            expected_score = float(components["score"])
+            expected_fundamental = float(components["fundamental"])
         try:
             actual_score = float(record.get("careerScore", -999))
             actual_fundamental = float(record.get("fundamentalValue", -999))
@@ -79,7 +89,11 @@ def main() -> int:
             errors.append(f"Score mismatch: {record.get('name')} expected {expected_score}, found {actual_score}")
         if abs(actual_fundamental - expected_fundamental) > TOLERANCE:
             errors.append(f"Fundamental mismatch: {record.get('name')} expected {expected_fundamental}, found {actual_fundamental}")
-        if str(record.get("pricingDataStatus", "")).startswith("Provisional") and actual_fundamental > 62.01:
+        if (
+            str(record.get("pricingDataStatus", "")).startswith("Provisional")
+            and not isinstance(record.get("rookiePricing"), dict)
+            and actual_fundamental > 62.01
+        ):
             errors.append(f"Unsupported star valuation: {record.get('name')} exceeds provisional cap")
         if record.get("pricingModelVersion") != MODEL_VERSION:
             errors.append(f"Wrong model version: {record.get('name')}")
@@ -106,6 +120,21 @@ def main() -> int:
             if len(errors) >= 50:
                 break
 
+    rookies = [record for record in current if isinstance(record.get("rookiePricing"), dict)]
+    for record in rookies:
+        rookie = record["rookiePricing"]
+        pick = float(rookie.get("overallPick") or 0)
+        influence = float(rookie.get("draftInfluencePct") or 0)
+        games = float(rookie.get("professionalGames") or 0)
+        if pick <= 0:
+            errors.append(f"Rookie model lacks draft pick: {record.get('name')}")
+        if not 0 < influence <= 100:
+            errors.append(f"Invalid rookie draft influence: {record.get('name')} ({influence})")
+        if games == 0 and influence < 99:
+            errors.append(f"Pre-debut rookie must retain full IPO influence: {record.get('name')}")
+        if len(errors) >= 50:
+            break
+
     by_name = {str(record.get("name")): record for record in current}
     comparisons = [
         ("Dak Prescott", "Thomas Incoom"),
@@ -113,7 +142,18 @@ def main() -> int:
         ("Trevor Lawrence", "Trey Lance"),
         ("Josh Jacobs", "Ty Johnson"),
     ]
-    comparison_output: list[str] = []
+    aj = by_name.get("AJ Dybantsa")
+    if aj:
+        aj_price = float(aj.get("marketPrice", 0))
+        comparison_output = [f"AJ Dybantsa rookie IPO: ${aj_price:.2f}"]
+        if aj.get("draftPick") != 1:
+            errors.append(f"AJ Dybantsa must be recognized as draft pick 1, found {aj.get('draftPick')}")
+        if not isinstance(aj.get("rookiePricing"), dict):
+            errors.append("AJ Dybantsa must use the Rookie transition model")
+        if aj_price < 55 or aj_price > 90:
+            errors.append(f"AJ Dybantsa rookie IPO price is outside the expected prototype range: ${aj_price:.2f}")
+    else:
+        comparison_output = []
     for higher_name, lower_name in comparisons:
         higher = by_name.get(higher_name)
         lower = by_name.get(lower_name)
@@ -128,7 +168,7 @@ def main() -> int:
             )
 
     print(f"Checked {len(current) + len(historical):,} records against model weights.")
-    print(f"Evidence enriched: {len(enriched):,}; provisional: {len(provisional):,}")
+    print(f"Evidence enriched: {len(enriched):,}; provisional: {len(provisional):,}; rookie transitions: {len(rookies):,}")
     print(f"Active weights: {ACTIVE_WEIGHTS}")
     print(f"Legacy weights: {LEGACY_WEIGHTS}")
     for line in comparison_output:

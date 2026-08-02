@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pricing_model import apply_pricing_to_records, load_overrides
+from pricing_model import MODEL_VERSION, apply_pricing_to_records, load_overrides
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -61,7 +61,7 @@ def main() -> int:
     manifest_path = DATA / "catalog_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest.update({
-        "pricingModelVersion": "3.2-achievements-weighted",
+        "pricingModelVersion": MODEL_VERSION,
         "pricingRule": "High valuations require curated or verified evidence; roster-only records are conservative and capped.",
         "pricingCatalogsProcessed": totals,
     })
