@@ -110,6 +110,7 @@ jobs:
           mkdir -p _site
           cp index.html app.js styles.css .nojekyll _site/
           cp -R data _site/data
+          cp -R assets _site/assets
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
