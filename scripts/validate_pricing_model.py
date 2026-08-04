@@ -40,6 +40,7 @@ def main() -> int:
     parser.add_argument("--minimum-current", type=int, default=0)
     parser.add_argument("--minimum-enriched", type=int, default=0)
     parser.add_argument("--max-identical-score-rate", type=float, default=0.08)
+    parser.add_argument("--minimum-non-athlete-per-category", type=int, default=100)
     args = parser.parse_args()
 
     current = load(DATA / "current_catalog.json") or load(DATA / "current_seed.json")
@@ -66,6 +67,37 @@ def main() -> int:
 
     if len(current) < args.minimum_current:
         errors.append(f"Current catalog has {len(current):,}; expected at least {args.minimum_current:,}")
+
+    category_counts = Counter(str(record.get("primaryCategory") or "Unknown") for record in current)
+    for category in ("Music", "Actor", "Creator"):
+        count = category_counts.get(category, 0)
+        if count < args.minimum_non_athlete_per_category:
+            errors.append(
+                f"Only {count} {category} records; expected at least "
+                f"{args.minimum_non_athlete_per_category}"
+            )
+        ranked = [
+            int(record.get("benchmarkRank"))
+            for record in current
+            if record.get("primaryCategory") == category and record.get("benchmarkRank") is not None
+        ]
+        if ranked and len(ranked) != len(set(ranked)):
+            errors.append(f"Duplicate curated benchmark ranks found in {category}")
+        ranked_records = sorted(
+            [
+                record for record in current
+                if record.get("primaryCategory") == category
+                and record.get("benchmarkRank") is not None
+            ],
+            key=lambda record: int(record.get("benchmarkRank")),
+        )
+        for higher, lower in zip(ranked_records, ranked_records[1:]):
+            if float(higher.get("fundamentalValue") or 0) + TOLERANCE < float(lower.get("fundamentalValue") or 0):
+                errors.append(
+                    f"{category} benchmark order reversed: {higher.get('name')} "
+                    f"must not price below {lower.get('name')} on fundamentals"
+                )
+                break
 
     enriched = [
         record for record in current
@@ -193,8 +225,15 @@ def main() -> int:
         ("Anthony Edwards", "Tyrese Maxey"),
         ("Taylor Swift", "Gracie Abrams"),
         ("Beyoncé", "Gracie Abrams"),
+        ("Rihanna", "Alex Warren"),
+        ("Ed Sheeran", "sombr"),
+        ("David Guetta", "NewJeans"),
         ("MrBeast", "Marques Brownlee"),
+        ("Joe Rogan", "Lex Fridman"),
+        ("Ibai Llanos", "Lele Pons"),
         ("Zendaya", "Pedro Pascal"),
+        ("Shah Rukh Khan", "Jacob Elordi"),
+        ("Zoe Saldaña", "Hunter Schafer"),
     ]
     aj = by_name.get("AJ Dybantsa")
     if aj:

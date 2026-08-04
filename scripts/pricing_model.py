@@ -220,17 +220,45 @@ def benchmark_score(rank: int, total: int) -> float:
 
 
 def build_benchmark_ranks(records: list[dict[str, Any]] | None) -> dict[tuple[str, str], tuple[int, int]]:
+    """Build temporary editorial benchmark ranks for curated categories.
+
+    Explicit ``benchmarkRank`` values take precedence over JSON array order.
+    This keeps non-athlete valuations stable when files are merged, sorted, or
+    regenerated. Records without an explicit rank retain the historical
+    array-order fallback.
+    """
     if not records:
         return {}
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for record in records:
+    grouped: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+    for index, record in enumerate(records):
         category = category_name(record)
-        grouped.setdefault(category, []).append(record)
+        grouped.setdefault(category, []).append((index, record))
+
     output: dict[tuple[str, str], tuple[int, int]] = {}
-    for category, items in grouped.items():
-        total = len(items)
-        for rank, item in enumerate(items, start=1):
-            output[(category, normalize(item.get("name", "")))] = (rank, total)
+    for category, indexed_items in grouped.items():
+        total = len(indexed_items)
+        explicit: list[tuple[int, int, dict[str, Any]]] = []
+        fallback: list[tuple[int, dict[str, Any]]] = []
+        seen_ranks: set[int] = set()
+        for index, item in indexed_items:
+            rank_value = optional_number(item.get("benchmarkRank"))
+            rank = int(rank_value) if rank_value is not None and rank_value >= 1 else None
+            if rank is not None and rank not in seen_ranks:
+                explicit.append((rank, index, item))
+                seen_ranks.add(rank)
+            else:
+                fallback.append((index, item))
+
+        if explicit:
+            ordered = [item for _, _, item in sorted(explicit, key=lambda row: (row[0], row[1]))]
+            ordered.extend(item for _, item in sorted(fallback, key=lambda row: row[0]))
+        else:
+            ordered = [item for _, item in sorted(indexed_items, key=lambda row: row[0])]
+
+        for rank, item in enumerate(ordered, start=1):
+            explicit_rank = optional_number(item.get("benchmarkRank"))
+            applied_rank = int(explicit_rank) if explicit_rank is not None and 1 <= explicit_rank <= total else rank
+            output[(category, normalize(item.get("name", "")))] = (applied_rank, total)
     return output
 
 

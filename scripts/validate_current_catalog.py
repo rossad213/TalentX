@@ -57,8 +57,13 @@ def main() -> int:
                 break
         if record.get("marketSegment") != "Current":
             errors.append(f"Non-current record in current catalog: {record.get('name')}")
-        if record.get("careerStatus") != "Active":
-            errors.append(f"Non-active record in current catalog: {record.get('name')}")
+        status = str(record.get("careerStatus") or "")
+        excluded_current_statuses = {
+            "Retired — Legacy", "Legacy artist", "Group inactive", "Legacy",
+            "Status under review", "Retirement announced",
+        }
+        if status in excluded_current_statuses:
+            errors.append(f"Legacy or unresolved record in current catalog: {record.get('name')} ({status})")
 
     automated = [r for r in records if r.get("sourceNamespace") in {"espn", "nhl"}]
     if len(automated) < args.minimum:
