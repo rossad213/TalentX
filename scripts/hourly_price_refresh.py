@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Lightweight hourly TalentX price refresh.
 
-This job starts from the latest successful full-catalog artifact, detects games
-that are live or recently completed, identifies participating athletes, refreshes
-only those athletes' available career/statistical evidence, and recalculates
-only their prices. The weekly workflow remains responsible for full roster,
-identity, award, and status verification.
+This job starts from the latest successful full-catalog artifact, detects
+unprocessed completed games, reads player-level box scores, refreshes only those
+athletes' season/career evidence, and applies bounded game-level price moves.
+The weekly workflow remains responsible for full roster, identity, award, and
+status verification.
 """
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ from enrich_current_catalog import (
     cohort_key,
     extract_profile_evidence,
     merge_profile_evidence,
+    norm_key,
     extract_stat_maps,
     fetch_json,
     number,
@@ -65,6 +66,11 @@ SIGNAL_KEYS = (
     "awardPoints",
 )
 
+PROCESSED_EVENT_RETENTION_DAYS = 30
+COMPLETED_EVENT_STATES = {
+    "post", "final", "completed", "complete", "off", "closed", "official",
+}
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -96,16 +102,185 @@ def safe_json(path: Path, fallback: Any) -> Any:
         return fallback
 
 
-def team_id_from_record(record: dict[str, Any]) -> str:
-    source_url = str(record.get("sourceUrl") or "")
-    match = re.search(r"/teams/([^/]+)/roster", source_url)
-    return match.group(1) if match else ""
+def event_key(provider: str, event_id: str) -> str:
+    return f"{provider.lower()}:{event_id}"
 
 
-def nhl_abbreviation_from_record(record: dict[str, Any]) -> str:
-    source_url = str(record.get("sourceUrl") or "")
-    match = re.search(r"/roster/([^/]+)/current", source_url)
-    return match.group(1).upper() if match else ""
+def player_event_key(athlete_key: tuple[str, str], game_key: str) -> str:
+    return f"{game_key}|{athlete_key[0]}:{athlete_key[1]}"
+
+
+def completed_event(state: str) -> bool:
+    normalized = str(state or "").lower().strip()
+    return normalized in COMPLETED_EVENT_STATES or normalized.startswith("status_final")
+
+
+def prior_processed_events(manifest: dict[str, Any], now: datetime) -> dict[str, dict[str, Any]]:
+    cutoff = now - timedelta(days=PROCESSED_EVENT_RETENTION_DAYS)
+    output: dict[str, dict[str, Any]] = {}
+    items = manifest.get("processedEvents") if isinstance(manifest.get("processedEvents"), list) else []
+    for item in items:
+        if isinstance(item, str):
+            output[item] = {"key": item}
+            continue
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "")
+        started_at = parse_datetime(item.get("startedAt"))
+        if key and (started_at is None or started_at >= cutoff):
+            output[key] = dict(item)
+    return output
+
+
+def prior_processed_player_events(manifest: dict[str, Any]) -> set[str]:
+    items = manifest.get("processedPlayerEvents") if isinstance(manifest.get("processedPlayerEvents"), list) else []
+    return {
+        str(item.get("key") if isinstance(item, dict) else item)
+        for item in items
+        if str(item.get("key") if isinstance(item, dict) else item)
+    }
+
+
+def numeric_box_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(float(value)) else None
+    text = str(value or "").strip().replace(",", "")
+    if not text or text in {"--", "-", "DNP", "DND"}:
+        return None
+    try:
+        parsed = float(text.rstrip("%"))
+    except ValueError:
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def made_attempted(value: Any) -> tuple[float, float] | None:
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*", str(value or ""))
+    if not match:
+        return None
+    return float(match.group(1)), float(match.group(2))
+
+
+def normalized_box_stats(labels: Iterable[Any], values: Iterable[Any], section: str = "") -> dict[str, float]:
+    """Normalize common ESPN box-score columns into pricing-model stat names."""
+    output: dict[str, float] = {}
+    group = norm_key(section)
+    basketball = {
+        "min": "minutes", "pts": "points", "reb": "rebounds", "ast": "assists",
+        "stl": "steals", "blk": "blocks", "to": "turnovers", "tov": "turnovers",
+        "oreb": "offensiveRebounds", "dreb": "defensiveRebounds", "pf": "personalFouls",
+    }
+    baseball = {
+        "ab": "atBats", "r": "runs", "h": "hits", "rbi": "runsBattedIn",
+        "bb": "walks", "k": "strikeouts", "so": "strikeouts", "hr": "homeRuns",
+        "sb": "stolenBases", "ip": "inningsPitched", "er": "earnedRuns",
+        "era": "earnedRunAverage", "avg": "battingAverage", "obp": "onBasePct",
+        "ops": "ops", "sv": "saves", "w": "wins",
+    }
+    soccer = {
+        "min": "minutes", "g": "goals", "gls": "goals", "a": "assists",
+        "ast": "assists", "sh": "shots", "sog": "shotsOnTarget", "sv": "saves",
+    }
+    for label, raw_value in zip(labels, values):
+        label_text = str(label or "").strip()
+        key = norm_key(label_text)
+        pair = made_attempted(raw_value)
+        if pair and key in {"fg", "fieldgoals", "3pt", "3p", "threepointfieldgoals", "ft", "freethrows"}:
+            made, attempted = pair
+            prefix = "fieldGoal" if key in {"fg", "fieldgoals"} else "threePointFieldGoal" if key in {"3pt", "3p", "threepointfieldgoals"} else "freeThrow"
+            output[f"{prefix}sMade"] = made
+            output[f"{prefix}sAttempted"] = attempted
+            output[f"{prefix}Pct"] = (made / attempted * 100.0) if attempted else 0.0
+            continue
+        parsed = numeric_box_value(raw_value)
+        if parsed is None:
+            continue
+        mapped = basketball.get(key) or baseball.get(key) or soccer.get(key)
+        if group:
+            if "pass" in group:
+                mapped = {
+                    "yds": "passingYards", "td": "passingTouchdowns", "int": "interceptions",
+                    "qbr": "QBRating", "rtg": "passerRating",
+                }.get(key, mapped)
+            elif "rush" in group:
+                mapped = {"yds": "rushingYards", "td": "rushingTouchdowns", "avg": "yardsPerRushAttempt"}.get(key, mapped)
+            elif "receiv" in group:
+                mapped = {"rec": "receptions", "yds": "receivingYards", "td": "receivingTouchdowns", "avg": "yardsPerReception"}.get(key, mapped)
+            elif "defen" in group:
+                mapped = {"tot": "totalTackles", "tkl": "totalTackles", "sack": "sacks", "int": "interceptions", "pd": "passesDefended", "ff": "forcedFumbles"}.get(key, mapped)
+        output[mapped or key] = parsed
+    return output
+
+
+def extract_espn_game_stats(payload: dict[str, Any], winning_team_ids: set[str]) -> dict[str, dict[str, Any]]:
+    """Return player-level stats from ESPN summary box scores."""
+    found: dict[str, dict[str, Any]] = {}
+    boxscore = payload.get("boxscore") if isinstance(payload.get("boxscore"), dict) else {}
+    teams = boxscore.get("players") if isinstance(boxscore.get("players"), list) else []
+    for team_block in teams:
+        if not isinstance(team_block, dict):
+            continue
+        team = team_block.get("team") if isinstance(team_block.get("team"), dict) else {}
+        team_id = str(team.get("id") or "")
+        groups = team_block.get("statistics") if isinstance(team_block.get("statistics"), list) else []
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            labels = group.get("labels") or group.get("names") or group.get("displayNames") or []
+            if not isinstance(labels, list):
+                continue
+            section = str(group.get("name") or group.get("displayName") or group.get("type") or "")
+            athletes = group.get("athletes") if isinstance(group.get("athletes"), list) else []
+            for entry in athletes:
+                if not isinstance(entry, dict):
+                    continue
+                athlete = entry.get("athlete") if isinstance(entry.get("athlete"), dict) else {}
+                athlete_id = str(athlete.get("id") or entry.get("athleteId") or "")
+                values = entry.get("stats") or entry.get("values") or []
+                if not athlete_id or not isinstance(values, list):
+                    continue
+                normalized = normalized_box_stats(labels, values, section)
+                if not normalized:
+                    continue
+                item = found.setdefault(
+                    athlete_id,
+                    {"stats": {}, "teamId": team_id, "teamWon": team_id in winning_team_ids if team_id else None},
+                )
+                item["stats"].update(normalized)
+    return found
+
+
+def extract_nhl_game_stats(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return player-level stats from the NHL gamecenter box score."""
+    found: dict[str, dict[str, Any]] = {}
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            player_id = str(node.get("playerId") or "")
+            if player_id:
+                stats: dict[str, float] = {}
+                for key, value in node.items():
+                    if key in {"playerId", "headshot", "name", "position"} or isinstance(value, (dict, list)):
+                        continue
+                    parsed = numeric_box_value(value)
+                    if parsed is not None:
+                        mapped = {
+                            "savePctg": "savePct", "sweaterNumber": "jerseyNumber",
+                            "toi": "timeOnIce", "pim": "penaltyMinutes",
+                        }.get(key, key)
+                        stats[mapped] = parsed
+                if stats:
+                    found[player_id] = {"stats": stats, "teamId": "", "teamWon": None}
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(payload.get("playerByGameStats") or payload)
+    return found
 
 
 def translated_text(value: Any) -> str:
@@ -114,50 +289,8 @@ def translated_text(value: Any) -> str:
     return str(value or "")
 
 
-def extract_espn_athlete_ids(payload: Any) -> set[str]:
-    found: set[str] = set()
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            athlete = node.get("athlete")
-            if isinstance(athlete, dict) and athlete.get("id") is not None:
-                found.add(str(athlete["id"]))
-            athlete_id = node.get("athleteId")
-            if athlete_id is not None:
-                found.add(str(athlete_id))
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value)
-
-    walk(payload)
-    return {value for value in found if value}
-
-
-def extract_nhl_player_ids(payload: Any) -> set[str]:
-    found: set[str] = set()
-
-    def walk(node: Any) -> None:
-        if isinstance(node, dict):
-            player_id = node.get("playerId")
-            if player_id is not None:
-                found.add(str(player_id))
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, list):
-            for value in node:
-                walk(value)
-
-    walk(payload)
-    return {value for value in found if value}
-
-
-def event_is_recent(start: datetime | None, state: str, now: datetime, cutoff: datetime) -> bool:
-    if start is None or start < cutoff or start > now + timedelta(hours=1):
-        return False
-    normalized = state.lower().strip()
-    return normalized in {"in", "post", "live", "crit", "off", "final", "completed"} or start <= now
+def event_in_window(start: datetime | None, state: str, now: datetime, cutoff: datetime) -> bool:
+    return bool(start and cutoff <= start <= now + timedelta(hours=1) and completed_event(state))
 
 
 def event_dates(now: datetime, lookback_hours: float) -> list[str]:
@@ -174,8 +307,15 @@ def discover_recent_events(
     lookback_hours: float,
     timeout: float,
     workers: int,
-) -> tuple[set[tuple[str, str]], set[tuple[str, str, str]], set[str], list[dict[str, Any]], list[str]]:
-    """Return participant IDs and fallback team targets from recent events."""
+    processed_keys: set[str],
+    processed_player_keys: set[str] | None = None,
+) -> tuple[
+    set[tuple[str, str]],
+    dict[tuple[str, str], list[dict[str, Any]]],
+    list[dict[str, Any]],
+    list[str],
+]:
+    """Return player-level box scores for completed, not-yet-processed games."""
     cutoff = now - timedelta(hours=lookback_hours)
     espn_leagues = sorted(
         {
@@ -188,8 +328,9 @@ def discover_recent_events(
     espn_leagues = [(sport, league) for sport, league in espn_leagues if sport and league]
 
     participant_ids: set[tuple[str, str]] = set()
-    fallback_teams: set[tuple[str, str, str]] = set()
-    nhl_teams: set[str] = set()
+    athlete_events: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    processed_player_keys = processed_player_keys or set()
+    seen_event_keys: set[str] = set()
     events: list[dict[str, Any]] = []
     warnings: list[str] = []
     summary_jobs: list[tuple[str, str, str, dict[str, Any]]] = []
@@ -211,9 +352,12 @@ def discover_recent_events(
                 start = parse_datetime(event.get("date"))
                 status_type = ((event.get("status") or {}).get("type") or {}) if isinstance(event.get("status"), dict) else {}
                 state = str(status_type.get("state") or status_type.get("name") or "")
-                if not event_id or not event_is_recent(start, state, now, cutoff):
+                key = event_key("ESPN", event_id)
+                if not event_id or key in processed_keys or key in seen_event_keys or not event_in_window(start, state, now, cutoff):
                     continue
+                seen_event_keys.add(key)
                 team_ids: list[str] = []
+                winning_team_ids: list[str] = []
                 for competition in event.get("competitions") or []:
                     if not isinstance(competition, dict):
                         continue
@@ -224,15 +368,20 @@ def discover_recent_events(
                         team_id = str(team.get("id") or "")
                         if team_id:
                             team_ids.append(team_id)
+                            if competitor.get("winner") is True:
+                                winning_team_ids.append(team_id)
                 info = {
                     "provider": "ESPN",
                     "eventId": event_id,
+                    "eventKey": key,
                     "league": league,
                     "sport": sport,
                     "name": str(event.get("name") or event.get("shortName") or event_id),
                     "state": state,
                     "startedAt": iso_utc(start) if start else None,
                     "teamIds": team_ids,
+                    "winningTeamIds": winning_team_ids,
+                    "ready": False,
                 }
                 events.append(info)
                 summary_jobs.append((sport, league, event_id, info))
@@ -250,8 +399,10 @@ def discover_recent_events(
             game_id = str(game.get("id") or "")
             start = parse_datetime(game.get("startTimeUTC"))
             state = str(game.get("gameState") or "")
-            if not game_id or not event_is_recent(start, state, now, cutoff):
+            key = event_key("NHL", game_id)
+            if not game_id or key in processed_keys or key in seen_event_keys or not event_in_window(start, state, now, cutoff):
                 continue
+            seen_event_keys.add(key)
             teams: list[str] = []
             for side in ("awayTeam", "homeTeam"):
                 team = game.get(side) if isinstance(game.get(side), dict) else {}
@@ -261,31 +412,39 @@ def discover_recent_events(
             info = {
                 "provider": "NHL",
                 "eventId": game_id,
+                "eventKey": key,
                 "league": "NHL",
                 "sport": "hockey",
                 "name": f"{' vs '.join(teams)}" if teams else game_id,
                 "state": state,
                 "startedAt": iso_utc(start) if start else None,
                 "teamIds": teams,
+                "ready": False,
             }
             events.append(info)
             nhl_jobs.append((game_id, info))
 
-    def fetch_espn_summary(job: tuple[str, str, str, dict[str, Any]]) -> tuple[set[tuple[str, str]], str | None]:
-        sport, league, event_id, _ = job
+    def fetch_espn_summary(job: tuple[str, str, str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], str | None]:
+        sport, league, event_id, info = job
         try:
             payload = fetch_json(ESPN_SUMMARY.format(sport=sport, league=league, event_id=event_id), timeout)
-            return {("espn", athlete_id) for athlete_id in extract_espn_athlete_ids(payload)}, None
+            stats = extract_espn_game_stats(payload, set(info.get("winningTeamIds") or []))
+            if not stats:
+                return {}, f"box score not ready {sport}/{league}/{event_id}"
+            return stats, None
         except Exception as exc:  # noqa: BLE001
-            return set(), f"summary {sport}/{league}/{event_id}: {type(exc).__name__}"
+            return {}, f"summary {sport}/{league}/{event_id}: {type(exc).__name__}"
 
-    def fetch_nhl_boxscore(job: tuple[str, dict[str, Any]]) -> tuple[set[tuple[str, str]], str | None]:
+    def fetch_nhl_boxscore(job: tuple[str, dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], str | None]:
         game_id, _ = job
         try:
             payload = fetch_json(NHL_BOXSCORE.format(game_id=game_id), timeout)
-            return {("nhl", athlete_id) for athlete_id in extract_nhl_player_ids(payload)}, None
+            stats = extract_nhl_game_stats(payload)
+            if not stats:
+                return {}, f"NHL box score not ready {game_id}"
+            return stats, None
         except Exception as exc:  # noqa: BLE001
-            return set(), f"NHL boxscore {game_id}: {type(exc).__name__}"
+            return {}, f"NHL boxscore {game_id}: {type(exc).__name__}"
 
     all_jobs: list[tuple[str, Any]] = [("espn", job) for job in summary_jobs] + [("nhl", job) for job in nhl_jobs]
     with ThreadPoolExecutor(max_workers=max(1, min(workers, len(all_jobs) or 1))) as executor:
@@ -295,50 +454,49 @@ def discover_recent_events(
             futures[future] = (kind, job)
         for future in as_completed(futures):
             kind, job = futures[future]
-            ids, warning = future.result()
-            if ids:
-                participant_ids.update(ids)
-            elif kind == "espn":
-                sport, league, _, info = job
-                for team_id in info.get("teamIds", []):
-                    fallback_teams.add((sport, league, str(team_id)))
-            else:
-                _, info = job
-                for abbreviation in info.get("teamIds", []):
-                    if abbreviation:
-                        nhl_teams.add(str(abbreviation).upper())
+            stats_by_player, warning = future.result()
+            info = job[3] if kind == "espn" else job[1]
+            namespace = "espn" if kind == "espn" else "nhl"
+            if stats_by_player:
+                info["ready"] = True
+                info["playersWithStats"] = len(stats_by_player)
+                for athlete_id, performance in stats_by_player.items():
+                    key = (namespace, str(athlete_id))
+                    if player_event_key(key, str(info["eventKey"])) in processed_player_keys:
+                        continue
+                    participant_ids.add(key)
+                    athlete_events[key].append(
+                        {
+                            "eventKey": info["eventKey"],
+                            "eventId": info["eventId"],
+                            "provider": info["provider"],
+                            "league": info["league"],
+                            "name": info["name"],
+                            "startedAt": info["startedAt"],
+                            "stats": performance.get("stats", {}),
+                            "teamWon": performance.get("teamWon"),
+                        }
+                    )
             if warning:
                 warnings.append(warning)
 
-    return participant_ids, fallback_teams, nhl_teams, events, warnings
+    for performances in athlete_events.values():
+        performances.sort(key=lambda item: str(item.get("startedAt") or ""))
+    return participant_ids, dict(athlete_events), events, warnings
 
 
 def select_records(
     records: list[dict[str, Any]],
     participant_ids: set[tuple[str, str]],
-    fallback_teams: set[tuple[str, str, str]],
-    nhl_teams: set[str],
     *,
     max_athletes: int,
 ) -> list[int]:
     exact: list[int] = []
-    fallback: list[int] = []
     for index, record in enumerate(records):
         namespace = str(record.get("sourceNamespace") or "")
         athlete_id = str(record.get("sourceRecordId") or "")
         if (namespace, athlete_id) in participant_ids:
             exact.append(index)
-            continue
-        if namespace == "espn":
-            sport = SPORT_PATH.get(str(record.get("discipline") or ""))
-            league = str(record.get("sourceLeagueSlug") or "")
-            team_id = team_id_from_record(record)
-            if sport and league and team_id and (sport, league, team_id) in fallback_teams:
-                fallback.append(index)
-        elif namespace == "nhl":
-            abbreviation = nhl_abbreviation_from_record(record)
-            if abbreviation and abbreviation in nhl_teams:
-                fallback.append(index)
 
     def priority(index: int) -> tuple[int, float, float, str]:
         record = records[index]
@@ -348,12 +506,7 @@ def select_records(
         return (1 if evidence else 0, 1 if starter else 0, confidence, str(record.get("name") or ""))
 
     exact = sorted(set(exact), key=priority, reverse=True)
-    remaining = max(0, max_athletes - len(exact)) if max_athletes > 0 else len(fallback)
-    fallback = sorted(set(fallback) - set(exact), key=priority, reverse=True)[:remaining]
-    selected = exact + fallback
-    if max_athletes > 0:
-        selected = selected[:max_athletes]
-    return selected
+    return exact[:max_athletes] if max_athletes > 0 else exact
 
 
 def prior_award_data(record: dict[str, Any]) -> tuple[float, list[str]]:
@@ -537,28 +690,117 @@ def apply_hourly_metrics(
     return record
 
 
-def cap_hourly_market_move(old_record: dict[str, Any], new_record: dict[str, Any], max_move_pct: float, refreshed_at: str) -> tuple[dict[str, Any], float]:
+def stat_value(stats: dict[str, Any], *aliases: str) -> float | None:
+    normalized = {norm_key(key): numeric_box_value(value) for key, value in stats.items()}
+    wanted = [norm_key(alias) for alias in aliases]
+    for alias in wanted:
+        if normalized.get(alias) is not None:
+            return normalized[alias]
+    for key, value in normalized.items():
+        if value is not None and any(key.endswith(alias) for alias in wanted):
+            return value
+    return None
+
+
+def expected_game_signal(record: dict[str, Any], item: dict[str, Any]) -> float:
+    """Convert saved season evidence to an expected one-game production signal."""
+    signals = item.get("signals") if isinstance(item.get("signals"), dict) else {}
+    season_signal = max(0.0, float(signals.get("recentProduction") or 0))
+    recent = item.get("recent") if isinstance(item.get("recent"), dict) else {}
+    league = str(record.get("leagueOrMedium") or "")
+    if league in {"NBA", "WNBA"}:
+        # ESPN basketball evidence is already expressed through per-game fields.
+        return season_signal
+    has_per_game_fields = any("pergame" in norm_key(key) or norm_key(key).startswith("avg") for key in recent)
+    if has_per_game_fields:
+        return season_signal
+    games = stat_value(recent, "gamesPlayed", "games", "appearances", "gp")
+    return season_signal / games if games and games > 0 else season_signal
+
+
+def game_event_move(
+    record: dict[str, Any],
+    item: dict[str, Any],
+    event: dict[str, Any],
+    max_game_move_pct: float,
+) -> tuple[float, dict[str, Any]]:
+    stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
+    actual_signal = float(signal_bundle(record, stats, {}, 0).get("recentProduction") or 0)
+    expected_signal = expected_game_signal(record, item)
+    if expected_signal <= 0:
+        return 0.0, {
+            "comparable": False,
+            "reason": "No season baseline was available for this box score",
+            "actualPerformanceScore": round(actual_signal, 3),
+            "expectedPerformanceScore": 0.0,
+        }
+
+    performance_delta = (actual_signal / expected_signal - 1.0) * 100.0
+    performance_move = clamp(performance_delta / 100.0 * 1.75, -2.25, 2.25)
+    outcome_move = 0.15 if event.get("teamWon") is True else -0.10 if event.get("teamWon") is False else 0.0
+    move_pct = clamp(performance_move + outcome_move, -max_game_move_pct, max_game_move_pct)
+    if abs(move_pct) < 0.05 and (abs(performance_delta) >= 1.0 or event.get("teamWon") is not None):
+        direction = move_pct if abs(move_pct) > 1e-9 else performance_delta or (1 if event.get("teamWon") else -1)
+        move_pct = 0.05 if direction > 0 else -0.05
+    return round(move_pct, 3), {
+        "comparable": True,
+        "actualPerformanceScore": round(actual_signal, 3),
+        "expectedPerformanceScore": round(expected_signal, 3),
+        "performanceDeltaPct": round(performance_delta, 2),
+        "outcomeMovePct": outcome_move,
+    }
+
+
+def apply_game_market_moves(
+    old_record: dict[str, Any],
+    new_record: dict[str, Any],
+    item: dict[str, Any],
+    events: list[dict[str, Any]],
+    max_game_move_pct: float,
+    refreshed_at: str,
+) -> tuple[dict[str, Any], float, list[dict[str, Any]]]:
+    """Move market price once per completed game while keeping fundamentals anchored."""
     old_price = max(0.01, float(old_record.get("marketPrice") or new_record.get("marketPrice") or 0.01))
     model_target = max(0.01, float(new_record.get("marketPrice") or old_price))
-    raw_move = model_target / old_price - 1
-    capped_move = clamp(raw_move, -max_move_pct / 100.0, max_move_pct / 100.0)
-    new_price = round(old_price * (1 + capped_move), 2)
-    change_pct = round((new_price / old_price - 1) * 100, 2)
+    anchor_gap_pct = (model_target / old_price - 1.0) * 100.0
+    anchor_budget = clamp(anchor_gap_pct * 0.15, -0.50, 0.50)
+    per_event_anchor = anchor_budget / max(1, len(events))
+    price = old_price
+    prior_trend = [float(value) for value in old_record.get("trend", []) if isinstance(value, (int, float))]
+    trend = [round(value, 2) for value in prior_trend] or [round(old_price, 2)] * 18
+    event_results: list[dict[str, Any]] = []
 
+    for event in sorted(events, key=lambda value: str(value.get("startedAt") or "")):
+        event_move, evidence = game_event_move(old_record, item, event, max_game_move_pct)
+        if not evidence.get("comparable"):
+            event_results.append({**event, **evidence, "movePct": 0.0})
+            continue
+        combined_move = clamp(event_move + per_event_anchor, -max_game_move_pct, max_game_move_pct)
+        next_price = round(price * (1.0 + combined_move / 100.0), 2)
+        actual_move = round((next_price / price - 1.0) * 100.0, 2)
+        price = next_price
+        trend = trend[-17:] + [price]
+        event_results.append({**event, **evidence, "movePct": actual_move, "priceAfter": price})
+
+    change_pct = round((price / old_price - 1.0) * 100.0, 2)
     result = dict(new_record)
     result["modelTargetPrice"] = round(model_target, 2)
     result["previousMarketPrice"] = round(old_price, 2)
-    result["marketPrice"] = new_price
+    result["marketPrice"] = round(price, 2)
     result["dailyChange"] = change_pct
     result["hourlyChangePct"] = change_pct
-    prior_trend = [float(value) for value in old_record.get("trend", []) if isinstance(value, (int, float))]
-    if abs(change_pct) >= 0.01:
-        result["lastPriceEventAt"] = refreshed_at
-        result["lastPriceEvent"] = "Recent game/statistics refresh"
-        result["trend"] = [round(value, 2) for value in prior_trend[-17:]] + [new_price]
-    else:
-        result["trend"] = [round(value, 2) for value in prior_trend] or [new_price] * 18
-    return result, change_pct
+    result["lastPriceRefreshAt"] = refreshed_at
+    result["trend"] = trend
+    comparable = [event for event in event_results if event.get("comparable")]
+    if comparable:
+        latest = comparable[-1]
+        result["lastPriceEventAt"] = latest.get("startedAt") or refreshed_at
+        result["lastPriceEvent"] = str(latest.get("name") or "Completed game")
+        result["lastPriceEventId"] = latest.get("eventKey")
+        result["lastGameMovePct"] = latest.get("movePct")
+        result["lastGamePerformanceDeltaPct"] = latest.get("performanceDeltaPct")
+        result["lastGameStats"] = latest.get("stats", {})
+    return result, change_pct, event_results
 
 
 def rewrite_csv(records: list[dict[str, Any]]) -> None:
@@ -600,9 +842,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=20)
     parser.add_argument("--request-timeout", type=float, default=10.0)
-    parser.add_argument("--lookback-hours", type=float, default=10.0)
+    parser.add_argument("--lookback-hours", type=float, default=48.0)
     parser.add_argument("--max-athletes", type=int, default=1800)
-    parser.add_argument("--max-hourly-move-pct", type=float, default=8.0)
+    parser.add_argument("--max-game-move-pct", type=float, default=2.5)
     parser.add_argument("--baseline-run-id", default="")
     args = parser.parse_args()
 
@@ -615,24 +857,29 @@ def main() -> int:
     started = time.time()
     now = utc_now()
     refreshed_at = iso_utc(now)
-    participant_ids, fallback_teams, nhl_teams, events, discovery_warnings = discover_recent_events(
+    prior_manifest = safe_json(HOURLY_MANIFEST, {})
+    if not isinstance(prior_manifest, dict):
+        prior_manifest = {}
+    processed_history = prior_processed_events(prior_manifest, now)
+    processed_player_history = prior_processed_player_events(prior_manifest)
+    participant_ids, athlete_events, events, discovery_warnings = discover_recent_events(
         records,
         now=now,
         lookback_hours=args.lookback_hours,
         timeout=args.request_timeout,
         workers=args.workers,
+        processed_keys=set(processed_history),
+        processed_player_keys=processed_player_history,
     )
     selected_indexes = select_records(
         records,
         participant_ids,
-        fallback_teams,
-        nhl_teams,
         max_athletes=args.max_athletes,
     )
 
-    print(f"Recent events found: {len(events):,}")
-    print(f"Exact participants found: {len(participant_ids):,}")
-    print(f"Athletes selected for hourly evidence refresh: {len(selected_indexes):,}")
+    print(f"Unprocessed completed events found: {len(events):,}")
+    print(f"Players with box-score statistics: {len(participant_ids):,}")
+    print(f"Athletes selected for game-level evidence refresh: {len(selected_indexes):,}")
 
     cohorts, leagues = stored_signal_pools(records)
     overrides = load_overrides(PRICING_OVERRIDES)
@@ -668,9 +915,12 @@ def main() -> int:
     unchanged = 0
     failures: Counter[str] = Counter()
     changes: list[dict[str, Any]] = []
+    evaluated_player_events: set[tuple[tuple[str, str], str]] = set()
     for index in selected_indexes:
         item = results_by_index.get(index, {"record": records[index], "ok": False, "reason": "missing worker result"})
         old_record = records[index]
+        athlete_key = (str(old_record.get("sourceNamespace") or ""), str(old_record.get("sourceRecordId") or ""))
+        player_events = athlete_events.get(athlete_key, [])
         if not item.get("ok"):
             failure_reason = str(item.get("reason") or "unknown")
             failures[failure_reason] += 1
@@ -693,7 +943,18 @@ def main() -> int:
             benchmark_records=benchmark_records,
             calibration_reference=records,
         )[0]
-        repriced, change_pct = cap_hourly_market_move(old_record, repriced, args.max_hourly_move_pct, refreshed_at)
+        repriced, change_pct, event_results = apply_game_market_moves(
+            old_record,
+            repriced,
+            item,
+            player_events,
+            args.max_game_move_pct,
+            refreshed_at,
+        )
+        for result in event_results:
+            game_key = str(result.get("eventKey") or "")
+            evaluated_player_events.add((athlete_key, game_key))
+            processed_player_history.add(player_event_key(athlete_key, game_key))
         repriced.pop("hourlyEvidenceWarning", None)
         updated_records[index] = repriced
         if abs(change_pct) >= 0.01:
@@ -707,6 +968,16 @@ def main() -> int:
                     "newPrice": round(float(repriced.get("marketPrice") or 0), 2),
                     "changePct": change_pct,
                     "modelTargetPrice": repriced.get("modelTargetPrice"),
+                    "games": [
+                        {
+                            "eventKey": result.get("eventKey"),
+                            "name": result.get("name"),
+                            "startedAt": result.get("startedAt"),
+                            "movePct": result.get("movePct"),
+                            "performanceDeltaPct": result.get("performanceDeltaPct"),
+                        }
+                        for result in event_results
+                    ],
                 }
             )
         else:
@@ -716,6 +987,45 @@ def main() -> int:
     CATALOG.write_text(json.dumps(updated_records, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     rewrite_csv(updated_records)
 
+    catalog_athlete_keys = {
+        (str(record.get("sourceNamespace") or ""), str(record.get("sourceRecordId") or ""))
+        for record in records
+        if record.get("sourceRecordId")
+    }
+    processed_now: list[dict[str, Any]] = []
+    for event in events:
+        if not event.get("ready"):
+            continue
+        key = str(event.get("eventKey") or "")
+        matching_players = {
+            athlete_key
+            for athlete_key, player_events in athlete_events.items()
+            if athlete_key in catalog_athlete_keys
+            and any(str(item.get("eventKey") or "") == key for item in player_events)
+        }
+        if matching_players and not all((athlete_key, key) in evaluated_player_events for athlete_key in matching_players):
+            continue
+        processed_item = {
+            "key": key,
+            "provider": event.get("provider"),
+            "eventId": event.get("eventId"),
+            "league": event.get("league"),
+            "name": event.get("name"),
+            "startedAt": event.get("startedAt"),
+            "processedAt": refreshed_at,
+            "playersWithStats": event.get("playersWithStats", 0),
+            "matchedCatalogPlayers": len(matching_players),
+        }
+        processed_history[key] = processed_item
+        processed_now.append(processed_item)
+
+    # Player-level markers prevent a successful athlete from being moved twice
+    # when a teammate's evidence request fails and the game must be retried.
+    processed_player_history = {
+        key for key in processed_player_history
+        if key.split("|", 1)[0] not in processed_history
+    }
+
     manifest = safe_json(CATALOG_MANIFEST, {})
     if not isinstance(manifest, dict):
         manifest = {}
@@ -724,25 +1034,32 @@ def main() -> int:
             "hourlyPriceRefreshAt": refreshed_at,
             "hourlyBaselineRunId": str(args.baseline_run_id or ""),
             "hourlyEventsFound": len(events),
+            "hourlyEventsProcessed": len(processed_now),
             "hourlyAthletesSelected": len(selected_indexes),
             "hourlyEvidenceUsable": usable,
             "hourlyPricesChanged": changed,
-            "hourlyRefreshMode": "Recent games and participating-athlete statistics only; full catalog remains weekly.",
-            "hourlyMaximumMovePct": args.max_hourly_move_pct,
+            "hourlyRefreshMode": "Completed games are processed once from player box scores; season and career evidence remains the valuation anchor.",
+            "hourlyMaximumGameMovePct": args.max_game_move_pct,
             "hourlyRefreshManifest": "data/hourly_refresh_manifest.json",
         }
     )
     CATALOG_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     hourly_manifest = {
-        "version": "1.2-event-driven-hourly-pricing",
+        "version": "1.3-game-level-event-pricing",
         "generatedAt": refreshed_at,
         "weeklyBaselineRunId": str(args.baseline_run_id or ""),
         "elapsedSeconds": round(time.time() - started, 1),
         "lookbackHours": args.lookback_hours,
         "maximumAthletes": args.max_athletes,
-        "maximumHourlyMovePct": args.max_hourly_move_pct,
+        "maximumGameMovePct": args.max_game_move_pct,
         "eventsFound": len(events),
+        "eventsProcessedNow": len(processed_now),
+        "processedEvents": sorted(
+            processed_history.values(),
+            key=lambda item: str(item.get("startedAt") or item.get("processedAt") or ""),
+        )[-2000:],
+        "processedPlayerEvents": sorted(processed_player_history)[-50000:],
         "exactParticipantsFound": len(participant_ids),
         "athletesSelected": len(selected_indexes),
         "evidenceUsable": usable,
@@ -754,9 +1071,9 @@ def main() -> int:
         "events": events[:150],
         "largestMoves": sorted(changes, key=lambda item: abs(float(item["changePct"])), reverse=True)[:100],
         "method": (
-            "Scoreboards identify live/recently completed games; box scores identify participants; only those athletes receive "
-            "updated recent-stat evidence and repricing. Drafted rookies automatically reduce their IPO influence as professional games accumulate. "
-            "Existing cohort distributions provide normalization until the next full weekly rebuild."
+            "Completed games are identified by stable provider event IDs and are processed only once. Player-level box scores are compared with "
+            "the athlete's saved season baseline; the resulting bounded game move is blended with a small pull toward the season/career model target. "
+            "Drafted rookies automatically reduce their IPO influence as professional games accumulate."
         ),
     }
     HOURLY_MANIFEST.write_text(json.dumps(hourly_manifest, ensure_ascii=False, indent=2), encoding="utf-8")

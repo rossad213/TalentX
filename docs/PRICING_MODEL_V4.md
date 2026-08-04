@@ -82,7 +82,17 @@ Market price is separated from fundamental value.
 
 These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined market adjustment is capped at ±6%, preventing hype from overpowering documented career value.
 
-After a full evidence build, every listing begins with a 0.00% change and a flat chart. A price changes only when a supported event updates its inputs—for example, a live or recently completed game produces new statistics—or when a user places a virtual trade in their own browser. Hourly runs leave all unrelated listings unchanged.
+After a full evidence build, every listing begins with a 0.00% change and a flat chart. A shared price changes only after a completed game with a player-level box score, or when another supported evidence event is added in a future feed. A virtual trade changes only that user's browser price. Hourly runs leave all unrelated listings unchanged.
+
+### Completed-game movement
+
+- Each completed game is identified by its stable provider and event ID and is processed once.
+- The player's individual box-score production is compared with that player's saved season baseline.
+- Season and career evidence continues to set fundamental value and supplies a small anchor toward the model target.
+- A normal above- or below-expectation game creates a modest move; outcome adds only a small adjustment.
+- A single game is capped at 2.5%, preventing one result from overwhelming established value.
+- The hourly job searches the prior 48 hours, so delayed runs can catch games that a short hourly window would miss.
+- Processed-event history is retained across weekly rebuilds, preventing the same game from being priced twice.
 
 ## Regression tests
 
@@ -95,6 +105,9 @@ The validation suite now checks:
 - Market adjustments remain within ±6%
 - Repricing is reproducible from the saved evidence
 - Full builds cannot manufacture a daily change or chart movement
+- Live games cannot move prices before their box scores are final
+- A completed game creates one bounded price point and a repeated event ID creates none
+- No-game refreshes preserve both price and chart history
 - Anthony Edwards prices above Amen Thompson and Tyrese Maxey
 - Taylor Swift and Beyoncé price above Gracie Abrams
 - MrBeast prices above Marques Brownlee

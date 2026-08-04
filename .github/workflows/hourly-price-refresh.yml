@@ -62,9 +62,17 @@ jobs:
           hourly_run_id="$(printf '%s' "$hourly_meta" | jq -r '.workflow_runs[0].id // empty')"
           hourly_created_at="$(printf '%s' "$hourly_meta" | jq -r '.workflow_runs[0].created_at // empty')"
 
-          if [ -n "$hourly_run_id" ] && [ "$hourly_created_at" \> "$weekly_created_at" ]; then
+          if [ -n "$hourly_run_id" ]; then
             gh run download "$hourly_run_id" -R "$GITHUB_REPOSITORY" -n talentx-hourly-catalog -D _hourly
-            for filename in current_catalog.json current_catalog.csv catalog_manifest.json current_source_manifest.json pricing_enrichment_manifest.json hourly_refresh_manifest.json; do
+            processed_manifest="$(find _hourly -name hourly_refresh_manifest.json -print -quit)"
+            if [ -n "$processed_manifest" ]; then
+              cp "$processed_manifest" data/hourly_refresh_manifest.json
+              echo "Restored processed-game history from hourly run $hourly_run_id."
+            fi
+          fi
+
+          if [ -n "$hourly_run_id" ] && [ "$hourly_created_at" \> "$weekly_created_at" ]; then
+            for filename in current_catalog.json current_catalog.csv catalog_manifest.json current_source_manifest.json pricing_enrichment_manifest.json; do
               source_file="$(find _hourly -name "$filename" -print -quit)"
               if [ -n "$source_file" ]; then
                 cp "$source_file" "data/$filename"
@@ -77,14 +85,17 @@ jobs:
 
           echo "WEEKLY_BASELINE_RUN_ID=$weekly_run_id" >> "$GITHUB_ENV"
 
-      - name: Refresh recent-event prices
+      - name: Validate game-level pricing logic
+        run: python -m unittest tests/test_hourly_price_refresh.py -v
+
+      - name: Refresh completed-game prices
         run: >-
           python scripts/hourly_price_refresh.py
           --workers 20
           --request-timeout 10
-          --lookback-hours 10
+          --lookback-hours 48
           --max-athletes 1800
-          --max-hourly-move-pct 8
+          --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
 
       - name: Validate current catalog
