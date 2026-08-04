@@ -77,7 +77,7 @@ ROOKIE_WEIGHTS = {
     "availability": 0.07,
     "audience": 0.05,
 }
-MODEL_VERSION = "4.0-cross-category-calibration"
+MODEL_VERSION = "4.1-event-driven-pricing"
 
 ROOKIE_SPORT_CONFIG: dict[str, dict[str, Any]] = {
     "NFL": {
@@ -683,11 +683,11 @@ def controlled_market_fields(record: dict[str, Any], score: float, metrics: dict
     availability = clamp(metrics.get("availability", metrics.get("liquidity", 75)), 0, 100)
     data_confidence = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.5)), 0, 1)
 
-    # Market demand is deliberately smaller than the fundamental model. The
-    # combined premium/discount cannot exceed +/-6%, preventing hype from
-    # overwhelming documented career value.
-    demand = clamp((audience - 50) * 0.040 + rng.uniform(-0.25, 0.25), -2.5, 3.0)
-    momentum = clamp((performance - 50) * 0.030 + rng.uniform(-0.20, 0.20), -2.0, 2.0)
+    # Market demand and momentum are derived only from saved evidence. Random
+    # jitter must never create a price move without a game, evidence update, or
+    # explicit virtual trade.
+    demand = clamp((audience - 50) * 0.040, -2.5, 3.0)
+    momentum = clamp((performance - 50) * 0.030, -2.0, 2.0)
     risk = clamp((availability - 75) * 0.020, -1.5, 1.0)
     adjustment = clamp(demand + momentum + risk, -MARKET_ADJUSTMENT_CAP_PCT, MARKET_ADJUSTMENT_CAP_PCT)
     market = fundamental * (1 + adjustment / 100.0)
@@ -697,26 +697,17 @@ def controlled_market_fields(record: dict[str, Any], score: float, metrics: dict
         market = min(market, 65.0)
     market = round(max(2.0, market), 2)
 
-    volatility = 1.2 + (100 - score) / 100 * 1.6
-    daily = round(rng.uniform(-volatility, volatility), 2)
     base_volume = 8_000 + audience * 5_500 + max(0, score - 40) * 3_000
     volume = int(max(5_000, base_volume * rng.uniform(0.75, 1.25)))
-
-    trend: list[float] = []
-    value = market / (1 + daily / 100 if abs(daily) < 99 else 1)
-    for _ in range(18):
-        value *= 1 + rng.uniform(-0.012, 0.013)
-        trend.append(round(max(1.0, value), 2))
-    trend[-1] = market
     return {
         "marketPrice": market,
-        "dailyChange": daily,
+        "dailyChange": 0.0,
         "demandPremiumPct": round(demand, 2),
         "momentumPct": round(momentum, 2),
         "riskAdjustmentPct": round(risk, 2),
         "marketAdjustmentPct": round(adjustment, 2),
         "volume": volume,
-        "trend": trend,
+        "trend": [market] * 18,
     }
 
 

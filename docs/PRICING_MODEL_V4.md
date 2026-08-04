@@ -80,7 +80,9 @@ Market price is separated from fundamental value.
 - Current momentum adjustment
 - Availability/risk adjustment
 
-The combined market adjustment is capped at ±6%, preventing hype from overpowering documented career value.
+These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined market adjustment is capped at ±6%, preventing hype from overpowering documented career value.
+
+After a full evidence build, every listing begins with a 0.00% change and a flat chart. A price changes only when a supported event updates its inputs—for example, a live or recently completed game produces new statistics—or when a user places a virtual trade in their own browser. Hourly runs leave all unrelated listings unchanged.
 
 ## Regression tests
 
@@ -92,6 +94,7 @@ The validation suite now checks:
 - Curated and low-confidence records cannot enter unsupported tiers
 - Market adjustments remain within ±6%
 - Repricing is reproducible from the saved evidence
+- Full builds cannot manufacture a daily change or chart movement
 - Anthony Edwards prices above Amen Thompson and Tyrese Maxey
 - Taylor Swift and Beyoncé price above Gracie Abrams
 - MrBeast prices above Marques Brownlee

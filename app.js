@@ -54,14 +54,14 @@ let retirementSelection='';
 let chartRange='1D';
 
 const CHART_RANGE_CONFIG={
-  '1D':{duration:8*60*60*1000,points:36,volatility:.012},
-  '5D':{duration:5*24*60*60*1000,points:48,volatility:.028},
-  '1M':{duration:30*24*60*60*1000,points:54,volatility:.050},
-  '6M':{duration:182*24*60*60*1000,points:64,volatility:.095},
-  'YTD':{duration:null,points:64,volatility:.110},
-  '1Y':{duration:365*24*60*60*1000,points:72,volatility:.145},
-  '5Y':{duration:5*365*24*60*60*1000,points:82,volatility:.260},
-  'Max':{duration:10*365*24*60*60*1000,points:92,volatility:.360}
+  '1D':{duration:8*60*60*1000,points:36},
+  '5D':{duration:5*24*60*60*1000,points:48},
+  '1M':{duration:30*24*60*60*1000,points:54},
+  '6M':{duration:182*24*60*60*1000,points:64},
+  'YTD':{duration:null,points:64},
+  '1Y':{duration:365*24*60*60*1000,points:72},
+  '5Y':{duration:5*365*24*60*60*1000,points:82},
+  'Max':{duration:10*365*24*60*60*1000,points:92}
 };
 const CHART_RANGES=Object.keys(CHART_RANGE_CONFIG);
 
@@ -77,7 +77,7 @@ let filters={
   page:1
 };
 
-const PRICING_MODEL_VERSION='4.0-cross-category-calibration';
+const PRICING_MODEL_VERSION='4.1-event-driven-pricing';
 const defaultState={cash:25000,holdings:{},watchlist:[],prices:{},transactions:[],pricingModelVersion:PRICING_MODEL_VERSION};
 let state=loadState();
 
@@ -109,6 +109,15 @@ function byId(id){
 function localPrice(r){
   return Number(state.prices[r.id]??r.marketPrice);
 }
+function displayChange(r){
+  const listed=Number(r.marketPrice||0);
+  const current=Number(localPrice(r));
+  const recorded=Number(r.dailyChange||0);
+  if(!Number.isFinite(listed)||listed<=0||!Number.isFinite(current)) return recorded;
+  if(Math.abs(current-listed)<.005) return recorded;
+  const prior=listed/(1+recorded/100);
+  return Number.isFinite(prior)&&prior>0?((current/prior)-1)*100:recorded;
+}
 function toast(msg){
   const el=$('#toast');el.textContent=msg;el.classList.add('show');
   clearTimeout(window.__toast);window.__toast=setTimeout(()=>el.classList.remove('show'),2200);
@@ -128,7 +137,7 @@ function note(){
   const statusText=automated
     ? `${automated.toLocaleString()} athlete profiles were included from point-in-time current-roster feeds. ${enriched.toLocaleString()} currently have statistics-and-awards pricing evidence; the remainder are visibly conservative provisional listings. Status and evidence can change after the timestamps shown.`
     : `This local preview contains the 200-person fallback seed. The GitHub Pages workflow generates and evidence-enriches the larger current catalog before deployment.`;
-  return `<div class="notice"><strong>TalentX data notice:</strong> ${statusText} All prices, scores, changes, charts, volumes, portfolios, and trades are simulated.</div>`;
+  return `<div class="notice"><strong>TalentX data notice:</strong> ${statusText} The market is simulated, but prices move only after supported evidence updates or a virtual trade in your browser; charts do not add random fluctuations.</div>`;
 }
 function avatar(r,large=false){
   return `<div class="avatar ${large?'large':''}">${esc(r.avatar||'TX')}</div>`;
@@ -138,29 +147,14 @@ function segmentClass(s){
 }
 function displayTrend(r){
   const base=(r.trend||[]).map(Number).filter(v=>Number.isFinite(v));
-  if(!base.length) return [];
   const current=Number(localPrice(r));
-  const last=Number(base[base.length-1]||0);
-  if(Number.isFinite(current)&&current>0&&Number.isFinite(last)&&last>0){
-    const scale=current/last;
-    return base.map(v=>Number((v*scale).toFixed(2)));
+  if(!base.length) return Number.isFinite(current)&&current>0?[Number(current.toFixed(2))]:[];
+  const output=base.map(v=>Number(v.toFixed(2)));
+  const last=Number(output[output.length-1]||0);
+  if(Number.isFinite(current)&&current>0&&Math.abs(current-last)>=.005){
+    output.push(Number(current.toFixed(2)));
   }
-  return base;
-}
-function hashSeed(value){
-  let h=2166136261;
-  for(const char of String(value||'')){h^=char.charCodeAt(0);h=Math.imul(h,16777619)}
-  return h>>>0;
-}
-function seededRandom(seed){
-  let value=seed>>>0;
-  return ()=>{
-    value+=0x6D2B79F5;
-    let t=value;
-    t=Math.imul(t^(t>>>15),t|1);
-    t^=t+Math.imul(t^(t>>>7),t|61);
-    return ((t^(t>>>14))>>>0)/4294967296;
-  };
+  return output;
 }
 function resampleValues(values,count){
   if(!values.length) return [];
@@ -172,49 +166,14 @@ function resampleValues(values,count){
     return Number((values[lower]+(values[upper]-values[lower])*blend).toFixed(2));
   });
 }
-function chartTargetReturn(r,range){
-  const score=(Number(r.careerScore||65)-65)/35;
-  const momentum=Number(r.momentumPct||0)/100;
-  const daily=Number(r.dailyChange||0)/100;
-  const target={
-    '5D':daily*1.8+momentum*.20,
-    '1M':daily*2.5+momentum*.60+score*.01,
-    '6M':momentum*2.5+score*.08,
-    'YTD':momentum*3.0+score*.11,
-    '1Y':momentum*4.0+score*.16,
-    '5Y':score*.55+.18,
-    'Max':score*.90+.32
-  }[range]||daily;
-  const limit={'5D':.10,'1M':.20,'6M':.42,'YTD':.55,'1Y':.70,'5Y':1.65,'Max':2.50}[range]||.08;
-  return clamp(target,Math.max(-.85,-limit),limit);
-}
 function chartSeries(r,range=chartRange){
   const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
   const current=Math.max(1,Number(localPrice(r))||1);
   const now=Date.now();
   const start=range==='YTD'?new Date(new Date(now).getFullYear(),0,1).getTime():now-config.duration;
-  let values;
-  if(range==='1D'){
-    const base=displayTrend(r);
-    values=base.length?resampleValues(base,config.points):Array(config.points).fill(current);
-    values[values.length-1]=Number(current.toFixed(2));
-  }else{
-    const rng=seededRandom(hashSeed(`${r.id}:${range}:talentx-chart-v2`));
-    const targetReturn=chartTargetReturn(r,range);
-    const startPrice=Math.max(1,current/(1+targetReturn));
-    const noise=[0];
-    for(let i=1;i<config.points;i++) noise.push(noise[i-1]+(rng()-.5)*2);
-    const totalNoise=noise[noise.length-1];
-    const normalizer=Math.sqrt(config.points);
-    values=noise.map((raw,i)=>{
-      const t=i/(config.points-1);
-      const baseline=Math.log(startPrice)+(Math.log(current)-Math.log(startPrice))*t;
-      const bridge=(raw-totalNoise*t)/normalizer;
-      return Number(Math.max(1,Math.exp(baseline+bridge*config.volatility)).toFixed(2));
-    });
-    values[0]=Number(startPrice.toFixed(2));
-    values[values.length-1]=Number(current.toFixed(2));
-  }
+  const base=displayTrend(r);
+  const values=base.length?resampleValues(base,config.points):Array(config.points).fill(current);
+  values[values.length-1]=Number(current.toFixed(2));
   return values.map((value,index)=>({
     value,
     time:start+((now-start)*(index/(values.length-1)))
@@ -267,8 +226,10 @@ function detailedTrendSvg(r,height=250){
   const up=a[a.length-1]>=a[0];
   const color=up?'#58ef78':'#ff5e79';
   const W=1000,H=340,padL=18,padR=108,padT=18,padB=38;
-  const min=Math.min(...a),max=Math.max(...a),range=Math.max(1,(max-min)*1.12);
-  const floor=min-(range*.04),ceil=floor+range;
+  const current=a[a.length-1],open=a[0],high=Math.max(...a),low=Math.min(...a);
+  const min=Math.min(...a),max=Math.max(...a),spread=max-min;
+  const range=spread<.005?Math.max(1,current*.02):spread*1.12;
+  const floor=spread<.005?min-range/2:min-(range*.04),ceil=floor+range;
   const usableW=W-padL-padR,usableH=H-padT-padB;
   const x=i=>padL+(a.length===1?usableW:(i/(a.length-1))*usableW);
   const y=v=>padT+((ceil-v)/(ceil-floor))*usableH;
@@ -276,7 +237,6 @@ function detailedTrendSvg(r,height=250){
   const linePoints=points.join(' ');
   const fillPoints=`${padL},${H-padB} ${linePoints} ${x(a.length-1)},${H-padB}`;
   const ticks=[0,.25,.5,.75,1].map(t=>Number((ceil-(range*t)).toFixed(2)));
-  const current=a[a.length-1],open=a[0],high=Math.max(...a),low=Math.min(...a);
   const highIndex=a.indexOf(high),lowIndex=a.indexOf(low);
   const currentY=y(current),currentX=x(a.length-1);
   const priceTagY=Math.max(padT+12,Math.min(H-padB-12,currentY));
@@ -308,7 +268,7 @@ function detailedTrendSvg(r,height=250){
     <div class="chart-hover-dot" aria-hidden="true"></div>
     <div class="chart-tooltip" role="status"><strong data-chart-price>${money(current)}</strong><span data-chart-time>${esc(formatHoverTime(series[series.length-1].time,chartRange))}</span></div>
   </div>
-  <div class="stock-chart-footer"><span class="${delta>=0?'positive':'negative'}">${delta>=0?'+':''}${pct.toFixed(2)}% simulated ${chartRange} trend</span><span>High ${money(high)}</span><span>Low ${money(low)}</span></div>`;
+  <div class="stock-chart-footer"><span class="${delta>=0?'positive':'negative'}">${delta>=0?'+':''}${pct.toFixed(2)}% event-driven ${chartRange} history</span><span>High ${money(high)}</span><span>Low ${money(low)}</span></div>`;
 }
 function beginChartPointer(event){
   event.preventDefault();
@@ -364,8 +324,8 @@ function trackChartPointer(event){
 function trendSvg(r,height=130,detailed=false){
   if(detailed) return detailedTrendSvg(r,height);
   const a=displayTrend(r); if(!a.length) return '';
-  const min=Math.min(...a),max=Math.max(...a),range=Math.max(1,max-min);
-  const pts=a.map((v,i)=>`${(i/(a.length-1))*100},${100-((v-min)/range)*86-7}`).join(' ');
+  const min=Math.min(...a),max=Math.max(...a),range=max-min;
+  const pts=a.map((v,i)=>`${(i/(a.length-1))*100},${range<.005?50:100-((v-min)/range)*86-7}`).join(' ');
   const up=a[a.length-1]>=a[0];
   return `<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Simulated price chart">
   <defs><linearGradient id="fill-${esc(r.id)}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${up?'#58ef78':'#ff5e79'}" stop-opacity=".25"/><stop offset="1" stop-color="${up?'#58ef78':'#ff5e79'}" stop-opacity="0"/></linearGradient></defs>
@@ -373,9 +333,10 @@ function trendSvg(r,height=130,detailed=false){
   <polyline points="${pts}" class="chart-line" style="stroke:${up?'#58ef78':'#ff5e79'}"></polyline></svg>`;
 }
 function miniCard(r){
+  const change=displayChange(r);
   return `<article class="card mini-card" onclick="openProfile('${esc(r.id)}')">
     <div class="person">${avatar(r)}<div class="person-copy"><strong>${esc(r.name)} <span class="ticker">${esc(r.ticker)}</span></strong><span>${esc(r.discipline)} · ${esc(r.leagueOrMedium)}</span></div></div>
-    <div class="mini-row"><strong>${money(localPrice(r))}</strong><span class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${Number(r.dailyChange).toFixed(2)}%</span></div>
+    <div class="mini-row"><strong>${money(localPrice(r))}</strong><span class="${change>=0?'positive':'negative'}">${change>=0?'+':''}${change.toFixed(2)}%</span></div>
   </article>`;
 }
 function currentCounts(){
@@ -383,8 +344,9 @@ function currentCounts(){
 }
 function dashboard(){
   const counts=currentCounts();
-  const movers=[...currentRecords].sort((a,b)=>b.dailyChange-a.dailyChange).slice(0,4);
+  const movers=[...currentRecords].filter(r=>Math.abs(displayChange(r))>=.005).sort((a,b)=>displayChange(b)-displayChange(a)).slice(0,4);
   const feature=[...currentRecords].sort((a,b)=>b.careerScore-a.careerScore)[0]||currentRecords[0];
+  const featureChange=displayChange(feature);
   const sports=Object.entries(currentRecords.filter(r=>r.primaryCategory==='Athlete').reduce((o,r)=>(o[r.discipline]=(o[r.discipline]||0)+1,o),{})).sort((a,b)=>b[1]-a[1]).slice(0,10);
   return `${note()}
   <div class="grid hero-grid">
@@ -399,11 +361,11 @@ function dashboard(){
       <div class="section-head"><h3>Featured current listing</h3><button class="link" onclick="openProfile('${esc(feature.id)}')">View →</button></div>
       <div class="person">${avatar(feature)}<div class="person-copy"><strong>${esc(feature.name)} <span class="ticker">${esc(feature.ticker)}</span></strong><span>${esc(feature.discipline)} · ${esc(feature.leagueOrMedium)}</span></div></div>
       <div class="price-big">${money(localPrice(feature))}</div>
-      <div class="${feature.dailyChange>=0?'positive':'negative'}">${feature.dailyChange>=0?'+':''}${feature.dailyChange.toFixed(2)}% simulated today</div>
+      <div class="${featureChange>=0?'positive':'negative'}">${Math.abs(featureChange)<.005?'0.00% · no new event':`${featureChange>=0?'+':''}${featureChange.toFixed(2)}% latest event move`}</div>
       <div class="chart">${trendSvg(feature)}</div>
     </section>
   </div>
-  <section class="section"><div class="section-head"><h2>Current market movers</h2><button class="link" onclick="setSegment('Current')">Open market →</button></div><div class="grid movers">${movers.map(miniCard).join('')}</div></section>
+  <section class="section"><div class="section-head"><h2>Latest event movers</h2><button class="link" onclick="setSegment('Current')">Open market →</button></div>${movers.length?`<div class="grid movers">${movers.map(miniCard).join('')}</div>`:`<div class="card empty">No price-changing events have been recorded in the latest refresh.</div>`}</section>
   <section class="section"><div class="section-head"><h2>Browse career categories</h2></div><div class="grid category-grid">
     ${['Athlete','Music','Actor','Creator'].map(c=>`<article class="card category-card" onclick="setCategory('${c}')"><span class="count">${counts[c]}</span><div class="icon">${ICONS[c]}</div><h3>${c==='Music'?'Music':c+'s'}</h3><p>${c==='Athlete'?'Filter by sport, league or tour, team, role, country, and career status.':c==='Music'?'Filter by genre, solo or group, region, activity, and career status.':c==='Actor'?'Filter by film, television, stage, voice, project activity, and status.':'Filter by platform, niche, country, activity, and status.'}</p></article>`).join('')}
   </div></section>
@@ -447,8 +409,8 @@ function filteredRecords(){
   const sorters={
     'score-desc':(a,b)=>b.careerScore-a.careerScore,
     'price-desc':(a,b)=>localPrice(b)-localPrice(a),
-    'change-desc':(a,b)=>b.dailyChange-a.dailyChange,
-    'change-asc':(a,b)=>a.dailyChange-b.dailyChange,
+    'change-desc':(a,b)=>displayChange(b)-displayChange(a),
+    'change-asc':(a,b)=>displayChange(a)-displayChange(b),
     'name':(a,b)=>a.name.localeCompare(b.name)
   };
   sorted.sort(sorters[filters.sort]||sorters['score-desc']);
@@ -463,7 +425,7 @@ function rowHtml(r){
     <td>${esc(r.primaryCategory)}</td><td>${esc(r.discipline)}</td><td>${esc(r.leagueOrMedium)}</td>
     <td><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span></td>
     <td><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)}</span></td>
-    <td>${money(localPrice(r))}</td><td class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}%</td>
+    <td>${money(localPrice(r))}</td><td class="${displayChange(r)>=0?'positive':'negative'}">${displayChange(r)>=0?'+':''}${displayChange(r).toFixed(2)}%</td>
     <td>${Number(r.careerScore).toFixed(1)}</td><td>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</td>
   </tr>`;
 }
@@ -505,14 +467,15 @@ function metricGrid(metrics){
 function profile(){
   const r=byId(selectedId); if(!r) return `<div class="card empty">Profile not found.</div>`;
   const shares=Number(state.holdings[r.id]||0);
+  const change=displayChange(r);
   const metrics=r.modelType.startsWith('Legacy')?r.legacyMetrics:r.activeMetrics;
   const sourceLink=r.sourceUrl?`<a href="${esc(r.sourceUrl)}" target="_blank" rel="noopener">Open source reference ↗</a>`:'';
   return `${note()}<div class="grid detail-grid"><section>
     <article class="card profile-card">
       <div class="profile-head"><div class="profile-id">${avatar(r,true)}<div><h1>${esc(r.name)} <span class="ticker">${esc(r.ticker)}</span></h1><p>${esc(r.role)} · ${esc(r.discipline)} · ${esc(r.leagueOrMedium)}${r.teamOrPlatform&&r.teamOrPlatform!=='—'?`<br>${esc(r.teamOrPlatform)}`:''}</p></div></div>
-      <div class="profile-price"><strong>${money(localPrice(r))}</strong><span class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}% simulated</span></div></div>
+      <div class="profile-price"><strong>${money(localPrice(r))}</strong><span class="${change>=0?'positive':'negative'}">${Math.abs(change)<.005?'0.00% · no new event':`${change>=0?'+':''}${change.toFixed(2)}% latest event move`}</span></div></div>
       <div class="badge-row"><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)} market</span><span class="status-badge">${esc(r.careerStatus)}</span><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span><span class="quality-badge">${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}% price confidence</span></div>
-      <div class="profile-chart detailed">${chartRangeTabs()}${trendSvg(r,260,true)}${chartStats(r)}<div class="chart-inspect-help">Move your cursor or drag across the line to inspect the simulated price at any point.</div></div>
+      <div class="profile-chart detailed">${chartRangeTabs()}${trendSvg(r,260,true)}${chartStats(r)}<div class="chart-inspect-help">Move your cursor or drag across the line to inspect recorded event-driven prices. A flat line means no price-changing event occurred.</div></div>
       <div class="tab-row">${['overview','pricing','data'].map(t=>`<button class="${profileTab===t?'active':''}" onclick="setProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>
       ${profileTab==='overview'?`<div class="grid info-grid"><div class="info-box"><small>Market segment</small><strong>${esc(r.marketSegment)}</strong></div><div class="info-box"><small>Career model</small><strong>${esc(r.modelType)}</strong></div><div class="info-box"><small>Career stage</small><strong>${esc(r.careerStage||'Stage under review')}</strong></div><div class="info-box"><small>Career score</small><strong>${Number(r.careerScore).toFixed(1)} / 100</strong></div><div class="info-box"><small>Country</small><strong>${esc(r.country)}</strong></div><div class="info-box"><small>Role</small><strong>${esc(r.role)}</strong></div><div class="info-box"><small>Virtual volume</small><strong>${compact(r.volume)}</strong></div></div><p class="page-sub" style="margin-top:18px">${esc(r.description)}</p>`:''}
       ${profileTab==='pricing'?`<div class="grid info-grid"><div class="info-box"><small>Fundamental value</small><strong>${money(r.fundamentalValue)}</strong></div><div class="info-box"><small>Pricing confidence</small><strong>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</strong></div><div class="info-box"><small>Pricing evidence</small><strong>${esc(r.pricingDataStatus||'Model status not listed')}</strong></div><div class="info-box"><small>Model version</small><strong>${esc(r.pricingModelVersion||'Legacy prototype')}</strong></div><div class="info-box"><small>Demand premium</small><strong>${r.demandPremiumPct>=0?'+':''}${Number(r.demandPremiumPct).toFixed(2)}%</strong></div><div class="info-box"><small>Momentum</small><strong>${r.momentumPct>=0?'+':''}${Number(r.momentumPct).toFixed(2)}%</strong></div></div>${r.rookiePricing?rookieProfilePricing(r):metricGrid(metrics)}${Array.isArray(r.pricingEvidence)&&r.pricingEvidence.length?`<div class="source-box"><small>Pricing evidence</small><strong>${r.pricingEvidence.length} cited source${r.pricingEvidence.length===1?'':'s'}</strong><small>${r.pricingEvidence.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">Open source</a>`).join(' · ')}</small></div>`:''}<div class="formula" style="margin-top:16px">${r.rookiePricing?'Rookie IPO price = draft capital + pre-professional performance + immediate opportunity + position value + development + availability + audience. Draft weight fades as professional evidence arrives.':r.marketSegment==='Legacy'?'Legacy price = weighted legacy score on a non-linear price curve + tightly controlled market activity':categoryFormula(r.primaryCategory)}</div>`:''}
@@ -569,7 +532,7 @@ function portfolio(){
 }
 function watchlist(){
   const records=state.watchlist.map(byId).filter(Boolean);
-  return `${note()}<div class="eyebrow">Saved talent</div><h1 class="page-title">Watchlist</h1><p class="page-sub">Track talent across Current, Legacy, and Under Review markets.</p>${records.length?`<div class="grid watch-grid">${records.map(r=>`<article class="card watch" onclick="openProfile('${esc(r.id)}')"><div class="person">${avatar(r)}<div class="person-copy"><strong>${esc(r.name)}</strong><span>${esc(r.marketSegment)} · ${esc(r.discipline)}</span></div></div><div class="mini-row"><strong>${money(localPrice(r))}</strong><span class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}%</span></div></article>`).join('')}</div>`:`<div class="card empty">Your watchlist is empty.</div>`}`;
+  return `${note()}<div class="eyebrow">Saved talent</div><h1 class="page-title">Watchlist</h1><p class="page-sub">Track talent across Current, Legacy, and Under Review markets.</p>${records.length?`<div class="grid watch-grid">${records.map(r=>`<article class="card watch" onclick="openProfile('${esc(r.id)}')"><div class="person">${avatar(r)}<div class="person-copy"><strong>${esc(r.name)}</strong><span>${esc(r.marketSegment)} · ${esc(r.discipline)}</span></div></div><div class="mini-row"><strong>${money(localPrice(r))}</strong><span class="${displayChange(r)>=0?'positive':'negative'}">${displayChange(r)>=0?'+':''}${displayChange(r).toFixed(2)}%</span></div></article>`).join('')}</div>`:`<div class="card empty">Your watchlist is empty.</div>`}`;
 }
 function clamp(n,min,max){return Math.max(min,Math.min(max,Number(n)||0))}
 function rookiePositionOptions(sport,selected=''){

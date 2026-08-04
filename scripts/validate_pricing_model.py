@@ -137,9 +137,11 @@ def main() -> int:
             continue
         expected_score = float(expected.get("careerScore", -999))
         expected_fundamental = float(expected.get("fundamentalValue", -999))
+        expected_market = float(expected.get("marketPrice", -999))
         try:
             actual_score = float(record.get("careerScore", -999))
             actual_fundamental = float(record.get("fundamentalValue", -999))
+            actual_market = float(record.get("marketPrice", -999))
         except (TypeError, ValueError):
             errors.append(f"Non-numeric price fields: {record.get('name')}")
             continue
@@ -147,6 +149,13 @@ def main() -> int:
             errors.append(f"Score mismatch: {record.get('name')} expected {expected_score}, found {actual_score}")
         if abs(actual_fundamental - expected_fundamental) > TOLERANCE:
             errors.append(f"Fundamental mismatch: {record.get('name')} expected {expected_fundamental}, found {actual_fundamental}")
+        if abs(actual_market - expected_market) > TOLERANCE:
+            errors.append(f"Market-price mismatch: {record.get('name')} expected {expected_market}, found {actual_market}")
+        if abs(float(record.get("dailyChange") or 0)) > TOLERANCE:
+            errors.append(f"Full build manufactured a price change for {record.get('name')}")
+        trend = [float(value) for value in record.get("trend", []) if isinstance(value, (int, float))]
+        if not trend or any(abs(value - actual_market) > TOLERANCE for value in trend):
+            errors.append(f"Full build manufactured chart movement for {record.get('name')}")
         status = str(record.get("pricingDataStatus", ""))
         if status.startswith("Provisional") and not isinstance(record.get("rookiePricing"), dict):
             if actual_fundamental > 62.01:

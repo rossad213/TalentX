@@ -551,10 +551,13 @@ def cap_hourly_market_move(old_record: dict[str, Any], new_record: dict[str, Any
     result["marketPrice"] = new_price
     result["dailyChange"] = change_pct
     result["hourlyChangePct"] = change_pct
-    result["lastPriceEventAt"] = refreshed_at
-    result["lastPriceEvent"] = "Recent game/statistics refresh"
     prior_trend = [float(value) for value in old_record.get("trend", []) if isinstance(value, (int, float))]
-    result["trend"] = [round(value, 2) for value in prior_trend[-17:]] + [new_price]
+    if abs(change_pct) >= 0.01:
+        result["lastPriceEventAt"] = refreshed_at
+        result["lastPriceEvent"] = "Recent game/statistics refresh"
+        result["trend"] = [round(value, 2) for value in prior_trend[-17:]] + [new_price]
+    else:
+        result["trend"] = [round(value, 2) for value in prior_trend] or [new_price] * 18
     return result, change_pct
 
 
@@ -633,7 +636,14 @@ def main() -> int:
 
     cohorts, leagues = stored_signal_pools(records)
     overrides = load_overrides(PRICING_OVERRIDES)
-    updated_records = list(records)
+    # A displayed change describes this refresh, not a permanent random drift.
+    # Untouched records keep their price and history but return to a 0.00% move.
+    updated_records = []
+    for record in records:
+        retained = dict(record)
+        retained["dailyChange"] = 0.0
+        retained["hourlyChangePct"] = 0.0
+        updated_records.append(retained)
     results_by_index: dict[int, dict[str, Any]] = {}
 
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
@@ -664,7 +674,7 @@ def main() -> int:
         if not item.get("ok"):
             failure_reason = str(item.get("reason") or "unknown")
             failures[failure_reason] += 1
-            retained = dict(old_record)
+            retained = dict(updated_records[index])
             retained["hourlyEvidenceCheckedAt"] = refreshed_at
             retained["hourlyEvidenceWarning"] = failure_reason
             updated_records[index] = retained
@@ -725,7 +735,7 @@ def main() -> int:
     CATALOG_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     hourly_manifest = {
-        "version": "1.1-hourly-rookie-transition",
+        "version": "1.2-event-driven-hourly-pricing",
         "generatedAt": refreshed_at,
         "weeklyBaselineRunId": str(args.baseline_run_id or ""),
         "elapsedSeconds": round(time.time() - started, 1),
