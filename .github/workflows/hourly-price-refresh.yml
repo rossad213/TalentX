@@ -6,8 +6,10 @@ on:
     paths:
       - ".github/workflows/hourly-price-refresh.yml"
       - "scripts/hourly_price_refresh.py"
+      - "scripts/event_pricing_policy.py"
       - "scripts/append_price_history.py"
       - "scripts/merge_hourly_market_state.py"
+      - "tests/test_event_pricing_policy.py"
       - "index.html"
       - "app.js"
       - "chart-history.js"
@@ -110,8 +112,8 @@ jobs:
 
           echo "WEEKLY_BASELINE_RUN_ID=$weekly_run_id" >> "$GITHUB_ENV"
 
-      - name: Validate game-level pricing logic
-        run: python -m unittest tests/test_hourly_price_refresh.py -v
+      - name: Validate pricing logic
+        run: python -m unittest tests/test_hourly_price_refresh.py tests/test_event_pricing_policy.py -v
 
       - name: Refresh completed-game prices
         run: >-
@@ -122,6 +124,9 @@ jobs:
           --max-athletes 1800
           --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
+
+      - name: Apply explainable pricing policy
+        run: python scripts/event_pricing_policy.py --catalog data/current_catalog.json
 
       - name: Append dated price history
         run: python scripts/append_price_history.py --catalog data/current_catalog.json
