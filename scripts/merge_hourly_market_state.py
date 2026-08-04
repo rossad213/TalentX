@@ -12,6 +12,7 @@ MARKET_STATE_FIELDS = (
     "previousMarketPrice",
     "modelTargetPrice",
     "trend",
+    "priceHistory",
     "lastPriceRefreshAt",
     "lastPriceEventAt",
     "lastPriceEvent",
@@ -36,7 +37,7 @@ def merge_market_state(
     prior_by_id = {
         str(record.get("id")): record
         for record in prior_hourly
-        if record.get("id") and record.get("lastPriceEventId")
+        if record.get("id") and (record.get("lastPriceEventId") or record.get("priceHistory"))
     }
     merged: list[dict[str, Any]] = []
     carried = 0
