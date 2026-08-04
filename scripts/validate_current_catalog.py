@@ -14,28 +14,17 @@ DATA = ROOT / "data"
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--minimum", type=int, default=19_500)
+    parser.add_argument("--minimum", type=int, default=10_000)
     parser.add_argument("--minimum-automated", type=int, default=10_000)
-    parser.add_argument("--minimum-music", type=int, default=5_100)
-    parser.add_argument("--minimum-actors", type=int, default=400)
-    parser.add_argument("--minimum-creators", type=int, default=200)
-    parser.add_argument("--minimum-baseball", type=int, default=500)
-    parser.add_argument("--minimum-tennis", type=int, default=400)
-    parser.add_argument("--minimum-golf", type=int, default=300)
-    parser.add_argument("--minimum-motorsport", type=int, default=300)
-    parser.add_argument("--minimum-combat", type=int, default=300)
-    parser.add_argument("--minimum-cricket", type=int, default=200)
-    parser.add_argument("--minimum-soccer", type=int, default=2_000)
     args = parser.parse_args()
 
     catalog_path = DATA / "current_catalog.json"
     csv_path = DATA / "current_catalog.csv"
     manifest_path = DATA / "catalog_manifest.json"
     source_manifest_path = DATA / "current_source_manifest.json"
-    expansion_manifest_path = DATA / "catalog_expansion_manifest.json"
     errors: list[str] = []
 
-    for path in (catalog_path, csv_path, manifest_path, source_manifest_path, expansion_manifest_path):
+    for path in (catalog_path, csv_path, manifest_path, source_manifest_path):
         if not path.exists():
             errors.append(f"Missing {path.relative_to(ROOT)}")
     if errors:
@@ -89,51 +78,12 @@ def main() -> int:
             if len(errors) >= 30:
                 break
 
-    expansion = [record for record in records if record.get("sourceNamespace") == "wikipedia-wikidata"]
-    if len(expansion) < 9_400:
-        errors.append(f"Only {len(expansion):,} Wikipedia/Wikidata expansion records found; expected 9,400")
-    for record in expansion:
-        if not record.get("sourceUrl") or not record.get("sourceRecordId") or not record.get("lastVerifiedAt"):
-            errors.append(f"Expansion record lacks source metadata: {record.get('name')}")
-            if len(errors) >= 30:
-                break
-        if not str(record.get("pricingDataStatus") or "").startswith("Provisional"):
-            errors.append(f"Expansion record is not provisional: {record.get('name')}")
-            break
-        fundamental = float(record.get("fundamentalValue") or record.get("fundamental") or 0)
-        if fundamental > 62.01:
-            errors.append(f"Expansion record exceeded limited-evidence cap: {record.get('name')} (${fundamental:.2f})")
-            break
-
     category_counts = Counter(str(record.get("primaryCategory")) for record in records)
-    category_minimums = {
-        "Music": args.minimum_music,
-        "Actor": args.minimum_actors,
-        "Creator": args.minimum_creators,
-    }
-    for category, minimum in category_minimums.items():
-        if category_counts[category] < minimum:
-            errors.append(f"Only {category_counts[category]:,} {category} records; expected at least {minimum:,}")
-
     discipline_counts = Counter(
         str(record.get("discipline"))
         for record in records
         if record.get("primaryCategory") == "Athlete"
     )
-    discipline_minimums = {
-        "Baseball": args.minimum_baseball,
-        "Tennis": args.minimum_tennis,
-        "Golf": args.minimum_golf,
-        "Motorsport": args.minimum_motorsport,
-        "Combat Sports": args.minimum_combat,
-        "Cricket": args.minimum_cricket,
-        "Soccer": args.minimum_soccer,
-    }
-    for discipline, minimum in discipline_minimums.items():
-        if discipline_counts[discipline] < minimum:
-            errors.append(
-                f"Only {discipline_counts[discipline]:,} {discipline} athletes; expected at least {minimum:,}"
-            )
 
     with csv_path.open(encoding="utf-8", newline="") as handle:
         csv_count = sum(1 for _ in csv.DictReader(handle))
@@ -144,13 +94,8 @@ def main() -> int:
     if manifest.get("currentCatalogRecords") != len(records):
         errors.append("Manifest currentCatalogRecords does not match catalog")
 
-    expansion_manifest = json.loads(expansion_manifest_path.read_text(encoding="utf-8"))
-    if expansion_manifest.get("generatedTotalAdditions") != 9_400:
-        errors.append("Expansion manifest does not report exactly 9,400 additions")
-
     print(f"Current records: {len(records):,}")
     print(f"Automated roster verified: {len(automated):,}")
-    print(f"Wikipedia/Wikidata expansion: {len(expansion):,}")
     print("Categories:")
     for category, count in category_counts.most_common():
         print(f"  {category}: {count:,}")

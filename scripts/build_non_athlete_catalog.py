@@ -246,24 +246,20 @@ def update_taxonomy(path: Path, roster: dict[str, Any]) -> None:
     path.write_text(json.dumps(taxonomy, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def validate(records: list[dict[str, Any]], target: int, roster_version: str) -> None:
+def validate(records: list[dict[str, Any]], target: int) -> None:
     ids = [str(record.get("id") or "") for record in records]
     tickers = [str(record.get("ticker") or "") for record in records]
     if len(ids) != len(set(ids)):
         raise ValueError("Duplicate profile IDs after non-athlete build")
     if len(tickers) != len(set(tickers)):
         raise ValueError("Duplicate tickers after non-athlete build")
-    curated = [
-        record for record in records
-        if record.get("nonAthleteRosterVersion") == roster_version
-    ]
-    counts = Counter(str(record.get("primaryCategory")) for record in curated)
+    counts = Counter(str(record.get("primaryCategory")) for record in records)
     for category in SUPPORTED:
         if counts[category] != target:
-            raise ValueError(f"Expected exactly {target} curated {category} records, found {counts[category]}")
+            raise ValueError(f"Expected exactly {target} {category} records, found {counts[category]}")
         ranks = sorted(
             int(record.get("benchmarkRank"))
-            for record in curated
+            for record in records
             if record.get("primaryCategory") == category
         )
         if ranks != list(range(1, target + 1)):
@@ -295,11 +291,6 @@ def main() -> int:
         for record in seed
     }
     athletes = [record for record in seed if record.get("primaryCategory") == "Athlete"]
-    expansion_non_athletes = [
-        record for record in seed
-        if record.get("primaryCategory") != "Athlete"
-        and record.get("sourceNamespace") == "wikipedia-wikidata"
-    ]
     # Reserve every existing identity before generating additions. Otherwise a
     # newly inserted higher-ranked name could claim a ticker that belongs to an
     # existing record processed later in the curated order.
@@ -333,7 +324,7 @@ def main() -> int:
                 roster_version,
             ))
 
-    combined = athletes + expansion_non_athletes + non_athletes
+    combined = athletes + non_athletes
     overrides = load_overrides(DEFAULT_OVERRIDES)
     combined = apply_pricing_to_records(
         combined,
@@ -341,7 +332,7 @@ def main() -> int:
         benchmark_records=combined,
         calibration_reference=combined,
     )
-    validate(combined, target, roster_version)
+    validate(combined, target)
 
     if args.dry_run:
         counts = Counter(str(record.get("primaryCategory")) for record in combined)
