@@ -2,8 +2,8 @@
  * TalentX historical chart reconstruction
  *
  * Charts remain flat between supported events. This module prefers explicit
- * dated price history, then dated event history, and finally reconstructs the
- * catalog's saved trend across the prior six months. It never adds randomness.
+ * dated price history, then dated event history, and supplements sparse dated
+ * data with the catalog's saved six-month trend. It never adds randomness.
  */
 (function(){
   const DAY=24*60*60*1000;
@@ -90,6 +90,22 @@
     }));
   }
 
+  function txMergePoints(reconstructed,dated){
+    if(!reconstructed.length) return dated;
+    if(!dated.length) return reconstructed;
+    const merged=[...reconstructed,...dated].sort((a,b)=>a.time-b.time);
+    const output=[];
+    for(const point of merged){
+      const prior=output[output.length-1];
+      if(prior&&Math.abs(prior.time-point.time)<1000){
+        output[output.length-1]=point;
+      }else{
+        output.push(point);
+      }
+    }
+    return output;
+  }
+
   function txStepSeries(points,start,now,count,current){
     const ordered=points.filter(point=>point.time<=now).sort((a,b)=>a.time-b.time);
     let opening=current;
@@ -116,8 +132,9 @@
     const now=Date.now();
     const start=txRangeStart(range,now);
     const explicit=txExplicitPricePoints(record);
-    const events=explicit.length?explicit:txEventPoints(record,current);
-    const points=events.length?events:txReconstructedTrendPoints(record,current,now);
+    const dated=explicit.length?explicit:txEventPoints(record,current);
+    const reconstructed=txReconstructedTrendPoints(record,current,now);
+    const points=txMergePoints(reconstructed,dated);
     return txStepSeries(points,start,now,config.points,current);
   };
 })();
