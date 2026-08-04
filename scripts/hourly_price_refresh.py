@@ -67,6 +67,7 @@ SIGNAL_KEYS = (
 )
 
 PROCESSED_EVENT_RETENTION_DAYS = 30
+HOURLY_MODEL_VERSION = "1.4-production-efficiency-game-pricing"
 COMPLETED_EVENT_STATES = {
     "post", "final", "completed", "complete", "off", "closed", "official",
 }
@@ -116,6 +117,8 @@ def completed_event(state: str) -> bool:
 
 
 def prior_processed_events(manifest: dict[str, Any], now: datetime) -> dict[str, dict[str, Any]]:
+    if manifest.get("version") != HOURLY_MODEL_VERSION:
+        return {}
     cutoff = now - timedelta(days=PROCESSED_EVENT_RETENTION_DAYS)
     output: dict[str, dict[str, Any]] = {}
     items = manifest.get("processedEvents") if isinstance(manifest.get("processedEvents"), list) else []
@@ -133,6 +136,8 @@ def prior_processed_events(manifest: dict[str, Any], now: datetime) -> dict[str,
 
 
 def prior_processed_player_events(manifest: dict[str, Any]) -> set[str]:
+    if manifest.get("version") != HOURLY_MODEL_VERSION:
+        return set()
     items = manifest.get("processedPlayerEvents") if isinstance(manifest.get("processedPlayerEvents"), list) else []
     return {
         str(item.get("key") if isinstance(item, dict) else item)
@@ -186,6 +191,8 @@ def normalized_box_stats(labels: Iterable[Any], values: Iterable[Any], section: 
     for label, raw_value in zip(labels, values):
         label_text = str(label or "").strip()
         key = norm_key(label_text)
+        if label_text in {"+/-", "+−"}:
+            key = "plusminus"
         pair = made_attempted(raw_value)
         if pair and key in {"fg", "fieldgoals", "3pt", "3p", "threepointfieldgoals", "ft", "freethrows"}:
             made, attempted = pair
@@ -198,6 +205,8 @@ def normalized_box_stats(labels: Iterable[Any], values: Iterable[Any], section: 
         if parsed is None:
             continue
         mapped = basketball.get(key) or baseball.get(key) or soccer.get(key)
+        if key == "plusminus":
+            mapped = "plusMinus"
         if group:
             if "pass" in group:
                 mapped = {
@@ -210,7 +219,8 @@ def normalized_box_stats(labels: Iterable[Any], values: Iterable[Any], section: 
                 mapped = {"rec": "receptions", "yds": "receivingYards", "td": "receivingTouchdowns", "avg": "yardsPerReception"}.get(key, mapped)
             elif "defen" in group:
                 mapped = {"tot": "totalTackles", "tkl": "totalTackles", "sack": "sacks", "int": "interceptions", "pd": "passesDefended", "ff": "forcedFumbles"}.get(key, mapped)
-        output[mapped or key] = parsed
+        if mapped or key:
+            output[mapped or key] = parsed
     return output
 
 
@@ -725,17 +735,30 @@ def game_event_move(
     max_game_move_pct: float,
 ) -> tuple[float, dict[str, Any]]:
     stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
-    actual_signal = float(signal_bundle(record, stats, {}, 0).get("recentProduction") or 0)
-    expected_signal = expected_game_signal(record, item)
-    if expected_signal <= 0:
+    normalized_stats: dict[str, float] = {}
+    for key, value in stats.items():
+        parsed = numeric_box_value(value)
+        if parsed is not None:
+            normalized_stats[norm_key(key)] = parsed
+    actual_signals = signal_bundle(record, normalized_stats, {}, 0)
+    actual_production = float(actual_signals.get("recentProduction") or 0)
+    expected_production = expected_game_signal(record, item)
+    expected_signals = item.get("signals") if isinstance(item.get("signals"), dict) else {}
+    actual_efficiency = float(actual_signals.get("efficiency") or 0)
+    expected_efficiency = float(expected_signals.get("efficiency") or 0)
+    if expected_production <= 0:
         return 0.0, {
             "comparable": False,
             "reason": "No season baseline was available for this box score",
-            "actualPerformanceScore": round(actual_signal, 3),
+            "actualPerformanceScore": round(actual_production, 3),
             "expectedPerformanceScore": 0.0,
         }
 
-    performance_delta = (actual_signal / expected_signal - 1.0) * 100.0
+    production_delta = (actual_production / expected_production - 1.0) * 100.0
+    efficiency_delta: float | None = None
+    if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
+        efficiency_delta = clamp((actual_efficiency / expected_efficiency - 1.0) * 100.0, -100.0, 100.0)
+    performance_delta = production_delta if efficiency_delta is None else production_delta * 0.80 + efficiency_delta * 0.20
     performance_move = clamp(performance_delta / 100.0 * 1.75, -2.25, 2.25)
     outcome_move = 0.15 if event.get("teamWon") is True else -0.10 if event.get("teamWon") is False else 0.0
     move_pct = clamp(performance_move + outcome_move, -max_game_move_pct, max_game_move_pct)
@@ -744,9 +767,11 @@ def game_event_move(
         move_pct = 0.05 if direction > 0 else -0.05
     return round(move_pct, 3), {
         "comparable": True,
-        "actualPerformanceScore": round(actual_signal, 3),
-        "expectedPerformanceScore": round(expected_signal, 3),
+        "actualPerformanceScore": round(actual_production, 3),
+        "expectedPerformanceScore": round(expected_production, 3),
         "performanceDeltaPct": round(performance_delta, 2),
+        "productionDeltaPct": round(production_delta, 2),
+        "efficiencyDeltaPct": round(efficiency_delta, 2) if efficiency_delta is not None else None,
         "outcomeMovePct": outcome_move,
     }
 
@@ -1046,7 +1071,7 @@ def main() -> int:
     CATALOG_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     hourly_manifest = {
-        "version": "1.3-game-level-event-pricing",
+        "version": HOURLY_MODEL_VERSION,
         "generatedAt": refreshed_at,
         "weeklyBaselineRunId": str(args.baseline_run_id or ""),
         "elapsedSeconds": round(time.time() - started, 1),

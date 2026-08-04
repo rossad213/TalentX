@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from hourly_price_refresh import (  # noqa: E402
+    HOURLY_MODEL_VERSION,
     apply_game_market_moves,
     discover_recent_events,
     event_in_window,
@@ -33,7 +34,7 @@ class HourlyGamePricingTests(unittest.TestCase):
             "trend": [154.99] * 18,
         }
         self.evidence = {
-            "signals": {"recentProduction": 120.27},
+            "signals": {"recentProduction": 120.27, "efficiency": 74.925},
             "recent": {
                 "avgPoints": 24.0,
                 "avgRebounds": 9.4,
@@ -51,7 +52,16 @@ class HourlyGamePricingTests(unittest.TestCase):
             "name": "Las Vegas Aces at Atlanta Dream",
             "startedAt": "2026-08-03T23:00:00Z",
             "teamWon": True,
-            "stats": {"points": 23, "rebounds": 6, "assists": 4},
+            "stats": {
+                "points": 23,
+                "rebounds": 6,
+                "assists": 4,
+                "blocks": 3,
+                "turnovers": 1,
+                "fieldGoalPct": 72.727,
+                "threePointFieldGoalPct": 100,
+                "freeThrowPct": 100,
+            },
         }
 
     def test_espn_basketball_box_score_is_normalized(self) -> None:
@@ -85,8 +95,9 @@ class HourlyGamePricingTests(unittest.TestCase):
     def test_aja_game_moves_relative_to_her_own_baseline(self) -> None:
         move, details = game_event_move(self.aja, self.evidence, self.event, 2.5)
         self.assertTrue(details["comparable"])
-        self.assertLess(details["performanceDeltaPct"], 0)
-        self.assertNotEqual(move, 0)
+        self.assertLess(details["productionDeltaPct"], 0)
+        self.assertGreater(details["efficiencyDeltaPct"], 0)
+        self.assertGreater(move, 0)
         self.assertLessEqual(abs(move), 2.5)
 
     def test_completed_game_creates_one_recorded_price_point(self) -> None:
@@ -130,6 +141,7 @@ class HourlyGamePricingTests(unittest.TestCase):
         now = datetime(2026, 8, 4, 20, tzinfo=timezone.utc)
         recent_key = event_key("ESPN", "401857111")
         manifest = {
+            "version": HOURLY_MODEL_VERSION,
             "processedEvents": [
                 {"key": recent_key, "startedAt": "2026-08-03T23:00:00Z"},
                 {"key": "espn:old", "startedAt": "2026-06-01T00:00:00Z"},
@@ -138,6 +150,7 @@ class HourlyGamePricingTests(unittest.TestCase):
         retained = prior_processed_events(manifest, now)
         self.assertIn(recent_key, retained)
         self.assertNotIn("espn:old", retained)
+        self.assertEqual(prior_processed_events({**manifest, "version": "1.3-game-level-event-pricing"}, now), {})
 
     def test_discovery_skips_a_game_after_its_event_id_is_processed(self) -> None:
         scoreboard = {

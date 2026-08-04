@@ -87,7 +87,7 @@ After a full evidence build, every listing begins with a 0.00% change and a flat
 ### Completed-game movement
 
 - Each completed game is identified by its stable provider and event ID and is processed once.
-- The player's individual box-score production is compared with that player's saved season baseline.
+- The player's individual box-score production and efficiency are compared with that player's saved season baseline (80% production, 20% efficiency when comparable efficiency data is present).
 - Season and career evidence continues to set fundamental value and supplies a small anchor toward the model target.
 - A normal above- or below-expectation game creates a modest move; outcome adds only a small adjustment.
 - A single game is capped at 2.5%, preventing one result from overwhelming established value.
