@@ -5,7 +5,13 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/hourly-price-refresh.yml"
+      - "scripts/hourly_price_refresh.py"
+      - "scripts/append_price_history.py"
+      - "scripts/merge_hourly_market_state.py"
+      - "index.html"
+      - "app.js"
       - "chart-history.js"
+      - "styles.css"
   workflow_run:
     workflows: ["Build current catalog and deploy TalentX"]
     types: [completed]
@@ -116,6 +122,9 @@ jobs:
           --max-athletes 1800
           --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
+
+      - name: Append dated price history
+        run: python scripts/append_price_history.py --catalog data/current_catalog.json
 
       - name: Validate current catalog
         run: python scripts/validate_current_catalog.py --minimum 10000
