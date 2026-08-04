@@ -3,10 +3,12 @@
 
 The roster builder proves that a person is currently attached to a roster. This
 script adds a second layer: recent statistics, career statistics, awards counts,
-age/experience, and role-aware cohort ranking. It then recalculates every current
-price through the existing TalentX active-career formula:
+age/experience, and role-aware cohort ranking. TalentX Pricing Model v4 then
+applies category-specific weights and cross-category calibration.
 
-35% performance + 25% achievements + 15% potential + 15% audience + 10% availability.
+For athletes, current performance is based on 70% recent production and 30%
+efficiency. Custom playing-time usage is no longer counted in performance or
+availability.
 
 Records without usable evidence stay conservative and explicitly provisional.
 """
@@ -30,7 +32,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from pricing_model import apply_pricing_to_records, clamp, load_overrides
+from pricing_model import CATEGORY_WEIGHTS, MODEL_VERSION, apply_pricing_to_records, clamp, load_overrides
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
@@ -40,13 +42,14 @@ CATALOG_MANIFEST = DATA / "catalog_manifest.json"
 PRICING_OVERRIDES = DATA / "pricing_overrides.json"
 DRAFT_METADATA_OVERRIDES = DATA / "draft_metadata_overrides.json"
 ENRICHMENT_MANIFEST = DATA / "pricing_enrichment_manifest.json"
+CURRENT_SEED = DATA / "current_seed.json"
 
 ESPN_OVERVIEW = "https://site.web.api.espn.com/apis/common/v3/sports/{sport}/{league}/athletes/{athlete_id}/overview"
 ESPN_ATHLETE_PROFILE = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/athletes/{athlete_id}"
 ESPN_CORE_ATHLETE = "https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/athletes/{athlete_id}?lang=en&region=us"
 ESPN_AWARDS = "https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/athletes/{athlete_id}/awards?limit=100"
 NHL_LANDING = "https://api-web.nhle.com/v1/player/{athlete_id}/landing"
-USER_AGENT = "TalentX-Pricing-Enricher/3.5 (+https://github.com/rossad213/TalentX)"
+USER_AGENT = "TalentX-Pricing-Enricher/4.0 (+https://github.com/rossad213/TalentX)"
 
 SPORT_PATH = {
     "American Football": "football",
@@ -607,12 +610,15 @@ def potential_prior(record: dict[str, Any], recent_pct: float) -> float:
         age_component = 58
 
     draft_bonus = 0.0
-    round_value = number(record.get("draftRound"))
-    pick_value = number(record.get("draftPick"))
-    if round_value is not None:
-        draft_bonus += max(0.0, 12 - (round_value - 1) * 2.2)
-    if pick_value is not None and pick_value <= 10:
-        draft_bonus += 5
+    professional_games = number(record.get("professionalGames")) or 0.0
+    pre_debut = professional_games <= 0 and (exp is None or exp <= 0)
+    if pre_debut:
+        round_value = number(record.get("draftRound"))
+        pick_value = number(record.get("draftPick"))
+        if round_value is not None:
+            draft_bonus += max(0.0, 12 - (round_value - 1) * 2.2)
+        if pick_value is not None and pick_value <= 10:
+            draft_bonus += 5
 
     return clamp(age_component * 0.70 + (28 + recent_pct * 68) * 0.30 + draft_bonus, 18, 97)
 
@@ -787,27 +793,30 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             pcts[key] = percentile(value, [peer["signals"].get(key, 0.0) for peer in peers])
 
         recent_pct = pcts["recentProduction"]
-        career_pct = max(pcts["careerProduction"], pcts["careerUsage"] * 0.82)
+        career_pct = pcts["careerProduction"]
         efficiency_pct = pcts["efficiency"]
         award_pct = pcts["awardPoints"]
 
+        # Playing time is not a performance proxy. Recent production and
+        # efficiency are the only active-performance inputs.
         performance = clamp(24 + 72 * (recent_pct * 0.70 + efficiency_pct * 0.30), 20, 98)
-        achievements = clamp(8 + 88 * (career_pct * 0.63 + award_pct * 0.27 + pcts["careerUsage"] * 0.10), 8, 99)
+        achievements = clamp(8 + 88 * (career_pct * 0.70 + award_pct * 0.30), 8, 99)
         potential = potential_prior(record, recent_pct)
 
         base_audience = number((record.get("activeMetrics") or {}).get("audience")) or 40.0
         news_boost = min(12.0, math.log1p(item.get("newsCount", 0)) * 4.0)
         audience = clamp(base_audience * 0.68 + recent_pct * 18 + award_pct * 10 + news_boost, 20, 97)
 
-        availability = 75 if record.get("careerStatus") == "Active" else 55
-
-        consistency = clamp(30 + career_pct * 35 + recent_pct * 25 + availability * 0.10, 28, 96)
+        # Until verified games-available data exists across every league,
+        # availability stays neutral rather than reusing minutes/starts.
+        availability = 75.0 if record.get("careerStatus") == "Active" else 55.0
+        consistency = clamp(24 + 72 * (career_pct * 0.65 + recent_pct * 0.35), 24, 97)
         completeness = sum(
             1
             for condition in (
                 bool(item.get("recent")),
                 bool(item.get("career")),
-                int(item.get("professionalGames") or 0) > 0,
+                number(record.get("professionalGames")) is not None,
                 signals.get("awardPoints", 0) > 0,
                 number(record.get("age")) is not None,
             )
@@ -844,11 +853,6 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "professionalGames": record.get("professionalGames", 0),
             "percentiles": {key: round(value, 4) for key, value in pcts.items()},
             "rawSignals": {key: round(value, 4) for key, value in signals.items()},
-            "valuationInputs": {
-                "performance": "70% recent-production percentile + 30% efficiency percentile",
-                "usageIncludedInPerformance": False,
-                "availability": "Neutral 75 active / 55 inactive pending normalized games-available evidence",
-            },
         }
         if item.get("errors"):
             record["pricingEvidenceWarnings"] = item["errors"]
@@ -920,7 +924,12 @@ def main() -> int:
 
     ranked = apply_ranked_metrics(ordered_results)
     overrides = load_overrides(PRICING_OVERRIDES)
-    repriced = apply_pricing_to_records(ranked, overrides)
+    benchmark_records: list[dict[str, Any]] = []
+    if CURRENT_SEED.exists():
+        loaded_seed = json.loads(CURRENT_SEED.read_text(encoding="utf-8"))
+        if isinstance(loaded_seed, list):
+            benchmark_records = loaded_seed
+    repriced = apply_pricing_to_records(ranked, overrides, benchmark_records=benchmark_records)
 
     enriched_count = sum(1 for record in repriced if str(record.get("pricingDataStatus", "")).startswith("Evidence enriched"))
     provisional_count = sum(1 for record in repriced if str(record.get("pricingDataStatus", "")).startswith("Provisional"))
@@ -946,7 +955,7 @@ def main() -> int:
         if record.get("pricingEnrichmentError")
     )
     manifest = {
-        "version": "3.5-production-first-athlete-inputs",
+        "version": MODEL_VERSION,
         "generatedAt": generated_at,
         "elapsedSeconds": round(time.time() - started, 1),
         "catalogRecords": len(repriced),
@@ -957,17 +966,14 @@ def main() -> int:
         "minimumRequired": args.minimum_enriched,
         "enrichedByLeague": dict(league_counts.most_common()),
         "topFailureReasons": dict(error_counts.most_common(12)),
-        "athleteFormula": {
-            "performance": 0.35,
-            "achievements": 0.25,
-            "potential": 0.15,
-            "audience": 0.15,
-            "availability": 0.10,
+        "categoryWeights": CATEGORY_WEIGHTS,
+        "athletePerformanceInputs": {
+            "recentProduction": 0.70,
+            "efficiency": 0.30,
+            "customUsage": 0.0,
         },
-        "performanceFormula": "70% recent-production percentile + 30% efficiency percentile",
-        "usageIncludedInPerformance": False,
-        "availabilityRule": "Neutral 75 active / 55 inactive pending normalized games-available evidence",
-        "method": "Recent and career statistics plus awards are converted to position-and-league cohort percentiles before the production-first athlete formula is applied.",
+        "athleteAvailabilityRule": "Neutral 75 active / 55 inactive until verified games-available coverage is normalized.",
+        "method": "Category-specific absolute scoring is blended 70/30 with profession peer calibration on one universal career-value scale.",
     }
     ENRICHMENT_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -977,12 +983,12 @@ def main() -> int:
             existing = {}
         existing.update(
             {
-                "version": "3.5-current-10000-production-first-athlete",
+                "version": MODEL_VERSION,
                 "pricingEvidenceGeneratedAt": generated_at,
                 "pricingEnrichedRecords": enriched_count,
                 "pricingProvisionalRecords": provisional_count,
                 "rookieTransitionRecords": rookie_count,
-                "pricingInputMethod": "Production-first position-and-league normalized statistics and awards plus draft-based rookie IPO transitions",
+                "pricingInputMethod": "Category-specific evidence scoring, 70/30 universal calibration, and draft-based rookie IPO transitions",
                 "pricingEnrichmentManifest": "data/pricing_enrichment_manifest.json",
             }
         )

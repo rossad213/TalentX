@@ -7,11 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pricing_model import MODEL_VERSION, apply_pricing_to_records, load_overrides
+from pricing_model import CATEGORY_WEIGHTS, MODEL_VERSION, apply_pricing_to_records, load_overrides
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 OVERRIDES = DATA / "pricing_overrides.json"
+CURRENT_SEED = DATA / "current_seed.json"
 
 
 def read_array(path: Path) -> list[dict[str, Any]]:
@@ -46,13 +47,21 @@ def write_current_csv(records: list[dict[str, Any]]) -> None:
 
 def main() -> int:
     overrides = load_overrides(OVERRIDES)
+    benchmark_records = read_array(CURRENT_SEED)
+    calibration_reference = read_array(DATA / "current_catalog.json") or benchmark_records
     totals: dict[str, int] = {}
     for filename in ("current_seed.json", "current_catalog.json", "legacy_catalog_v2.json"):
         path = DATA / filename
         if not path.exists():
             continue
         records = read_array(path)
-        repriced = apply_pricing_to_records(records, overrides)
+        reference = calibration_reference if filename != "legacy_catalog_v2.json" else records
+        repriced = apply_pricing_to_records(
+            records,
+            overrides,
+            benchmark_records=benchmark_records,
+            calibration_reference=reference,
+        )
         write_array(path, repriced)
         totals[filename] = len(repriced)
         if filename == "current_catalog.json":
@@ -62,7 +71,9 @@ def main() -> int:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest.update({
         "pricingModelVersion": MODEL_VERSION,
-        "pricingRule": "High valuations require curated or verified evidence; roster-only records are conservative and capped.",
+        "pricingRule": "Category-specific fundamentals are calibrated 70/30 with profession peers; evidence quality limits unsupported valuations.",
+        "categoryWeights": CATEGORY_WEIGHTS,
+        "crossCategoryCalibration": {"absolute": 0.70, "professionPeer": 0.30},
         "pricingCatalogsProcessed": totals,
     })
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

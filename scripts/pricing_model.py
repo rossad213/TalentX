@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Evidence-weighted TalentX pricing model.
+"""TalentX Pricing Model v4.
 
-Active careers use verified performance, achievements, potential, audience and
-availability evidence. Drafted rookies use a separate IPO anchor based primarily
-on draft capital, then transition automatically toward the active-career model as
-professional games accumulate.
+Each profession uses a category-specific fundamental model, then scores are
+calibrated onto one universal 0-100 career-value scale. Evidence quality limits
+unsupported valuations, while drafted rookies retain a separate IPO anchor that
+transitions toward the professional model as verified games accumulate.
 """
 from __future__ import annotations
 
@@ -18,20 +18,49 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ACTIVE_WEIGHTS = {
-    "performance": 0.30,
-    "achievements": 0.25,
-    "potential": 0.20,
-    "audience": 0.15,
-    "availability": 0.10,
+CATEGORY_WEIGHTS: dict[str, dict[str, float]] = {
+    # Current athletic value emphasizes verified production and durable career
+    # strength. Audience is handled as a small market-demand adjustment rather
+    # than being allowed to overpower on-field evidence.
+    "Athlete": {
+        "performance": 0.35,
+        "achievements": 0.25,
+        "consistency": 0.15,
+        "potential": 0.15,
+        "availability": 0.10,
+    },
+    # Existing generic fields are interpreted by profession until dedicated
+    # ingestion pipelines provide named music/film/creator metrics.
+    "Music": {
+        "performance": 0.25,   # current commercial performance
+        "consistency": 0.25,   # catalog strength and longevity
+        "achievements": 0.20,  # awards and documented milestones
+        "audience": 0.20,      # global demand
+        "potential": 0.10,     # current momentum / release pipeline
+    },
+    "Actor": {
+        "performance": 0.25,   # recent project performance
+        "consistency": 0.25,   # career body of work
+        "achievements": 0.20,  # awards and critical recognition
+        "audience": 0.20,      # bankability and audience demand
+        "potential": 0.10,     # upcoming project pipeline
+    },
+    "Creator": {
+        "audience": 0.25,      # reach
+        "performance": 0.25,   # engagement quality
+        "potential": 0.20,     # growth
+        "consistency": 0.15,   # retention and publishing consistency
+        "achievements": 0.15,  # brand / monetization strength
+    },
 }
-ATHLETE_ACTIVE_WEIGHTS = {
-    "performance": 0.35,
-    "achievements": 0.25,
-    "potential": 0.15,
-    "audience": 0.15,
-    "availability": 0.10,
-}
+# Backward-compatible export used by existing scripts and reports.
+ACTIVE_WEIGHTS = CATEGORY_WEIGHTS["Athlete"]
+
+ABSOLUTE_SCORE_WEIGHT = 0.70
+PEER_SCORE_WEIGHT = 0.30
+CURATED_BENCHMARK_WEIGHT = 1.00
+MARKET_ADJUSTMENT_CAP_PCT = 6.0
+
 LEGACY_WEIGHTS = {
     "legacy": 0.35,
     "audience": 0.25,
@@ -48,7 +77,7 @@ ROOKIE_WEIGHTS = {
     "availability": 0.07,
     "audience": 0.05,
 }
-MODEL_VERSION = "3.5-production-first-athlete"
+MODEL_VERSION = "4.0-cross-category-calibration"
 
 ROOKIE_SPORT_CONFIG: dict[str, dict[str, Any]] = {
     "NFL": {
@@ -125,15 +154,201 @@ def deterministic_rng(record: dict[str, Any]) -> random.Random:
     return random.Random(int.from_bytes(digest[:8], "big"))
 
 
-def active_weights_for(record: dict[str, Any]) -> dict[str, float]:
-    if record.get("primaryCategory") == "Athlete":
-        return ATHLETE_ACTIVE_WEIGHTS
-    return ACTIVE_WEIGHTS
+def category_name(record: dict[str, Any] | None = None, category: str | None = None) -> str:
+    value = str(category or (record or {}).get("primaryCategory") or "Athlete")
+    return value if value in CATEGORY_WEIGHTS else "Athlete"
 
 
-def active_score(metrics: dict[str, Any], weights: dict[str, float] | None = None) -> float:
-    selected = weights or ACTIVE_WEIGHTS
-    return round(sum(clamp(metrics.get(key), 0, 100) * weight for key, weight in selected.items()), 1)
+def category_weights(record: dict[str, Any] | None = None, category: str | None = None) -> dict[str, float]:
+    return CATEGORY_WEIGHTS[category_name(record, category)]
+
+
+def active_score(
+    metrics: dict[str, Any],
+    category: str = "Athlete",
+) -> float:
+    weights = category_weights(category=category)
+    return round(sum(clamp(metrics.get(key), 0, 100) * weight for key, weight in weights.items()), 1)
+
+
+def evidence_tier(record: dict[str, Any]) -> str:
+    status = str(record.get("pricingDataStatus") or "")
+    confidence = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.5)), 0, 1)
+    evidence = record.get("pricingEvidence")
+    if record.get("marketSegment") == "Under Review":
+        return "under_review"
+    if status.startswith("Provisional"):
+        return "limited"
+    if status.startswith("Rookie"):
+        return "rookie"
+    if status.startswith("Verified career-evidence override"):
+        return "verified"
+    if status.startswith("Evidence enriched") or (isinstance(evidence, list) and evidence and confidence >= 0.82):
+        return "strong"
+    if status.startswith("Curated prototype") or status.startswith("Curated benchmark"):
+        return "curated"
+    return "standard"
+
+
+EVIDENCE_SCORE_CAPS = {
+    "verified": 100.0,
+    "strong": 97.0,
+    "standard": 94.0,
+    "curated": 95.0,
+    "rookie": 96.0,
+    "under_review": 82.0,
+    "limited": 86.0,
+}
+
+
+def confidence_price_factor(record: dict[str, Any]) -> float:
+    confidence = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.5)), 0, 1)
+    # Confidence should matter without erasing the documented career score.
+    return round(0.92 + 0.08 * confidence, 4)
+
+
+def benchmark_score(rank: int, total: int) -> float:
+    """Convert an editorial seed order into a conservative temporary prior.
+
+    The prior only applies to curated prototype records while profession-specific
+    evidence ingestion is incomplete. It never replaces verified career data.
+    """
+    if total <= 1:
+        return 82.0
+    percentile_from_top = clamp((rank - 1) / (total - 1), 0, 1)
+    return round(68.0 + 27.0 * (1.0 - percentile_from_top) ** 0.65, 1)
+
+
+def build_benchmark_ranks(records: list[dict[str, Any]] | None) -> dict[tuple[str, str], tuple[int, int]]:
+    if not records:
+        return {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        category = category_name(record)
+        grouped.setdefault(category, []).append(record)
+    output: dict[tuple[str, str], tuple[int, int]] = {}
+    for category, items in grouped.items():
+        total = len(items)
+        for rank, item in enumerate(items, start=1):
+            output[(category, normalize(item.get("name", "")))] = (rank, total)
+    return output
+
+
+def percentile_position(value: float, values: list[float]) -> float:
+    clean = sorted(float(item) for item in values if math.isfinite(float(item)))
+    if len(clean) <= 1:
+        return 0.5
+    below = sum(1 for item in clean if item < value)
+    equal = sum(1 for item in clean if item == value)
+    return clamp((below + 0.5 * equal) / len(clean), 0, 1)
+
+
+def normalize_evidence_metrics(
+    record: dict[str, Any],
+    metrics: dict[str, float],
+) -> dict[str, float]:
+    """Upgrade previously enriched athlete metrics to the v4 input rules."""
+    output = dict(metrics)
+    if category_name(record) != "Athlete":
+        return output
+    summary = record.get("pricingEvidenceSummary")
+    percentiles = summary.get("percentiles") if isinstance(summary, dict) else None
+    if not isinstance(percentiles, dict):
+        return output
+
+    recent = optional_number(percentiles.get("recentProduction"))
+    efficiency = optional_number(percentiles.get("efficiency"))
+    career = optional_number(percentiles.get("careerProduction"))
+    awards = optional_number(percentiles.get("awardPoints"))
+    if recent is not None and efficiency is not None:
+        output["performance"] = round(clamp(24 + 72 * (recent * 0.70 + efficiency * 0.30), 20, 98), 1)
+    if career is not None and awards is not None:
+        output["achievements"] = round(clamp(8 + 88 * (career * 0.70 + awards * 0.30), 8, 99), 1)
+    if career is not None and recent is not None:
+        output["consistency"] = round(clamp(24 + 72 * (career * 0.65 + recent * 0.35), 24, 97), 1)
+    output["availability"] = 75.0 if record.get("careerStatus") == "Active" else 55.0
+    return output
+
+
+def metrics_for_calibration(
+    record: dict[str, Any],
+    overrides: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, float]:
+    override = override_for(record, overrides)
+    existing = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else None
+    if override and isinstance(override.get("activeMetrics"), dict):
+        source = {**provisional_active_metrics(record), **override["activeMetrics"]}
+    elif existing:
+        source = dict(existing)
+    else:
+        source = provisional_active_metrics(record)
+    metrics = {key: round(clamp(value, 0, 100), 1) for key, value in source.items()}
+    metrics.setdefault("consistency", round((metrics.get("performance", 50) + metrics.get("availability", 70)) / 2, 1))
+    return normalize_evidence_metrics(record, metrics)
+
+
+def absolute_category_score(
+    record: dict[str, Any],
+    metrics: dict[str, Any],
+    benchmark_ranks: dict[tuple[str, str], tuple[int, int]],
+) -> tuple[float, float | None]:
+    raw = active_score(metrics, category_name(record))
+    benchmark_value: float | None = None
+    rank_info = benchmark_ranks.get((category_name(record), normalize(record.get("name", ""))))
+    if rank_info and (evidence_tier(record) == "curated" or record.get("sourceName") == "TalentX current-first seed"):
+        benchmark_value = benchmark_score(*rank_info)
+        raw = round(raw * (1.0 - CURATED_BENCHMARK_WEIGHT) + benchmark_value * CURATED_BENCHMARK_WEIGHT, 1)
+    return raw, benchmark_value
+
+
+def prepare_universal_scores(
+    records: list[dict[str, Any]],
+    overrides: dict[tuple[str, str], dict[str, Any]],
+    *,
+    benchmark_records: list[dict[str, Any]] | None = None,
+    calibration_reference: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Annotate records with cross-category calibration inputs.
+
+    Seventy percent of the universal score comes from absolute category-specific
+    evidence. Thirty percent comes from peer position inside the same profession.
+    """
+    benchmark_ranks = build_benchmark_ranks(benchmark_records)
+    reference = calibration_reference or records
+
+    reference_scores: dict[str, list[float]] = {}
+    for item in reference:
+        if item.get("marketSegment") in {"Legacy", "Under Review"} or str(item.get("modelType", "")).startswith("Legacy"):
+            continue
+        metrics = metrics_for_calibration(item, overrides)
+        absolute, _ = absolute_category_score(item, metrics, benchmark_ranks)
+        reference_scores.setdefault(category_name(item), []).append(absolute)
+
+    prepared: list[dict[str, Any]] = []
+    for item in records:
+        record = dict(item)
+        if record.get("marketSegment") in {"Legacy", "Under Review"} or str(record.get("modelType", "")).startswith("Legacy"):
+            prepared.append(record)
+            continue
+        metrics = metrics_for_calibration(record, overrides)
+        raw = active_score(metrics, category_name(record))
+        absolute, benchmark_value = absolute_category_score(record, metrics, benchmark_ranks)
+        pool = reference_scores.get(category_name(record), [absolute])
+        peer_percentile = percentile_position(absolute, pool)
+        peer_score = round(45.0 + 50.0 * peer_percentile, 1)
+        universal = round(
+            absolute * ABSOLUTE_SCORE_WEIGHT + peer_score * PEER_SCORE_WEIGHT,
+            1,
+        )
+        record["_pricingRawScore"] = raw
+        record["_pricingAbsoluteScore"] = absolute
+        record["_pricingPeerScore"] = peer_score
+        record["_pricingPeerPercentile"] = round(peer_percentile, 4)
+        record["_pricingUniversalScore"] = universal
+        record["_pricingBenchmarkScore"] = benchmark_value
+        record["_pricingCategoryPoolSize"] = len(pool)
+        prepared.append(record)
+    return prepared
 
 
 def legacy_score(metrics: dict[str, Any]) -> float:
@@ -274,11 +489,30 @@ def rookie_metrics_for(record: dict[str, Any], active_metrics: dict[str, Any]) -
 
 
 def active_pricing_components(record: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
-    active_weights = active_weights_for(record)
-    active_model_score = active_score(metrics, active_weights)
-    active_fundamental = fundamental_from_score(active_model_score)
+    category = category_name(record)
+    raw_score = active_score(metrics, category)
+    absolute_score = optional_number(record.get("_pricingAbsoluteScore"))
+    peer_score = optional_number(record.get("_pricingPeerScore"))
+    peer_percentile = optional_number(record.get("_pricingPeerPercentile"))
+    universal_score = optional_number(record.get("_pricingUniversalScore"))
+
+    if absolute_score is None:
+        absolute_score = raw_score
+    if peer_score is None:
+        peer_score = raw_score
+    if peer_percentile is None:
+        peer_percentile = 0.5
+    if universal_score is None:
+        universal_score = raw_score
+
+    tier = evidence_tier(record)
+    score_cap = EVIDENCE_SCORE_CAPS.get(tier, 94.0)
+    active_model_score = round(min(universal_score, score_cap), 1)
+    confidence_factor = confidence_price_factor(record)
+    active_fundamental = round(fundamental_from_score(active_model_score) * confidence_factor, 2)
+
     provisional_cap: float | None = None
-    if str(record.get("pricingDataStatus", "")).startswith("Provisional"):
+    if tier == "limited":
         provisional_cap = 62.0
         active_fundamental = min(active_fundamental, provisional_cap)
 
@@ -301,7 +535,16 @@ def active_pricing_components(record: dict[str, Any], metrics: dict[str, Any]) -
         influence = 0.0
 
     return {
-        "activeWeights": active_weights,
+        "category": category,
+        "weights": category_weights(category=category),
+        "rawCategoryScore": raw_score,
+        "absoluteScore": round(absolute_score, 1),
+        "peerScore": round(peer_score, 1),
+        "peerPercentile": round(peer_percentile, 4),
+        "universalScore": round(universal_score, 1),
+        "evidenceTier": tier,
+        "evidenceScoreCap": score_cap,
+        "confidencePriceFactor": confidence_factor,
         "activeScore": active_model_score,
         "activeFundamental": round(active_fundamental, 2),
         "rookieMetrics": rookie_metrics,
@@ -407,15 +650,23 @@ def override_for(record: dict[str, Any], overrides: dict[tuple[str, str], dict[s
 
 def controlled_market_fields(record: dict[str, Any], score: float, metrics: dict[str, Any], fundamental: float) -> dict[str, Any]:
     rng = deterministic_rng(record)
-    audience = clamp(metrics.get("audience"), 0, 100)
+    audience = clamp(metrics.get("audience", 50), 0, 100)
     performance = clamp(metrics.get("performance", metrics.get("preProPerformance", metrics.get("legacy", 50))), 0, 100)
+    availability = clamp(metrics.get("availability", metrics.get("liquidity", 75)), 0, 100)
     data_confidence = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.5)), 0, 1)
 
-    demand = clamp((audience - 50) * 0.075 + rng.uniform(-0.6, 0.6), -4.0, 5.0)
-    momentum = clamp((performance - 50) * 0.045 + rng.uniform(-0.5, 0.5), -3.0, 3.0)
-    market = fundamental * (1 + demand / 100.0) * (1 + momentum / 100.0)
+    # Market demand is deliberately smaller than the fundamental model. The
+    # combined premium/discount cannot exceed +/-6%, preventing hype from
+    # overwhelming documented career value.
+    demand = clamp((audience - 50) * 0.040 + rng.uniform(-0.25, 0.25), -2.5, 3.0)
+    momentum = clamp((performance - 50) * 0.030 + rng.uniform(-0.20, 0.20), -2.0, 2.0)
+    risk = clamp((availability - 75) * 0.020, -1.5, 1.0)
+    adjustment = clamp(demand + momentum + risk, -MARKET_ADJUSTMENT_CAP_PCT, MARKET_ADJUSTMENT_CAP_PCT)
+    market = fundamental * (1 + adjustment / 100.0)
     if record.get("marketSegment") == "Under Review":
         market *= 0.82 + 0.18 * data_confidence
+    if evidence_tier(record) == "limited":
+        market = min(market, 65.0)
     market = round(max(2.0, market), 2)
 
     volatility = 1.2 + (100 - score) / 100 * 1.6
@@ -434,6 +685,8 @@ def controlled_market_fields(record: dict[str, Any], score: float, metrics: dict
         "dailyChange": daily,
         "demandPremiumPct": round(demand, 2),
         "momentumPct": round(momentum, 2),
+        "riskAdjustmentPct": round(risk, 2),
+        "marketAdjustmentPct": round(adjustment, 2),
         "volume": volume,
         "trend": trend,
     }
@@ -451,7 +704,7 @@ def apply_active_pricing(record: dict[str, Any], overrides: dict[tuple[str, str]
         result["pricingEvidence"] = override.get("evidence", [])
     elif existing and result.get("sourceName") == "TalentX current-first seed":
         metrics = dict(existing)
-        result["pricingDataStatus"] = "Curated prototype metrics — verification required"
+        result["pricingDataStatus"] = "Curated benchmark prior — profession evidence required"
         result["pricingConfidence"] = clamp(result.get("dataConfidence", 0.70), 0, 1)
         result["pricingEvidence"] = []
     elif existing and result.get("pricingDataStatus") not in (None, ""):
@@ -464,6 +717,7 @@ def apply_active_pricing(record: dict[str, Any], overrides: dict[tuple[str, str]
 
     metrics = {key: round(clamp(value, 0, 100), 1) for key, value in metrics.items()}
     metrics.setdefault("consistency", round((metrics.get("performance", 50) + metrics.get("availability", 70)) / 2, 1))
+    metrics = normalize_evidence_metrics(result, metrics)
     components = active_pricing_components(result, metrics)
     score = float(components["score"])
     fundamental = float(components["fundamental"])
@@ -511,6 +765,7 @@ def apply_active_pricing(record: dict[str, Any], overrides: dict[tuple[str, str]
         market_metrics = {
             "performance": rookie_metrics["preProPerformance"] * influence + metrics.get("performance", 50) * (1 - influence),
             "audience": rookie_metrics["audience"] * influence + metrics.get("audience", 50) * (1 - influence),
+            "availability": rookie_metrics["availability"] * influence + metrics.get("availability", 75) * (1 - influence),
         }
     else:
         result["modelType"] = "Active career model"
@@ -519,18 +774,21 @@ def apply_active_pricing(record: dict[str, Any], overrides: dict[tuple[str, str]
             result["pricingDataStatus"] = "Evidence enriched — professional statistics; draft influence expired"
 
     result["pricingAudit"] = {
-        "weights": components["activeWeights"],
-        "performanceFormula": (
-            "24 + 72 × (70% recent-production percentile + 30% efficiency percentile)"
-            if result.get("primaryCategory") == "Athlete"
-            else None
-        ),
-        "usageIncludedInPerformance": False if result.get("primaryCategory") == "Athlete" else None,
-        "availabilityRule": (
-            "75 active / 55 inactive pending normalized games-available evidence"
-            if result.get("primaryCategory") == "Athlete"
-            else None
-        ),
+        "modelVersion": MODEL_VERSION,
+        "category": components["category"],
+        "weights": components["weights"],
+        "rawCategoryScore": components["rawCategoryScore"],
+        "curatedBenchmarkScore": result.get("_pricingBenchmarkScore"),
+        "absoluteScore": components["absoluteScore"],
+        "absoluteWeight": ABSOLUTE_SCORE_WEIGHT,
+        "peerScore": components["peerScore"],
+        "peerPercentile": components["peerPercentile"],
+        "peerWeight": PEER_SCORE_WEIGHT,
+        "categoryPoolSize": result.get("_pricingCategoryPoolSize"),
+        "universalScore": components["universalScore"],
+        "evidenceTier": components["evidenceTier"],
+        "evidenceScoreCap": components["evidenceScoreCap"],
+        "confidencePriceFactor": components["confidencePriceFactor"],
         "activeScore": components["activeScore"],
         "activeFundamental": components["activeFundamental"],
         "rookieWeights": ROOKIE_WEIGHTS if rookie_metrics else None,
@@ -539,10 +797,18 @@ def apply_active_pricing(record: dict[str, Any], overrides: dict[tuple[str, str]
         "rookieInfluence": influence,
         "blendedModelScore": components["blendedModelScore"],
         "score": score,
-        "fundamentalFormula": "Draft IPO anchor blended with active-career value as professional games accumulate" if rookie_metrics else "2 + 180 × (score ÷ 100)²",
+        "fundamentalFormula": (
+            "Draft IPO anchor blended with confidence-adjusted universal career value"
+            if rookie_metrics
+            else "confidence factor × [2 + 180 × (universal score ÷ 100)²]"
+        ),
         "limitedEvidenceCap": components["limitedEvidenceCap"],
+        "marketAdjustmentCapPct": MARKET_ADJUSTMENT_CAP_PCT,
     }
     result.update(controlled_market_fields(result, score, market_metrics, fundamental))
+    for key in list(result):
+        if key.startswith("_pricing"):
+            result.pop(key, None)
     return result
 
 
@@ -574,5 +840,17 @@ def apply_pricing(record: dict[str, Any], overrides: dict[tuple[str, str], dict[
     return apply_active_pricing(record, overrides)
 
 
-def apply_pricing_to_records(records: list[dict[str, Any]], overrides: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
-    return [apply_pricing(record, overrides) for record in records]
+def apply_pricing_to_records(
+    records: list[dict[str, Any]],
+    overrides: dict[tuple[str, str], dict[str, Any]],
+    *,
+    benchmark_records: list[dict[str, Any]] | None = None,
+    calibration_reference: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    prepared = prepare_universal_scores(
+        records,
+        overrides,
+        benchmark_records=benchmark_records,
+        calibration_reference=calibration_reference,
+    )
+    return [apply_pricing(record, overrides) for record in prepared]

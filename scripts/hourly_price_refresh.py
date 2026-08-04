@@ -49,6 +49,7 @@ CATALOG_CSV = DATA / "current_catalog.csv"
 CATALOG_MANIFEST = DATA / "catalog_manifest.json"
 PRICING_OVERRIDES = DATA / "pricing_overrides.json"
 HOURLY_MANIFEST = DATA / "hourly_refresh_manifest.json"
+CURRENT_SEED = DATA / "current_seed.json"
 
 ESPN_SCOREBOARD = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/scoreboard?dates={date}&limit=1000"
 ESPN_SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{league}/summary?event={event_id}"
@@ -474,13 +475,12 @@ def apply_hourly_metrics(
         for key in SIGNAL_KEYS
     }
     recent_pct = pcts["recentProduction"]
-    career_pct = max(pcts["careerProduction"], pcts["careerUsage"] * 0.82)
+    career_pct = pcts["careerProduction"]
     efficiency_pct = pcts["efficiency"]
-    usage_pct = pcts["usage"]
     award_pct = pcts["awardPoints"]
 
-    performance = clamp(24 + 72 * (recent_pct * 0.56 + efficiency_pct * 0.24 + usage_pct * 0.20), 20, 98)
-    achievements = clamp(8 + 88 * (career_pct * 0.63 + award_pct * 0.27 + pcts["careerUsage"] * 0.10), 8, 99)
+    performance = clamp(24 + 72 * (recent_pct * 0.70 + efficiency_pct * 0.30), 20, 98)
+    achievements = clamp(8 + 88 * (career_pct * 0.70 + award_pct * 0.30), 8, 99)
     potential = potential_prior(record, recent_pct)
 
     current_metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
@@ -488,18 +488,15 @@ def apply_hourly_metrics(
     news_boost = min(12.0, math.log1p(item.get("newsCount", 0)) * 4.0)
     audience = clamp(base_audience * 0.68 + recent_pct * 18 + award_pct * 10 + news_boost, 20, 97)
 
-    if signals.get("usage", 0) > 0:
-        availability = clamp(52 + usage_pct * 42, 48, 96)
-    else:
-        availability = float(current_metrics.get("availability") or (72 if record.get("careerStatus") == "Active" else 55))
-    consistency = clamp(30 + career_pct * 35 + recent_pct * 25 + availability * 0.10, 28, 96)
+    availability = 75.0 if record.get("careerStatus") == "Active" else 55.0
+    consistency = clamp(24 + 72 * (career_pct * 0.65 + recent_pct * 0.35), 24, 97)
 
     completeness = sum(
         1
         for condition in (
             bool(item.get("recent")),
             bool(item.get("career")),
-            signals.get("usage", 0) > 0,
+            number(record.get("professionalGames")) is not None,
             signals.get("awardPoints", 0) > 0,
             number(record.get("age")) is not None,
         )
@@ -675,7 +672,17 @@ def main() -> int:
 
         usable += 1
         metrics_record = apply_hourly_metrics(item, cohorts, leagues, refreshed_at)
-        repriced = apply_pricing_to_records([metrics_record], overrides)[0]
+        benchmark_records: list[dict[str, Any]] = []
+        if CURRENT_SEED.exists():
+            loaded_seed = safe_json(CURRENT_SEED, [])
+            if isinstance(loaded_seed, list):
+                benchmark_records = loaded_seed
+        repriced = apply_pricing_to_records(
+            [metrics_record],
+            overrides,
+            benchmark_records=benchmark_records,
+            calibration_reference=records,
+        )[0]
         repriced, change_pct = cap_hourly_market_move(old_record, repriced, args.max_hourly_move_pct, refreshed_at)
         repriced.pop("hourlyEvidenceWarning", None)
         updated_records[index] = repriced

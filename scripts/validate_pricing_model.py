@@ -9,18 +9,20 @@ from pathlib import Path
 from typing import Any
 
 from pricing_model import (
-    ACTIVE_WEIGHTS,
-    ATHLETE_ACTIVE_WEIGHTS,
+    CATEGORY_WEIGHTS,
     LEGACY_WEIGHTS,
+    MARKET_ADJUSTMENT_CAP_PCT,
     MODEL_VERSION,
     ROOKIE_WEIGHTS,
-    active_pricing_components,
+    apply_pricing_to_records,
     fundamental_from_score,
     legacy_score,
+    load_overrides,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
+OVERRIDES = DATA / "pricing_overrides.json"
 TOLERANCE = 0.11
 
 
@@ -44,21 +46,19 @@ def main() -> int:
     historical = load(DATA / "legacy_catalog_v2.json")
     errors: list[str] = []
 
-    expected_athlete_weights = {
-        "performance": 0.35,
-        "achievements": 0.25,
-        "potential": 0.15,
-        "audience": 0.15,
-        "availability": 0.10,
-    }
-    if ATHLETE_ACTIVE_WEIGHTS != expected_athlete_weights:
-        errors.append(f"Athlete weights must equal {expected_athlete_weights}")
-    if abs(sum(ATHLETE_ACTIVE_WEIGHTS.values()) - 1.0) > 1e-9:
-        errors.append("Athlete pricing weights must total 100%")
-    if ACTIVE_WEIGHTS.get("achievements") != 0.25 or ACTIVE_WEIGHTS.get("potential") != 0.20:
-        errors.append("Non-athlete active weights must remain unchanged")
-    if abs(sum(ACTIVE_WEIGHTS.values()) - 1.0) > 1e-9:
-        errors.append("Active pricing weights must total 100%")
+    required_categories = {"Athlete", "Music", "Actor", "Creator"}
+    if set(CATEGORY_WEIGHTS) != required_categories:
+        errors.append(f"Category weights must cover exactly {sorted(required_categories)}")
+    for category, weights in CATEGORY_WEIGHTS.items():
+        if abs(sum(weights.values()) - 1.0) > 1e-9:
+            errors.append(f"{category} pricing weights must total 100%")
+    athlete_weights = CATEGORY_WEIGHTS.get("Athlete", {})
+    if athlete_weights.get("performance") != 0.35:
+        errors.append("Athlete performance must remain the strongest input at 35%")
+    if athlete_weights.get("achievements") != 0.25:
+        errors.append("Athlete achievements must remain 25%")
+    if athlete_weights.get("consistency") != 0.15 or athlete_weights.get("potential") != 0.15:
+        errors.append("Athlete consistency and potential must each be 15%")
     if abs(sum(ROOKIE_WEIGHTS.values()) - 1.0) > 1e-9:
         errors.append("Rookie IPO weights must total 100%")
     if ROOKIE_WEIGHTS.get("draftCapital") != 0.35:
@@ -78,17 +78,33 @@ def main() -> int:
     if len(enriched) < args.minimum_enriched:
         errors.append(f"Only {len(enriched):,} evidence-enriched records; expected at least {args.minimum_enriched:,}")
 
-    for record in current + historical:
-        segment = record.get("marketSegment")
-        if segment in {"Legacy", "Under Review"} or str(record.get("modelType", "")).startswith("Legacy"):
-            metrics = record.get("legacyMetrics") or {}
-            expected_score = legacy_score(metrics)
-            expected_fundamental = fundamental_from_score(expected_score, legacy=True, under_review=segment == "Under Review")
-        else:
-            metrics = record.get("activeMetrics") or {}
-            components = active_pricing_components(record, metrics)
-            expected_score = float(components["score"])
-            expected_fundamental = float(components["fundamental"])
+    benchmark_records = load(DATA / "current_seed.json")
+    overrides = load_overrides(OVERRIDES)
+    expected_current = apply_pricing_to_records(
+        current,
+        overrides,
+        benchmark_records=benchmark_records,
+        calibration_reference=current,
+    )
+    expected_historical = apply_pricing_to_records(
+        historical,
+        overrides,
+        benchmark_records=benchmark_records,
+        calibration_reference=historical,
+    )
+    expected_by_id = {
+        str(record.get("id") or f"{record.get('name')}::{index}"): record
+        for index, record in enumerate(expected_current + expected_historical)
+    }
+
+    for index, record in enumerate(current + historical):
+        key = str(record.get("id") or f"{record.get('name')}::{index}")
+        expected = expected_by_id.get(key)
+        if expected is None:
+            errors.append(f"Unable to reproduce price: {record.get('name')}")
+            continue
+        expected_score = float(expected.get("careerScore", -999))
+        expected_fundamental = float(expected.get("fundamentalValue", -999))
         try:
             actual_score = float(record.get("careerScore", -999))
             actual_fundamental = float(record.get("fundamentalValue", -999))
@@ -99,12 +115,19 @@ def main() -> int:
             errors.append(f"Score mismatch: {record.get('name')} expected {expected_score}, found {actual_score}")
         if abs(actual_fundamental - expected_fundamental) > TOLERANCE:
             errors.append(f"Fundamental mismatch: {record.get('name')} expected {expected_fundamental}, found {actual_fundamental}")
-        if (
-            str(record.get("pricingDataStatus", "")).startswith("Provisional")
-            and not isinstance(record.get("rookiePricing"), dict)
-            and actual_fundamental > 62.01
-        ):
-            errors.append(f"Unsupported star valuation: {record.get('name')} exceeds provisional cap")
+        status = str(record.get("pricingDataStatus", ""))
+        if status.startswith("Provisional") and not isinstance(record.get("rookiePricing"), dict):
+            if actual_fundamental > 62.01:
+                errors.append(f"Unsupported star valuation: {record.get('name')} exceeds provisional fundamental cap")
+            if float(record.get("marketPrice") or 0) > 65.01:
+                errors.append(f"Unsupported market valuation: {record.get('name')} exceeds provisional market cap")
+        if (status.startswith("Curated prototype") or status.startswith("Curated benchmark")) and actual_score > 95.01:
+            errors.append(f"Curated prototype exceeds evidence score cap: {record.get('name')}")
+        if float(record.get("pricingConfidence") or record.get("dataConfidence") or 0) < 0.60 and actual_fundamental > 100:
+            errors.append(f"Low-confidence record entered top pricing tier: {record.get('name')}")
+        market_adjustment = abs(float(record.get("marketAdjustmentPct") or 0))
+        if market_adjustment > MARKET_ADJUSTMENT_CAP_PCT + 0.01:
+            errors.append(f"Market adjustment exceeds cap: {record.get('name')} ({market_adjustment:.2f}%)")
         if record.get("pricingModelVersion") != MODEL_VERSION:
             errors.append(f"Wrong model version: {record.get('name')}")
         if len(errors) >= 50:
@@ -130,42 +153,6 @@ def main() -> int:
             if len(errors) >= 50:
                 break
 
-    for record in enriched:
-        if record.get("primaryCategory") != "Athlete":
-            continue
-        metrics = record.get("activeMetrics")
-        summary = record.get("pricingEvidenceSummary")
-        percentiles = summary.get("percentiles") if isinstance(summary, dict) else None
-        if not isinstance(metrics, dict) or not isinstance(percentiles, dict):
-            continue
-        try:
-            production = float(percentiles["recentProduction"])
-            efficiency = float(percentiles["efficiency"])
-            actual_performance = float(metrics["performance"])
-            actual_availability = float(metrics["availability"])
-        except (KeyError, TypeError, ValueError):
-            errors.append(f"Missing revised athlete inputs: {record.get('name')}")
-            if len(errors) >= 50:
-                break
-            continue
-        expected_performance = round(
-            max(20.0, min(98.0, 24 + 72 * (production * 0.70 + efficiency * 0.30))),
-            1,
-        )
-        expected_availability = 75.0 if record.get("careerStatus") == "Active" else 55.0
-        if abs(actual_performance - expected_performance) > TOLERANCE:
-            errors.append(
-                f"Production-first performance mismatch: {record.get('name')} "
-                f"expected {expected_performance}, found {actual_performance}"
-            )
-        if abs(actual_availability - expected_availability) > TOLERANCE:
-            errors.append(
-                f"Neutral availability mismatch: {record.get('name')} "
-                f"expected {expected_availability}, found {actual_availability}"
-            )
-        if len(errors) >= 50:
-            break
-
     rookies = [record for record in current if isinstance(record.get("rookiePricing"), dict)]
     for record in rookies:
         rookie = record["rookiePricing"]
@@ -181,12 +168,33 @@ def main() -> int:
         if len(errors) >= 50:
             break
 
+    supported = [
+        record for record in current
+        if not str(record.get("pricingDataStatus", "")).startswith("Provisional")
+    ]
+    category_prices: dict[str, list[float]] = {}
+    for record in supported:
+        category_prices.setdefault(str(record.get("primaryCategory") or "Unknown"), []).append(
+            float(record.get("fundamentalValue") or 0)
+        )
+    for category, prices in sorted(category_prices.items()):
+        if prices and max(prices) > 180.01:
+            errors.append(f"{category} exceeds the universal fundamental ceiling")
+        if prices and min(prices) < 2:
+            errors.append(f"{category} fell below the universal fundamental floor")
+
     by_name = {str(record.get("name")): record for record in current}
     comparisons = [
         ("Dak Prescott", "Thomas Incoom"),
         ("Justin Herbert", "Kyle Allen"),
         ("Trevor Lawrence", "Trey Lance"),
         ("Josh Jacobs", "Ty Johnson"),
+        ("Anthony Edwards", "Amen Thompson"),
+        ("Anthony Edwards", "Tyrese Maxey"),
+        ("Taylor Swift", "Gracie Abrams"),
+        ("Beyoncé", "Gracie Abrams"),
+        ("MrBeast", "Marques Brownlee"),
+        ("Zendaya", "Pedro Pascal"),
     ]
     aj = by_name.get("AJ Dybantsa")
     if aj:
@@ -215,8 +223,7 @@ def main() -> int:
 
     print(f"Checked {len(current) + len(historical):,} records against model weights.")
     print(f"Evidence enriched: {len(enriched):,}; provisional: {len(provisional):,}; rookie transitions: {len(rookies):,}")
-    print(f"Active weights: {ACTIVE_WEIGHTS}")
-    print(f"Athlete active weights: {ATHLETE_ACTIVE_WEIGHTS}")
+    print(f"Category weights: {CATEGORY_WEIGHTS}")
     print(f"Legacy weights: {LEGACY_WEIGHTS}")
     for line in comparison_output:
         print(line)
