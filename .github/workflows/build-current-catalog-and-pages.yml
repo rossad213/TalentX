@@ -7,12 +7,12 @@ on:
       - ".github/workflows/build-current-catalog-and-pages.yml"
       - "scripts/**"
       - "data/**"
+      - "assets/**"
       - "requirements.txt"
       - "index.html"
       - "app.js"
       - "styles.css"
   schedule:
-    # Full roster-and-pricing refresh every Sunday at 08:17 UTC.
     - cron: "17 8 * * 0"
   workflow_dispatch:
 
@@ -54,6 +54,9 @@ jobs:
 
       - name: Reprice current, legacy, and under-review catalogs
         run: python scripts/reprice_catalogs.py
+
+      - name: Apply production-first athlete pricing
+        run: python scripts/apply_revised_athlete_pricing.py
 
       - name: Validate evidence-weighted pricing
         run: >-

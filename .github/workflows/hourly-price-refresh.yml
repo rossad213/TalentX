@@ -2,7 +2,6 @@ name: Hourly price refresh and deploy TalentX
 
 on:
   schedule:
-    # Avoid the busiest top-of-hour period while still refreshing once per hour.
     - cron: "23 * * * *"
   workflow_dispatch:
 
@@ -87,6 +86,9 @@ jobs:
           --max-athletes 1800
           --max-hourly-move-pct 8
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
+
+      - name: Reapply production-first athlete pricing
+        run: python scripts/apply_revised_athlete_pricing.py
 
       - name: Validate current catalog
         run: python scripts/validate_current_catalog.py --minimum 10000
