@@ -1,0 +1,292 @@
+{
+  "version": "2.1-wikipedia-wikidata-expansion",
+  "requestedTotalAdditions": 9400,
+  "sourcePolicy": "Candidate names come from English Wikipedia category membership. Wikidata entity data is used to confirm a human or musical-group identity and to exclude known deceased or dissolved entities from the current-market expansion. Identity verification is not treated as verified career-performance evidence.",
+  "groups": [
+    {
+      "key": "music",
+      "category": "Music",
+      "discipline": "Music",
+      "target": 5000,
+      "role": "Music Artist",
+      "leagueOrMedium": "Recorded Music",
+      "teamOrPlatform": "Independent / Label",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 2600,
+      "maxCategoriesPerRoot": 700,
+      "allowedEntityTypes": [
+        "human",
+        "musical_group"
+      ],
+      "descriptionKeywords": [
+        "musician",
+        "singer",
+        "rapper",
+        "band",
+        "musical group",
+        "composer",
+        "songwriter",
+        "disc jockey",
+        "dj",
+        "record producer",
+        "orchestra",
+        "vocalist",
+        "instrumentalist"
+      ],
+      "roots": [
+        "Category:Musicians by nationality",
+        "Category:Singers by nationality",
+        "Category:Rappers by nationality",
+        "Category:Musical groups by nationality",
+        "Category:Songwriters by nationality",
+        "Category:Record producers by nationality",
+        "Category:DJs by nationality",
+        "Category:Composers by nationality"
+      ]
+    },
+    {
+      "key": "actor",
+      "category": "Actor",
+      "discipline": "Film & Television",
+      "target": 300,
+      "role": "Actor",
+      "leagueOrMedium": "Film & Television",
+      "teamOrPlatform": "Film / Television",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 900,
+      "maxCategoriesPerRoot": 450,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "actor",
+        "actress",
+        "film actor",
+        "television actor",
+        "voice actor",
+        "stage actor"
+      ],
+      "roots": [
+        "Category:Actors by nationality",
+        "Category:Film actors by nationality",
+        "Category:Television actors by nationality"
+      ]
+    },
+    {
+      "key": "creator",
+      "category": "Creator",
+      "discipline": "Digital Media",
+      "target": 100,
+      "role": "Digital Creator",
+      "leagueOrMedium": "Digital Media",
+      "teamOrPlatform": "YouTube / Streaming / Podcasting",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 450,
+      "maxCategoriesPerRoot": 300,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "youtuber",
+        "streamer",
+        "podcaster",
+        "blogger",
+        "internet personality",
+        "tiktoker",
+        "content creator",
+        "online personality"
+      ],
+      "roots": [
+        "Category:YouTubers by nationality",
+        "Category:Twitch (service) streamers",
+        "Category:Podcasters by nationality",
+        "Category:TikTokers by nationality",
+        "Category:Internet celebrities by nationality"
+      ]
+    },
+    {
+      "key": "baseball",
+      "category": "Athlete",
+      "discipline": "Baseball",
+      "target": 500,
+      "role": "Baseball Player",
+      "leagueOrMedium": "Global Baseball",
+      "teamOrPlatform": "Club / National Team",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 1800,
+      "maxCategoriesPerRoot": 650,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "baseball player",
+        "baseball pitcher",
+        "baseball outfielder",
+        "baseball infielder",
+        "baseball catcher"
+      ],
+      "roots": [
+        "Category:Baseball players by nationality",
+        "Category:Major League Baseball players by nationality"
+      ]
+    },
+    {
+      "key": "tennis",
+      "category": "Athlete",
+      "discipline": "Tennis",
+      "target": 400,
+      "role": "Tennis Player",
+      "leagueOrMedium": "Professional Tennis",
+      "teamOrPlatform": "ATP / WTA / ITF",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 1800,
+      "maxCategoriesPerRoot": 650,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "tennis player"
+      ],
+      "roots": [
+        "Category:Tennis players by nationality",
+        "Category:Male tennis players by nationality",
+        "Category:Female tennis players by nationality"
+      ]
+    },
+    {
+      "key": "golf",
+      "category": "Athlete",
+      "discipline": "Golf",
+      "target": 300,
+      "role": "Golfer",
+      "leagueOrMedium": "Professional Golf",
+      "teamOrPlatform": "Professional Tour",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 1500,
+      "maxCategoriesPerRoot": 550,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "golfer",
+        "golf player"
+      ],
+      "roots": [
+        "Category:Golfers by nationality",
+        "Category:Male golfers by nationality",
+        "Category:Female golfers by nationality"
+      ]
+    },
+    {
+      "key": "motorsport",
+      "category": "Athlete",
+      "discipline": "Motorsport",
+      "target": 300,
+      "role": "Racing Driver / Rider",
+      "leagueOrMedium": "Motorsport",
+      "teamOrPlatform": "Racing Series",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 1500,
+      "maxCategoriesPerRoot": 600,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "racing driver",
+        "race car driver",
+        "motorcycle racer",
+        "motorsport",
+        "formula one driver",
+        "rally driver"
+      ],
+      "roots": [
+        "Category:Racing drivers by nationality",
+        "Category:Motorcycle racers by nationality",
+        "Category:Formula One drivers",
+        "Category:Rally drivers by nationality"
+      ]
+    },
+    {
+      "key": "combat",
+      "category": "Athlete",
+      "discipline": "Combat Sports",
+      "target": 300,
+      "role": "Combat Sports Athlete",
+      "leagueOrMedium": "Combat Sports",
+      "teamOrPlatform": "Promotion / Federation",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 1300,
+      "maxCategoriesPerRoot": 500,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "boxer",
+        "mixed martial artist",
+        "kickboxer",
+        "muay thai",
+        "judoka",
+        "karateka",
+        "taekwondo practitioner",
+        "martial artist"
+      ],
+      "roots": [
+        "Category:Boxers by nationality",
+        "Category:Mixed martial artists by nationality",
+        "Category:Kickboxers by nationality",
+        "Category:Judoka by nationality",
+        "Category:Muay Thai practitioners by nationality"
+      ]
+    },
+    {
+      "key": "cricket",
+      "category": "Athlete",
+      "discipline": "Cricket",
+      "target": 200,
+      "role": "Cricketer",
+      "leagueOrMedium": "Professional Cricket",
+      "teamOrPlatform": "Club / National Team",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 1400,
+      "maxCategoriesPerRoot": 600,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "cricketer",
+        "cricket player"
+      ],
+      "roots": [
+        "Category:Cricketers by nationality",
+        "Category:Male cricketers by nationality",
+        "Category:Female cricketers by nationality"
+      ]
+    },
+    {
+      "key": "soccer",
+      "category": "Athlete",
+      "discipline": "Soccer",
+      "target": 2000,
+      "role": "Soccer Player",
+      "leagueOrMedium": "Professional Soccer",
+      "teamOrPlatform": "Club / National Team",
+      "maxDepth": 3,
+      "candidateLimitPerRoot": 7000,
+      "maxCategoriesPerRoot": 1100,
+      "allowedEntityTypes": [
+        "human"
+      ],
+      "descriptionKeywords": [
+        "association football player",
+        "footballer",
+        "soccer player",
+        "professional football player"
+      ],
+      "roots": [
+        "Category:Association football players by nationality",
+        "Category:Men's association football players by nationality",
+        "Category:Women's association football players by nationality"
+      ]
+    }
+  ]
+}
