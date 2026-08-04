@@ -1,0 +1,31 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-08-04T05:46:45Z",
+  "targetPerCategory": 100,
+  "totalNonAthleteRecords": 300,
+  "categoryCounts": {
+    "Music": 100,
+    "Actor": 100,
+    "Creator": 100
+  },
+  "athleteSeedRecordsPreserved": 110,
+  "selectionMethod": "Curated broad-market roster. Rank is a temporary editorial benchmark used only until profession-specific evidence feeds are available.",
+  "selectionSources": [
+    {
+      "category": "Music",
+      "name": "Spotify 2025 Wrapped global and U.S. top lists",
+      "url": "https://newsroom.spotify.com/2025-12-03/wrapped-top-artists-songs-albums-podcasts-audiobooks/"
+    },
+    {
+      "category": "Actor",
+      "name": "IMDb Top 100 Stars of 2025",
+      "url": "https://www.imdb.com/list/ls4153616638/"
+    },
+    {
+      "category": "Creator",
+      "name": "Forbes Top Creators 2025",
+      "url": "https://www.forbes.com/sites/stevenbertoni/2025/06/16/forbes-top-creators-2025/"
+    }
+  ],
+  "pricingStatus": "Curated benchmark prior — profession evidence required"
+}
