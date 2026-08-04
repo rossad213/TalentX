@@ -10,6 +10,7 @@ on:
       - "requirements.txt"
       - "index.html"
       - "app.js"
+      - "chart-history.js"
       - "styles.css"
   schedule:
     # Full roster-and-pricing refresh every Sunday at 08:17 UTC.
@@ -84,7 +85,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html app.js styles.css .nojekyll _site/
+          cp index.html app.js chart-history.js styles.css .nojekyll _site/
           cp -R data _site/data
 
       - name: Configure GitHub Pages
