@@ -47,6 +47,7 @@ jobs:
           set -euo pipefail
           rm -rf _weekly _hourly
           mkdir -p _weekly _hourly
+          cp data/taxonomy.json _weekly/repository-taxonomy.json
 
           weekly_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
           weekly_run_id="$(printf '%s' "$weekly_meta" | jq -r '.workflow_runs[0].id // empty')"
@@ -65,6 +66,7 @@ jobs:
           rm -rf data
           mkdir -p data
           cp -R "$weekly_data_dir"/. data/
+          cp _weekly/repository-taxonomy.json data/taxonomy.json
 
           hourly_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/hourly-price-refresh.yml/runs?status=success&per_page=1")"
           hourly_run_id="$(printf '%s' "$hourly_meta" | jq -r '.workflow_runs[0].id // empty')"
@@ -128,6 +130,7 @@ jobs:
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
             data/hourly_refresh_manifest.json
+            data/taxonomy.json
           retention-days: 10
 
       - name: Prepare static Pages site
