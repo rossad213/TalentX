@@ -13,6 +13,8 @@ MARKET_STATE_FIELDS = (
     "modelTargetPrice",
     "trend",
     "priceHistory",
+    "priceExplanation",
+    "volatilityTier",
     "lastPriceRefreshAt",
     "lastPriceEventAt",
     "lastPriceEvent",
@@ -49,8 +51,8 @@ def merge_market_state(
             for field in MARKET_STATE_FIELDS:
                 if field in prior:
                     result[field] = prior[field]
-            # The historical game move remains visible through lastGameMovePct;
-            # this refresh itself must not manufacture another change.
+            # The historical event remains available through its explanation;
+            # the rebuild itself must not manufacture another price move.
             result["dailyChange"] = 0.0
             result["hourlyChangePct"] = 0.0
             carried += 1
