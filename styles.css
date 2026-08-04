@@ -14,10 +14,10 @@ button,input,select{font:inherit}
 button{cursor:pointer}
 .app-shell{display:grid;grid-template-columns:238px minmax(0,1fr);min-height:100vh}
 .sidebar{height:100vh;position:sticky;top:0;padding:20px 15px;border-right:1px solid rgba(132,164,194,.14);background:rgba(4,11,18,.92);backdrop-filter:blur(16px);display:flex;flex-direction:column;z-index:30}
-.brand{display:flex;align-items:center;gap:12px;padding:2px 8px 24px;cursor:pointer}
-.brand-logo{width:48px;height:48px;border-radius:14px;display:block;object-fit:cover;box-shadow:0 0 0 1px rgba(132,164,194,.18),0 10px 26px rgba(0,0,0,.35)}
-.brand-copy strong{display:block;font-size:17px;letter-spacing:-.02em}
-.brand-copy small{display:block;color:var(--muted);font-size:8px;letter-spacing:.14em;margin-top:2px}
+.brand{display:flex;align-items:center;gap:11px;padding:2px 8px 24px;cursor:pointer}
+.brand-mark{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,var(--green),var(--blue),var(--purple));color:#061019;font-weight:1000}
+.brand strong{display:block;font-size:17px;letter-spacing:-.02em}
+.brand small{display:block;color:var(--muted);font-size:8px;letter-spacing:.14em;margin-top:2px}
 .nav{display:grid;gap:5px}
 .nav button{display:flex;gap:11px;align-items:center;border:0;background:transparent;color:#a2afbf;padding:12px;border-radius:12px;text-align:left;font-weight:760}
 .nav button:hover{color:white;background:#0c1a29}
@@ -35,7 +35,6 @@ button{cursor:pointer}
 .top-actions{margin-left:auto;display:flex;align-items:center;gap:8px;color:#c3cfdb;font-size:12px}
 .status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(88,239,120,.7)}
 .user-avatar{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#ffd28f,#f08d73);color:#08111b;font-weight:950;margin-left:8px}
-.user-avatar.user-avatar-logo{padding:0;background:#000;border:1px solid rgba(132,164,194,.22);object-fit:cover;display:block;box-shadow:0 0 0 1px rgba(132,164,194,.12),0 8px 18px rgba(0,0,0,.28)}
 .content{padding:27px;max-width:1640px;margin:auto}
 .loading,.empty{padding:40px;text-align:center;color:var(--muted)}
 .notice{margin-bottom:18px;padding:12px 14px;border-radius:13px;border:1px solid rgba(255,201,92,.25);background:rgba(255,201,92,.07);color:#e0d1ab;font-size:12px;line-height:1.5}
@@ -236,4 +235,26 @@ linear-gradient(145deg,#12243a,#08131f)}
 @media (max-width:1100px){.chart-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:720px){.chart-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-y-label,.stock-x-label{font-size:13px}}
 
-@media (max-width:720px){.brand-logo{width:40px;height:40px;border-radius:12px}}
+/* Interactive stock-style chart controls */
+.chart-range-tabs{display:grid;grid-template-columns:repeat(8,minmax(48px,1fr));gap:4px;margin:-2px 0 12px;padding-bottom:10px;border-bottom:1px solid rgba(31,53,74,.8);overflow-x:auto;scrollbar-width:none}
+.chart-range-tabs::-webkit-scrollbar{display:none}
+.chart-range-tabs button{min-width:48px;border:0;border-radius:9px;background:transparent;color:#8f9cad;padding:9px 8px;font-size:12px;font-weight:900;cursor:pointer;transition:background .18s,color .18s}
+.chart-range-tabs button:hover{background:#102033;color:#dce8f3}
+.chart-range-tabs button.active{background:#14283d;color:#7fb5ff;box-shadow:inset 0 -2px 0 #7fb5ff}
+.stock-chart-wrap{touch-action:none;user-select:none;-webkit-user-select:none}
+.stock-chart{cursor:crosshair}
+.chart-crosshair{position:absolute;top:5.3%;bottom:11.2%;width:1px;background:rgba(220,232,244,.58);border-left:1px dashed rgba(220,232,244,.45);opacity:0;pointer-events:none;transform:translateX(-50%);z-index:4}
+.chart-hover-dot{position:absolute;width:12px;height:12px;border:3px solid #07121d;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.28),0 0 14px rgba(255,255,255,.2);opacity:0;pointer-events:none;transform:translate(-50%,-50%);z-index:6}
+.chart-tooltip{position:absolute;min-width:148px;padding:10px 12px;border:1px solid #34516a;border-radius:11px;background:rgba(10,23,36,.96);box-shadow:0 12px 28px rgba(0,0,0,.38);opacity:0;pointer-events:none;transform:translate(-50%,calc(-100% - 14px));z-index:7;text-align:left;backdrop-filter:blur(8px)}
+.chart-tooltip strong{display:block;color:#f2f7fc;font-size:16px;line-height:1.1}
+.chart-tooltip span{display:block;margin-top:5px;color:#9fb0c2;font-size:10px;font-weight:750;white-space:nowrap}
+.stock-chart-wrap.is-inspecting .chart-crosshair,.stock-chart-wrap.is-inspecting .chart-hover-dot,.stock-chart-wrap.is-inspecting .chart-tooltip{opacity:1}
+.chart-inspect-help{margin-top:10px;color:#7f91a5;font-size:10px;text-align:center}
+
+@media(max-width:720px){
+  .chart-range-tabs{display:flex;justify-content:flex-start;gap:3px;margin-left:-4px;margin-right:-4px;padding-left:4px;padding-right:4px}
+  .chart-range-tabs button{flex:0 0 52px}
+  .chart-tooltip{min-width:132px;padding:9px 10px}
+  .chart-tooltip strong{font-size:14px}
+  .chart-inspect-help{font-size:9px}
+}
