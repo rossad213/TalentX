@@ -1,0 +1,131 @@
+name: Backfill historical player prices and deploy TalentX
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/backfill-price-history.yml"
+      - "scripts/backfill_price_history.py"
+      - "scripts/hourly_price_refresh.py"
+      - "chart-history.js"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Number of days of completed games to backfill"
+        required: false
+        default: "182"
+      max_athletes:
+        description: "Maximum matched athletes to process"
+        required: false
+        default: "2500"
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: talentx-pages
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade -r requirements.txt
+
+      - name: Restore latest deployed catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _catalog
+          mkdir -p _catalog
+          hourly_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/hourly-price-refresh.yml/runs?status=success&per_page=1")"
+          hourly_run_id="$(printf '%s' "$hourly_meta" | jq -r '.workflow_runs[0].id // empty')"
+          if [ -n "$hourly_run_id" ]; then
+            gh run download "$hourly_run_id" -R "$GITHUB_REPOSITORY" -n talentx-hourly-catalog -D _catalog
+          else
+            weekly_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+            weekly_run_id="$(printf '%s' "$weekly_meta" | jq -r '.workflow_runs[0].id // empty')"
+            test -n "$weekly_run_id"
+            gh run download "$weekly_run_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _catalog
+          fi
+          source_catalog="$(find _catalog -name current_catalog.json -print -quit)"
+          test -n "$source_catalog"
+          source_dir="$(dirname "$source_catalog")"
+          rm -rf data
+          mkdir -p data
+          cp -R "$source_dir"/. data/
+          test -f data/current_catalog.json
+          if [ ! -f data/taxonomy.json ]; then cp _catalog/repository-taxonomy.json data/taxonomy.json 2>/dev/null || cp data/taxonomy.json data/taxonomy.json; fi
+
+      - name: Backfill six months of completed games
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '182' }}
+          MAX_ATHLETES: ${{ inputs.max_athletes || '2500' }}
+        run: >-
+          python scripts/backfill_price_history.py
+          --catalog data/current_catalog.json
+          --days "$BACKFILL_DAYS"
+          --workers 20
+          --request-timeout 12
+          --max-athletes "$MAX_ATHLETES"
+          --max-game-move-pct 2.5
+
+      - name: Validate generated catalog
+        run: python scripts/validate_current_catalog.py --minimum 10000
+
+      - name: Upload backfilled catalog
+        uses: actions/upload-artifact@v4
+        with:
+          name: talentx-hourly-catalog
+          path: |
+            data/current_catalog.json
+            data/current_catalog.csv
+            data/catalog_manifest.json
+            data/current_source_manifest.json
+            data/pricing_enrichment_manifest.json
+            data/hourly_refresh_manifest.json
+            data/taxonomy.json
+          retention-days: 10
+          overwrite: true
+
+      - name: Prepare static Pages site
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp index.html app.js chart-history.js styles.css .nojekyll _site/
+          cp -R data _site/data
+          cp -R assets _site/assets
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: backfill
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
