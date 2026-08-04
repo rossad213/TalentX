@@ -2,11 +2,12 @@
  * TalentX historical chart reconstruction
  *
  * Charts remain flat between supported events. This module prefers explicit
- * price history, then event history, and finally the latest verified event.
- * It intentionally does not synthesize random market movement.
+ * dated price history, then dated event history, and finally reconstructs the
+ * catalog's saved trend across the prior six months. It never adds randomness.
  */
 (function(){
   const DAY=24*60*60*1000;
+  const RECONSTRUCTED_TREND_SPAN=182*DAY;
 
   function txDate(value){
     if(value===null||value===undefined||value==='') return NaN;
@@ -61,7 +62,6 @@
     }
     if(!events.length) return [];
 
-    // Work backward from today's known price so each event creates one step.
     let after=current;
     const points=[];
     for(let i=events.length-1;i>=0;i--){
@@ -74,6 +74,20 @@
       after=before;
     }
     return points.sort((a,b)=>a.time-b.time);
+  }
+
+  function txReconstructedTrendPoints(record,current,now){
+    const trend=(Array.isArray(record.trend)?record.trend:[])
+      .map(txNumber)
+      .filter(value=>Number.isFinite(value)&&value>0);
+    if(!trend.length) return [];
+    if(Math.abs(trend[trend.length-1]-current)>.005) trend.push(current);
+    if(trend.length===1) return [{time:now-RECONSTRUCTED_TREND_SPAN,value:trend[0]},{time:now,value:current}];
+    const start=now-RECONSTRUCTED_TREND_SPAN;
+    return trend.map((value,index)=>({
+      time:start+((now-start)*(index/(trend.length-1))),
+      value:Number(value.toFixed(2))
+    }));
   }
 
   function txStepSeries(points,start,now,count,current){
@@ -102,7 +116,8 @@
     const now=Date.now();
     const start=txRangeStart(range,now);
     const explicit=txExplicitPricePoints(record);
-    const eventPoints=explicit.length?explicit:txEventPoints(record,current);
-    return txStepSeries(eventPoints,start,now,config.points,current);
+    const events=explicit.length?explicit:txEventPoints(record,current);
+    const points=events.length?events:txReconstructedTrendPoints(record,current,now);
+    return txStepSeries(points,start,now,config.points,current);
   };
 })();
