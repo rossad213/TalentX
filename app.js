@@ -112,7 +112,7 @@ function localPrice(r){
 function displayChange(r){
   const listed=Number(r.marketPrice||0);
   const current=Number(localPrice(r));
-  const recorded=Number(r.dailyChange||0);
+  const recorded=Number(r.lastPriceEventId?(r.lastGameMovePct??r.dailyChange??0):(r.dailyChange||0));
   if(!Number.isFinite(listed)||listed<=0||!Number.isFinite(current)) return recorded;
   if(Math.abs(current-listed)<.005) return recorded;
   const prior=listed/(1+recorded/100);

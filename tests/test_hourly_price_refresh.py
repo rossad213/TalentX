@@ -19,6 +19,7 @@ from hourly_price_refresh import (  # noqa: E402
     game_event_move,
     prior_processed_events,
 )
+from merge_hourly_market_state import merge_market_state  # noqa: E402
 
 
 class HourlyGamePricingTests(unittest.TestCase):
@@ -240,6 +241,35 @@ class HourlyGamePricingTests(unittest.TestCase):
         self.assertEqual(player_events, {})
         self.assertEqual(events, [])
         self.assertEqual(warnings, [])
+
+    def test_weekly_rebuild_preserves_prior_game_price_without_reapplying_move(self) -> None:
+        rebuilt = [
+            {
+                "id": "cur-a-ja-wilson",
+                "marketPrice": 154.99,
+                "fundamentalValue": 151.25,
+                "dailyChange": 0.0,
+                "trend": [154.99] * 18,
+            }
+        ]
+        prior_hourly = [
+            {
+                "id": "cur-a-ja-wilson",
+                "marketPrice": 155.45,
+                "fundamentalValue": 150.18,
+                "dailyChange": 0.3,
+                "lastPriceEventId": "espn:401857111",
+                "lastGameMovePct": 0.3,
+                "trend": [154.99] * 17 + [155.45],
+            }
+        ]
+        merged, carried = merge_market_state(rebuilt, prior_hourly)
+        self.assertEqual(carried, 1)
+        self.assertEqual(merged[0]["fundamentalValue"], 151.25)
+        self.assertEqual(merged[0]["marketPrice"], 155.45)
+        self.assertEqual(merged[0]["lastGameMovePct"], 0.3)
+        self.assertEqual(merged[0]["dailyChange"], 0.0)
+        self.assertEqual(merged[0]["trend"][-1], 155.45)
 
 
 if __name__ == "__main__":

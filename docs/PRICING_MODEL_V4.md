@@ -93,6 +93,7 @@ After a full evidence build, every listing begins with a 0.00% change and a flat
 - A single game is capped at 2.5%, preventing one result from overwhelming established value.
 - The hourly job searches the prior 48 hours, so delayed runs can catch games that a short hourly window would miss.
 - Processed-event history is retained across weekly rebuilds, preventing the same game from being priced twice.
+- Weekly evidence rebuilds keep their newly calculated fundamentals while carrying forward recorded event prices and chart history.
 
 ## Regression tests
 

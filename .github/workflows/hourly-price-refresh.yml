@@ -87,6 +87,14 @@ jobs:
               fi
             done
             echo "Restored hourly overlay from run $hourly_run_id over weekly run $weekly_run_id."
+          elif [ -n "$hourly_run_id" ]; then
+            prior_hourly_catalog="$(find _hourly -name current_catalog.json -print -quit)"
+            if [ -n "$prior_hourly_catalog" ]; then
+              python scripts/merge_hourly_market_state.py \
+                --base data/current_catalog.json \
+                --overlay "$prior_hourly_catalog"
+            fi
+            echo "Using weekly run $weekly_run_id with prior event-driven market history preserved."
           else
             echo "Using weekly run $weekly_run_id as the hourly baseline."
           fi
