@@ -11,9 +11,6 @@ on:
       - "index.html"
       - "app.js"
       - "styles.css"
-  schedule:
-    # Full roster-and-pricing refresh every Sunday at 08:17 UTC.
-    - cron: "17 8 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -28,7 +25,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -44,12 +41,6 @@ jobs:
 
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
-
-      - name: Add 9,400 source-linked catalog identities
-        run: >-
-          python scripts/build_large_catalog_expansion.py
-          --workers 8
-          --request-timeout 25
 
       - name: Build 10,000-name current roster expansion
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
