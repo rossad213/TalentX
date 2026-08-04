@@ -1,6 +1,10 @@
 name: Refresh source-linked catalog expansion
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/refresh-catalog-expansion.yml"
   schedule:
     # Refresh source-linked identities monthly, separate from site deployment.
     - cron: "17 8 1 * *"
