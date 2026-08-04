@@ -6,7 +6,7 @@ script adds a second layer: recent statistics, career statistics, awards counts,
 age/experience, and role-aware cohort ranking. It then recalculates every current
 price through the existing TalentX active-career formula:
 
-30% performance + 25% achievements + 20% potential + 15% audience + 10% availability.
+35% performance + 25% achievements + 15% potential + 15% audience + 10% availability.
 
 Records without usable evidence stay conservative and explicitly provisional.
 """
@@ -46,7 +46,7 @@ ESPN_ATHLETE_PROFILE = "https://site.api.espn.com/apis/site/v2/sports/{sport}/{l
 ESPN_CORE_ATHLETE = "https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/athletes/{athlete_id}?lang=en&region=us"
 ESPN_AWARDS = "https://sports.core.api.espn.com/v2/sports/{sport}/leagues/{league}/athletes/{athlete_id}/awards?limit=100"
 NHL_LANDING = "https://api-web.nhle.com/v1/player/{athlete_id}/landing"
-USER_AGENT = "TalentX-Pricing-Enricher/3.4 (+https://github.com/rossad213/TalentX)"
+USER_AGENT = "TalentX-Pricing-Enricher/3.5 (+https://github.com/rossad213/TalentX)"
 
 SPORT_PATH = {
     "American Football": "football",
@@ -789,10 +789,9 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         recent_pct = pcts["recentProduction"]
         career_pct = max(pcts["careerProduction"], pcts["careerUsage"] * 0.82)
         efficiency_pct = pcts["efficiency"]
-        usage_pct = pcts["usage"]
         award_pct = pcts["awardPoints"]
 
-        performance = clamp(24 + 72 * (recent_pct * 0.56 + efficiency_pct * 0.24 + usage_pct * 0.20), 20, 98)
+        performance = clamp(24 + 72 * (recent_pct * 0.70 + efficiency_pct * 0.30), 20, 98)
         achievements = clamp(8 + 88 * (career_pct * 0.63 + award_pct * 0.27 + pcts["careerUsage"] * 0.10), 8, 99)
         potential = potential_prior(record, recent_pct)
 
@@ -800,11 +799,7 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
         news_boost = min(12.0, math.log1p(item.get("newsCount", 0)) * 4.0)
         audience = clamp(base_audience * 0.68 + recent_pct * 18 + award_pct * 10 + news_boost, 20, 97)
 
-        games_value = max(signals.get("usage", 0.0), 0.0)
-        if games_value > 0:
-            availability = clamp(52 + usage_pct * 42, 48, 96)
-        else:
-            availability = 72 if record.get("careerStatus") == "Active" else 55
+        availability = 75 if record.get("careerStatus") == "Active" else 55
 
         consistency = clamp(30 + career_pct * 35 + recent_pct * 25 + availability * 0.10, 28, 96)
         completeness = sum(
@@ -812,7 +807,7 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for condition in (
                 bool(item.get("recent")),
                 bool(item.get("career")),
-                signals.get("usage", 0) > 0,
+                int(item.get("professionalGames") or 0) > 0,
                 signals.get("awardPoints", 0) > 0,
                 number(record.get("age")) is not None,
             )
@@ -849,6 +844,11 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "professionalGames": record.get("professionalGames", 0),
             "percentiles": {key: round(value, 4) for key, value in pcts.items()},
             "rawSignals": {key: round(value, 4) for key, value in signals.items()},
+            "valuationInputs": {
+                "performance": "70% recent-production percentile + 30% efficiency percentile",
+                "usageIncludedInPerformance": False,
+                "availability": "Neutral 75 active / 55 inactive pending normalized games-available evidence",
+            },
         }
         if item.get("errors"):
             record["pricingEvidenceWarnings"] = item["errors"]
@@ -946,7 +946,7 @@ def main() -> int:
         if record.get("pricingEnrichmentError")
     )
     manifest = {
-        "version": "3.4-rookie-transition-inputs",
+        "version": "3.5-production-first-athlete-inputs",
         "generatedAt": generated_at,
         "elapsedSeconds": round(time.time() - started, 1),
         "catalogRecords": len(repriced),
@@ -957,14 +957,17 @@ def main() -> int:
         "minimumRequired": args.minimum_enriched,
         "enrichedByLeague": dict(league_counts.most_common()),
         "topFailureReasons": dict(error_counts.most_common(12)),
-        "formula": {
-            "performance": 0.30,
+        "athleteFormula": {
+            "performance": 0.35,
             "achievements": 0.25,
-            "potential": 0.20,
+            "potential": 0.15,
             "audience": 0.15,
             "availability": 0.10,
         },
-        "method": "Recent and career statistics plus awards are converted to position-and-league cohort percentiles before the TalentX formula is applied.",
+        "performanceFormula": "70% recent-production percentile + 30% efficiency percentile",
+        "usageIncludedInPerformance": False,
+        "availabilityRule": "Neutral 75 active / 55 inactive pending normalized games-available evidence",
+        "method": "Recent and career statistics plus awards are converted to position-and-league cohort percentiles before the production-first athlete formula is applied.",
     }
     ENRICHMENT_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -974,12 +977,12 @@ def main() -> int:
             existing = {}
         existing.update(
             {
-                "version": "3.4-current-10000-rookie-transition",
+                "version": "3.5-current-10000-production-first-athlete",
                 "pricingEvidenceGeneratedAt": generated_at,
                 "pricingEnrichedRecords": enriched_count,
                 "pricingProvisionalRecords": provisional_count,
                 "rookieTransitionRecords": rookie_count,
-                "pricingInputMethod": "Position-and-league normalized statistics and awards plus draft-based rookie IPO transitions",
+                "pricingInputMethod": "Production-first position-and-league normalized statistics and awards plus draft-based rookie IPO transitions",
                 "pricingEnrichmentManifest": "data/pricing_enrichment_manifest.json",
             }
         )

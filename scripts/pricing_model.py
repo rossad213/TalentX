@@ -25,6 +25,13 @@ ACTIVE_WEIGHTS = {
     "audience": 0.15,
     "availability": 0.10,
 }
+ATHLETE_ACTIVE_WEIGHTS = {
+    "performance": 0.35,
+    "achievements": 0.25,
+    "potential": 0.15,
+    "audience": 0.15,
+    "availability": 0.10,
+}
 LEGACY_WEIGHTS = {
     "legacy": 0.35,
     "audience": 0.25,
@@ -41,7 +48,7 @@ ROOKIE_WEIGHTS = {
     "availability": 0.07,
     "audience": 0.05,
 }
-MODEL_VERSION = "3.4-rookie-transition"
+MODEL_VERSION = "3.5-production-first-athlete"
 
 ROOKIE_SPORT_CONFIG: dict[str, dict[str, Any]] = {
     "NFL": {
@@ -118,8 +125,15 @@ def deterministic_rng(record: dict[str, Any]) -> random.Random:
     return random.Random(int.from_bytes(digest[:8], "big"))
 
 
-def active_score(metrics: dict[str, Any]) -> float:
-    return round(sum(clamp(metrics.get(key), 0, 100) * weight for key, weight in ACTIVE_WEIGHTS.items()), 1)
+def active_weights_for(record: dict[str, Any]) -> dict[str, float]:
+    if record.get("primaryCategory") == "Athlete":
+        return ATHLETE_ACTIVE_WEIGHTS
+    return ACTIVE_WEIGHTS
+
+
+def active_score(metrics: dict[str, Any], weights: dict[str, float] | None = None) -> float:
+    selected = weights or ACTIVE_WEIGHTS
+    return round(sum(clamp(metrics.get(key), 0, 100) * weight for key, weight in selected.items()), 1)
 
 
 def legacy_score(metrics: dict[str, Any]) -> float:
@@ -260,7 +274,8 @@ def rookie_metrics_for(record: dict[str, Any], active_metrics: dict[str, Any]) -
 
 
 def active_pricing_components(record: dict[str, Any], metrics: dict[str, Any]) -> dict[str, Any]:
-    active_model_score = active_score(metrics)
+    active_weights = active_weights_for(record)
+    active_model_score = active_score(metrics, active_weights)
     active_fundamental = fundamental_from_score(active_model_score)
     provisional_cap: float | None = None
     if str(record.get("pricingDataStatus", "")).startswith("Provisional"):
@@ -286,6 +301,7 @@ def active_pricing_components(record: dict[str, Any], metrics: dict[str, Any]) -
         influence = 0.0
 
     return {
+        "activeWeights": active_weights,
         "activeScore": active_model_score,
         "activeFundamental": round(active_fundamental, 2),
         "rookieMetrics": rookie_metrics,
@@ -503,7 +519,18 @@ def apply_active_pricing(record: dict[str, Any], overrides: dict[tuple[str, str]
             result["pricingDataStatus"] = "Evidence enriched — professional statistics; draft influence expired"
 
     result["pricingAudit"] = {
-        "weights": ACTIVE_WEIGHTS,
+        "weights": components["activeWeights"],
+        "performanceFormula": (
+            "24 + 72 × (70% recent-production percentile + 30% efficiency percentile)"
+            if result.get("primaryCategory") == "Athlete"
+            else None
+        ),
+        "usageIncludedInPerformance": False if result.get("primaryCategory") == "Athlete" else None,
+        "availabilityRule": (
+            "75 active / 55 inactive pending normalized games-available evidence"
+            if result.get("primaryCategory") == "Athlete"
+            else None
+        ),
         "activeScore": components["activeScore"],
         "activeFundamental": components["activeFundamental"],
         "rookieWeights": ROOKIE_WEIGHTS if rookie_metrics else None,

@@ -10,6 +10,7 @@ from typing import Any
 
 from pricing_model import (
     ACTIVE_WEIGHTS,
+    ATHLETE_ACTIVE_WEIGHTS,
     LEGACY_WEIGHTS,
     MODEL_VERSION,
     ROOKIE_WEIGHTS,
@@ -43,10 +44,19 @@ def main() -> int:
     historical = load(DATA / "legacy_catalog_v2.json")
     errors: list[str] = []
 
+    expected_athlete_weights = {
+        "performance": 0.35,
+        "achievements": 0.25,
+        "potential": 0.15,
+        "audience": 0.15,
+        "availability": 0.10,
+    }
+    if ATHLETE_ACTIVE_WEIGHTS != expected_athlete_weights:
+        errors.append(f"Athlete weights must equal {expected_athlete_weights}")
+    if abs(sum(ATHLETE_ACTIVE_WEIGHTS.values()) - 1.0) > 1e-9:
+        errors.append("Athlete pricing weights must total 100%")
     if ACTIVE_WEIGHTS.get("achievements") != 0.25 or ACTIVE_WEIGHTS.get("potential") != 0.20:
-        errors.append("Active weights must use 25% achievements and 20% potential")
-    if ACTIVE_WEIGHTS.get("achievements", 0) <= ACTIVE_WEIGHTS.get("potential", 0):
-        errors.append("Achievements must outweigh potential in the active-career model")
+        errors.append("Non-athlete active weights must remain unchanged")
     if abs(sum(ACTIVE_WEIGHTS.values()) - 1.0) > 1e-9:
         errors.append("Active pricing weights must total 100%")
     if abs(sum(ROOKIE_WEIGHTS.values()) - 1.0) > 1e-9:
@@ -120,6 +130,42 @@ def main() -> int:
             if len(errors) >= 50:
                 break
 
+    for record in enriched:
+        if record.get("primaryCategory") != "Athlete":
+            continue
+        metrics = record.get("activeMetrics")
+        summary = record.get("pricingEvidenceSummary")
+        percentiles = summary.get("percentiles") if isinstance(summary, dict) else None
+        if not isinstance(metrics, dict) or not isinstance(percentiles, dict):
+            continue
+        try:
+            production = float(percentiles["recentProduction"])
+            efficiency = float(percentiles["efficiency"])
+            actual_performance = float(metrics["performance"])
+            actual_availability = float(metrics["availability"])
+        except (KeyError, TypeError, ValueError):
+            errors.append(f"Missing revised athlete inputs: {record.get('name')}")
+            if len(errors) >= 50:
+                break
+            continue
+        expected_performance = round(
+            max(20.0, min(98.0, 24 + 72 * (production * 0.70 + efficiency * 0.30))),
+            1,
+        )
+        expected_availability = 75.0 if record.get("careerStatus") == "Active" else 55.0
+        if abs(actual_performance - expected_performance) > TOLERANCE:
+            errors.append(
+                f"Production-first performance mismatch: {record.get('name')} "
+                f"expected {expected_performance}, found {actual_performance}"
+            )
+        if abs(actual_availability - expected_availability) > TOLERANCE:
+            errors.append(
+                f"Neutral availability mismatch: {record.get('name')} "
+                f"expected {expected_availability}, found {actual_availability}"
+            )
+        if len(errors) >= 50:
+            break
+
     rookies = [record for record in current if isinstance(record.get("rookiePricing"), dict)]
     for record in rookies:
         rookie = record["rookiePricing"]
@@ -170,6 +216,7 @@ def main() -> int:
     print(f"Checked {len(current) + len(historical):,} records against model weights.")
     print(f"Evidence enriched: {len(enriched):,}; provisional: {len(provisional):,}; rookie transitions: {len(rookies):,}")
     print(f"Active weights: {ACTIVE_WEIGHTS}")
+    print(f"Athlete active weights: {ATHLETE_ACTIVE_WEIGHTS}")
     print(f"Legacy weights: {LEGACY_WEIGHTS}")
     for line in comparison_output:
         print(line)
