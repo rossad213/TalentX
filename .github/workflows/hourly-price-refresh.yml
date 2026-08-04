@@ -1,6 +1,13 @@
 name: Hourly price refresh and deploy TalentX
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/hourly-price-refresh.yml"
+  workflow_run:
+    workflows: ["Build current catalog and deploy TalentX"]
+    types: [completed]
   schedule:
     - cron: "23 * * * *"
   workflow_dispatch:
@@ -17,6 +24,7 @@ concurrency:
 
 jobs:
   refresh:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
