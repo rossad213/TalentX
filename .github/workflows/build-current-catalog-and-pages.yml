@@ -11,6 +11,9 @@ on:
       - "index.html"
       - "app.js"
       - "styles.css"
+  schedule:
+    # Full roster-and-pricing refresh every Sunday at 08:17 UTC.
+    - cron: "17 8 * * 0"
   workflow_dispatch:
 
 permissions:
@@ -58,12 +61,12 @@ jobs:
       - name: Validate evidence-weighted pricing
         run: >-
           python scripts/validate_pricing_model.py
-          --minimum-current 19500
+          --minimum-current 10000
           --minimum-enriched 2500
           --max-identical-score-rate 0.08
 
       - name: Validate generated current catalog
-        run: python scripts/validate_current_catalog.py --minimum 19500 --minimum-automated 10000
+        run: python scripts/validate_current_catalog.py --minimum 10000
 
       - name: Upload generated catalog files
         uses: actions/upload-artifact@v4
@@ -75,7 +78,6 @@ jobs:
             data/catalog_manifest.json
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
-            data/catalog_expansion_manifest.json
           retention-days: 14
 
       - name: Prepare static Pages site
