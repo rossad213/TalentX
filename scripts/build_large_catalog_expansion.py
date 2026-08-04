@@ -160,10 +160,10 @@ class ApiClient:
         self.stats = SourceStats()
         self.session = requests.Session()
         retries = Retry(
-            total=4,
-            connect=4,
-            read=4,
-            backoff_factor=0.55,
+            total=2,
+            connect=2,
+            read=2,
+            backoff_factor=0.4,
             status_forcelist=(429, 500, 502, 503, 504),
             allowed_methods=frozenset(["GET"]),
         )
