@@ -1,12 +1,14 @@
-name: Refresh source-linked catalog expansion
+name: Add source-linked catalog batch
 
 on:
   push:
     branches: [main]
     paths:
       - ".github/workflows/refresh-catalog-expansion.yml"
+      - "data/catalog_expansion_config.json"
+      - "scripts/build_large_catalog_expansion.py"
   schedule:
-    # Refresh source-linked identities monthly, separate from site deployment.
+    # Rebuild the active batch monthly without removing earlier completed batches.
     - cron: "17 8 1 * *"
   workflow_dispatch:
 
@@ -20,7 +22,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -37,14 +39,14 @@ jobs:
       - name: Rebuild curated seed
         run: python scripts/build_non_athlete_catalog.py
 
-      - name: Refresh 9,400 source-linked identities
-        timeout-minutes: 75
+      - name: Add first 500-name source-linked batch
+        timeout-minutes: 30
         run: >-
           python scripts/build_large_catalog_expansion.py
-          --workers 24
+          --workers 16
           --request-timeout 7
 
-      - name: Confirm expansion totals
+      - name: Confirm batch totals
         run: |
           python - <<'PY'
           import json
@@ -53,12 +55,12 @@ jobs:
           manifest = json.loads(Path("data/catalog_expansion_manifest.json").read_text())
           expected = int(manifest["requestedTotalAdditions"])
           generated = int(manifest["generatedTotalAdditions"])
-          if expected != 9400 or generated != expected:
-              raise SystemExit(f"Expected 9,400 additions; generated {generated:,}")
+          if expected != 500 or generated != expected:
+              raise SystemExit(f"Expected 500 additions; generated {generated:,}")
           print(f"Validated {generated:,} source-linked additions")
           PY
 
-      - name: Commit refreshed expansion
+      - name: Commit completed batch
         run: |
           if git diff --quiet -- data/current_seed.json data/catalog_expansion_manifest.json data/taxonomy.json data/non_athlete_manifest.json; then
             echo "No catalog changes to commit."
@@ -67,5 +69,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/current_seed.json data/catalog_expansion_manifest.json data/taxonomy.json data/non_athlete_manifest.json
-          git commit -m "Refresh source-linked TalentX catalog"
+          git commit -m "Add source-linked TalentX catalog batch 001"
           git push
