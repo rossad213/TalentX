@@ -234,27 +234,3 @@ linear-gradient(145deg,#12243a,#08131f)}
 
 @media (max-width:1100px){.chart-stats{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:720px){.chart-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-y-label,.stock-x-label{font-size:13px}}
-
-/* Interactive stock-style chart controls */
-.chart-range-tabs{display:grid;grid-template-columns:repeat(8,minmax(48px,1fr));gap:4px;margin:-2px 0 12px;padding-bottom:10px;border-bottom:1px solid rgba(31,53,74,.8);overflow-x:auto;scrollbar-width:none}
-.chart-range-tabs::-webkit-scrollbar{display:none}
-.chart-range-tabs button{min-width:48px;border:0;border-radius:9px;background:transparent;color:#8f9cad;padding:9px 8px;font-size:12px;font-weight:900;cursor:pointer;transition:background .18s,color .18s}
-.chart-range-tabs button:hover{background:#102033;color:#dce8f3}
-.chart-range-tabs button.active{background:#14283d;color:#7fb5ff;box-shadow:inset 0 -2px 0 #7fb5ff}
-.stock-chart-wrap{touch-action:none;user-select:none;-webkit-user-select:none}
-.stock-chart{cursor:crosshair}
-.chart-crosshair{position:absolute;top:5.3%;bottom:11.2%;width:1px;background:rgba(220,232,244,.58);border-left:1px dashed rgba(220,232,244,.45);opacity:0;pointer-events:none;transform:translateX(-50%);z-index:4}
-.chart-hover-dot{position:absolute;width:12px;height:12px;border:3px solid #07121d;border-radius:50%;box-shadow:0 0 0 2px rgba(255,255,255,.28),0 0 14px rgba(255,255,255,.2);opacity:0;pointer-events:none;transform:translate(-50%,-50%);z-index:6}
-.chart-tooltip{position:absolute;min-width:148px;padding:10px 12px;border:1px solid #34516a;border-radius:11px;background:rgba(10,23,36,.96);box-shadow:0 12px 28px rgba(0,0,0,.38);opacity:0;pointer-events:none;transform:translate(-50%,calc(-100% - 14px));z-index:7;text-align:left;backdrop-filter:blur(8px)}
-.chart-tooltip strong{display:block;color:#f2f7fc;font-size:16px;line-height:1.1}
-.chart-tooltip span{display:block;margin-top:5px;color:#9fb0c2;font-size:10px;font-weight:750;white-space:nowrap}
-.stock-chart-wrap.is-inspecting .chart-crosshair,.stock-chart-wrap.is-inspecting .chart-hover-dot,.stock-chart-wrap.is-inspecting .chart-tooltip{opacity:1}
-.chart-inspect-help{margin-top:10px;color:#7f91a5;font-size:10px;text-align:center}
-
-@media(max-width:720px){
-  .chart-range-tabs{display:flex;justify-content:flex-start;gap:3px;margin-left:-4px;margin-right:-4px;padding-left:4px;padding-right:4px}
-  .chart-range-tabs button{flex:0 0 52px}
-  .chart-tooltip{min-width:132px;padding:9px 10px}
-  .chart-tooltip strong{font-size:14px}
-  .chart-inspect-help{font-size:9px}
-}

@@ -32,19 +32,6 @@ let selectedId=null;
 let profileTab='overview';
 let tradeMode='buy';
 let retirementSelection='';
-let chartRange='1D';
-
-const CHART_RANGE_CONFIG={
-  '1D':{duration:8*60*60*1000,points:36,volatility:.012},
-  '5D':{duration:5*24*60*60*1000,points:48,volatility:.028},
-  '1M':{duration:30*24*60*60*1000,points:54,volatility:.050},
-  '6M':{duration:182*24*60*60*1000,points:64,volatility:.095},
-  'YTD':{duration:null,points:64,volatility:.110},
-  '1Y':{duration:365*24*60*60*1000,points:72,volatility:.145},
-  '5Y':{duration:5*365*24*60*60*1000,points:82,volatility:.260},
-  'Max':{duration:10*365*24*60*60*1000,points:92,volatility:.360}
-};
-const CHART_RANGES=Object.keys(CHART_RANGE_CONFIG);
 
 let filters={
   segment:'Current',
@@ -58,7 +45,7 @@ let filters={
   page:1
 };
 
-const PRICING_MODEL_VERSION='3.3-evidence-ranked-inputs';
+const PRICING_MODEL_VERSION='3.4-rookie-transition';
 const defaultState={cash:25000,holdings:{},watchlist:[],prices:{},transactions:[],pricingModelVersion:PRICING_MODEL_VERSION};
 let state=loadState();
 
@@ -101,7 +88,7 @@ function go(next){
   route=next; selectedId=null; profileTab='overview'; setActiveNav(); render();
 }
 function openProfile(id){
-  selectedId=id; route='profile'; profileTab='overview'; chartRange='1D'; setActiveNav(); render(); window.scrollTo({top:0,behavior:'smooth'});
+  selectedId=id; route='profile'; profileTab='overview'; setActiveNav(); render(); window.scrollTo({top:0,behavior:'smooth'});
 }
 function note(){
   const automated=Number(manifest?.automatedRosterVerifiedRecords||0);
@@ -128,154 +115,53 @@ function displayTrend(r){
   }
   return base;
 }
-function hashSeed(value){
-  let h=2166136261;
-  for(const char of String(value||'')){h^=char.charCodeAt(0);h=Math.imul(h,16777619)}
-  return h>>>0;
-}
-function seededRandom(seed){
-  let value=seed>>>0;
-  return ()=>{
-    value+=0x6D2B79F5;
-    let t=value;
-    t=Math.imul(t^(t>>>15),t|1);
-    t^=t+Math.imul(t^(t>>>7),t|61);
-    return ((t^(t>>>14))>>>0)/4294967296;
-  };
-}
-function resampleValues(values,count){
-  if(!values.length) return [];
-  if(values.length===1) return Array(count).fill(Number(values[0]));
-  return Array.from({length:count},(_,i)=>{
-    const position=(i/(count-1))*(values.length-1);
-    const lower=Math.floor(position),upper=Math.min(values.length-1,Math.ceil(position));
-    const blend=position-lower;
-    return Number((values[lower]+(values[upper]-values[lower])*blend).toFixed(2));
-  });
-}
-function chartTargetReturn(r,range){
-  const score=(Number(r.careerScore||65)-65)/35;
-  const momentum=Number(r.momentumPct||0)/100;
-  const daily=Number(r.dailyChange||0)/100;
-  const target={
-    '5D':daily*1.8+momentum*.20,
-    '1M':daily*2.5+momentum*.60+score*.01,
-    '6M':momentum*2.5+score*.08,
-    'YTD':momentum*3.0+score*.11,
-    '1Y':momentum*4.0+score*.16,
-    '5Y':score*.55+.18,
-    'Max':score*.90+.32
-  }[range]||daily;
-  const limit={'5D':.10,'1M':.20,'6M':.42,'YTD':.55,'1Y':.70,'5Y':1.65,'Max':2.50}[range]||.08;
-  return clamp(target,Math.max(-.85,-limit),limit);
-}
-function chartSeries(r,range=chartRange){
-  const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
-  const current=Math.max(1,Number(localPrice(r))||1);
-  const now=Date.now();
-  const start=range==='YTD'?new Date(new Date(now).getFullYear(),0,1).getTime():now-config.duration;
-  let values;
-  if(range==='1D'){
-    const base=displayTrend(r);
-    values=base.length?resampleValues(base,config.points):Array(config.points).fill(current);
-    values[values.length-1]=Number(current.toFixed(2));
-  }else{
-    const rng=seededRandom(hashSeed(`${r.id}:${range}:talentx-chart-v2`));
-    const targetReturn=chartTargetReturn(r,range);
-    const startPrice=Math.max(1,current/(1+targetReturn));
-    const noise=[0];
-    for(let i=1;i<config.points;i++) noise.push(noise[i-1]+(rng()-.5)*2);
-    const totalNoise=noise[noise.length-1];
-    const normalizer=Math.sqrt(config.points);
-    values=noise.map((raw,i)=>{
-      const t=i/(config.points-1);
-      const baseline=Math.log(startPrice)+(Math.log(current)-Math.log(startPrice))*t;
-      const bridge=(raw-totalNoise*t)/normalizer;
-      return Number(Math.max(1,Math.exp(baseline+bridge*config.volatility)).toFixed(2));
-    });
-    values[0]=Number(startPrice.toFixed(2));
-    values[values.length-1]=Number(current.toFixed(2));
-  }
-  return values.map((value,index)=>({
-    value,
-    time:start+((now-start)*(index/(values.length-1)))
-  }));
-}
-function formatAxisTime(timestamp,range){
-  const date=new Date(Number(timestamp));
-  if(range==='1D') return date.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  if(range==='5D') return date.toLocaleDateString([],{weekday:'short'});
-  if(range==='1M') return date.toLocaleDateString([],{month:'short',day:'numeric'});
-  if(['6M','YTD','1Y'].includes(range)) return date.toLocaleDateString([],{month:'short'});
-  return date.toLocaleDateString([],{year:'numeric'});
-}
-function formatHoverTime(timestamp,range){
-  const date=new Date(Number(timestamp));
-  if(range==='1D') return date.toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'});
-  if(range==='5D') return date.toLocaleString([],{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
-  if(['5Y','Max'].includes(range)) return date.toLocaleDateString([],{month:'short',year:'numeric'});
-  return date.toLocaleDateString([],{month:'short',day:'numeric',year:'numeric'});
-}
-function chartRangeTabs(){
-  return `<div class="chart-range-tabs" role="tablist" aria-label="Price chart period">${CHART_RANGES.map(range=>`<button type="button" role="tab" aria-selected="${chartRange===range}" class="${chartRange===range?'active':''}" onclick="setChartRange('${range}')">${range}</button>`).join('')}</div>`;
-}
-function setChartRange(range){
-  if(!CHART_RANGE_CONFIG[range]||chartRange===range) return;
-  const y=window.scrollY;
-  chartRange=range;
-  render();
-  requestAnimationFrame(()=>window.scrollTo({top:y,left:0,behavior:'auto'}));
-}
 function chartStats(r){
-  const series=chartSeries(r);
-  const a=series.map(point=>point.value); if(!a.length) return '';
-  const open=a[0],high=Math.max(...a),low=Math.min(...a),current=a[a.length-1];
+  const a=displayTrend(r); if(!a.length) return '';
+  const open=a[0], high=Math.max(...a), low=Math.min(...a), current=a[a.length-1];
   const delta=current-open;
   const pct=open?((delta/open)*100):0;
   const stats=[
-    ['Open',money(open)],
-    ['High',money(high)],
-    ['Low',money(low)],
-    ['Current',money(current)],
-    ['Change',`${delta>=0?'+':'-'}${money(Math.abs(delta))}`],
-    ['Return',`${pct>=0?'+':''}${pct.toFixed(2)}%`]
+    ['Open', money(open)],
+    ['High', money(high)],
+    ['Low', money(low)],
+    ['Current', money(current)],
+    ['Change', `${delta>=0?'+':'-'}${money(Math.abs(delta))}`],
+    ['Return', `${pct>=0?'+':''}${pct.toFixed(2)}%`]
   ];
   return `<div class="chart-stats">${stats.map(([label,value])=>`<div class="chart-stat"><small>${label}</small><strong class="${label==='Change'||label==='Return'?(delta>=0?'positive':'negative'):''}">${value}</strong></div>`).join('')}</div>`;
 }
 function detailedTrendSvg(r,height=250){
-  const series=chartSeries(r);
-  const a=series.map(point=>point.value); if(!a.length) return `<div class="chart-empty">No chart history yet.</div>`;
+  const a=displayTrend(r); if(!a.length) return `<div class="chart-empty">No chart history yet.</div>`;
   const up=a[a.length-1]>=a[0];
   const color=up?'#58ef78':'#ff5e79';
   const W=1000,H=340,padL=18,padR=108,padT=18,padB=38;
   const min=Math.min(...a),max=Math.max(...a),range=Math.max(1,(max-min)*1.12);
-  const floor=min-(range*.04),ceil=floor+range;
-  const usableW=W-padL-padR,usableH=H-padT-padB;
+  const floor=min-(range*0.04),ceil=floor+range;
+  const usableW=W-padL-padR, usableH=H-padT-padB;
   const x=i=>padL+(a.length===1?usableW:(i/(a.length-1))*usableW);
   const y=v=>padT+((ceil-v)/(ceil-floor))*usableH;
   const points=a.map((v,i)=>`${x(i).toFixed(2)},${y(v).toFixed(2)}`);
   const linePoints=points.join(' ');
   const fillPoints=`${padL},${H-padB} ${linePoints} ${x(a.length-1)},${H-padB}`;
   const ticks=[0,.25,.5,.75,1].map(t=>Number((ceil-(range*t)).toFixed(2)));
-  const current=a[a.length-1],open=a[0],high=Math.max(...a),low=Math.min(...a);
-  const highIndex=a.indexOf(high),lowIndex=a.indexOf(low);
-  const currentY=y(current),currentX=x(a.length-1);
+  const current=a[a.length-1], open=a[0], high=Math.max(...a), low=Math.min(...a);
+  const highIndex=a.indexOf(high), lowIndex=a.indexOf(low);
+  const currentY=y(current), currentX=x(a.length-1);
   const priceTagY=Math.max(padT+12,Math.min(H-padB-12,currentY));
   const priceTagX=Math.min(W-76,currentX+18);
   const tickLines=ticks.map((v,idx)=>`<g><line x1="${padL}" y1="${y(v).toFixed(2)}" x2="${W-padR+8}" y2="${y(v).toFixed(2)}" class="stock-grid-line ${idx===ticks.length-1?'stock-grid-line--base':''}"></line><text x="${W-padR+14}" y="${(y(v)+4).toFixed(2)}" class="stock-y-label">${money(v)}</text></g>`).join('');
-  const labelIndexes=[0,Math.floor((a.length-1)/2),a.length-1];
-  const xLabels=labelIndexes.map((index,labelIndex)=>`<text x="${x(index).toFixed(2)}" y="${H-10}" text-anchor="${labelIndex===0?'start':labelIndex===2?'end':'middle'}" class="stock-x-label">${esc(formatAxisTime(series[index].time,chartRange))}</text>`).join('');
-  const delta=current-open,pct=open?((delta/open)*100):0;
-  return `<div class="stock-chart-wrap" style="height:${height}px" data-values="${a.join(',')}" data-times="${series.map(point=>Math.round(point.time)).join(',')}" data-range="${chartRange}" data-floor="${floor}" data-ceil="${ceil}" data-color="${color}">
-    <svg class="stock-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Simulated ${chartRange} price chart for ${esc(r.name)}" onpointermove="trackChartPointer(event)" onpointerdown="beginChartPointer(event)" onpointerup="endChartPointer(event)" onpointercancel="endChartPointer(event)" onpointerleave="hideChartPointer(event)">
+  const xLabels=[{p:0,label:'Open'},{p:.5,label:'Mid'},{p:1,label:'Now'}].map(item=>`<text x="${(padL+usableW*item.p).toFixed(2)}" y="${H-10}" text-anchor="${item.p===0?'start':item.p===1?'end':'middle'}" class="stock-x-label">${item.label}</text>`).join('');
+  const delta=current-open, pct=open?((delta/open)*100):0;
+  return `<div class="stock-chart-wrap" style="height:${height}px">
+    <svg class="stock-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="Simulated price chart for ${esc(r.name)}">
       <defs>
-        <linearGradient id="stock-fill-${esc(r.id)}-${chartRange}" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id="stock-fill-${esc(r.id)}" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stop-color="${color}" stop-opacity="0.30"></stop>
           <stop offset="1" stop-color="${color}" stop-opacity="0.02"></stop>
         </linearGradient>
       </defs>
       ${tickLines}
-      <polygon points="${fillPoints}" fill="url(#stock-fill-${esc(r.id)}-${chartRange})"></polygon>
+      <polygon points="${fillPoints}" fill="url(#stock-fill-${esc(r.id)})"></polygon>
       <line x1="${padL}" x2="${W-padR+8}" y1="${currentY.toFixed(2)}" y2="${currentY.toFixed(2)}" class="stock-price-line"></line>
       <polyline points="${linePoints}" class="stock-line" style="stroke:${color}"></polyline>
       <circle cx="${currentX.toFixed(2)}" cy="${currentY.toFixed(2)}" r="6" class="stock-current-marker" style="fill:${color}"></circle>
@@ -285,62 +171,8 @@ function detailedTrendSvg(r,height=250){
       <text x="${(priceTagX+37).toFixed(2)}" y="${(priceTagY+4).toFixed(2)}" text-anchor="middle" class="stock-price-tag-text">${money(current)}</text>
       ${xLabels}
     </svg>
-    <div class="chart-crosshair" aria-hidden="true"></div>
-    <div class="chart-hover-dot" aria-hidden="true"></div>
-    <div class="chart-tooltip" role="status"><strong data-chart-price>${money(current)}</strong><span data-chart-time>${esc(formatHoverTime(series[series.length-1].time,chartRange))}</span></div>
   </div>
-  <div class="stock-chart-footer"><span class="${delta>=0?'positive':'negative'}">${delta>=0?'+':''}${pct.toFixed(2)}% simulated ${chartRange} trend</span><span>High ${money(high)}</span><span>Low ${money(low)}</span></div>`;
-}
-function beginChartPointer(event){
-  event.preventDefault();
-  const wrap=event.currentTarget.closest('.stock-chart-wrap');
-  if(wrap) wrap.dataset.dragging='true';
-  try{event.currentTarget.setPointerCapture(event.pointerId)}catch{}
-  trackChartPointer(event);
-}
-function endChartPointer(event){
-  const wrap=event.currentTarget.closest('.stock-chart-wrap');
-  trackChartPointer(event);
-  if(wrap) wrap.dataset.dragging='false';
-  try{event.currentTarget.releasePointerCapture(event.pointerId)}catch{}
-  if(event.pointerType!=='mouse'&&wrap) setTimeout(()=>wrap.classList.remove('is-inspecting'),900);
-}
-function hideChartPointer(event){
-  const wrap=event.currentTarget.closest('.stock-chart-wrap');
-  if(wrap&&wrap.dataset.dragging!=='true') wrap.classList.remove('is-inspecting');
-}
-function trackChartPointer(event){
-  const svg=event.currentTarget;
-  const wrap=svg.closest('.stock-chart-wrap');
-  if(!wrap) return;
-  const values=String(wrap.dataset.values||'').split(',').map(Number).filter(Number.isFinite);
-  const times=String(wrap.dataset.times||'').split(',').map(Number);
-  if(!values.length) return;
-  const rect=svg.getBoundingClientRect();
-  const padLeft=rect.width*(18/1000),padRight=rect.width*(108/1000);
-  const padTop=rect.height*(18/340),padBottom=rect.height*(38/340);
-  const usableWidth=Math.max(1,rect.width-padLeft-padRight),usableHeight=Math.max(1,rect.height-padTop-padBottom);
-  const pointerX=clamp(event.clientX-rect.left,padLeft,padLeft+usableWidth);
-  const ratio=clamp((pointerX-padLeft)/usableWidth,0,1);
-  const index=Math.round(ratio*(values.length-1));
-  const pointX=padLeft+(index/(Math.max(1,values.length-1)))*usableWidth;
-  const floor=Number(wrap.dataset.floor),ceil=Number(wrap.dataset.ceil),value=values[index];
-  const pointY=padTop+((ceil-value)/Math.max(.0001,ceil-floor))*usableHeight;
-  const crosshair=wrap.querySelector('.chart-crosshair');
-  const dot=wrap.querySelector('.chart-hover-dot');
-  const tooltip=wrap.querySelector('.chart-tooltip');
-  if(!crosshair||!dot||!tooltip) return;
-  crosshair.style.left=`${pointX}px`;
-  dot.style.left=`${pointX}px`;
-  dot.style.top=`${pointY}px`;
-  dot.style.background=wrap.dataset.color||'#58ef78';
-  tooltip.style.left=`${clamp(pointX,82,Math.max(82,rect.width-82))}px`;
-  tooltip.style.top=`${Math.max(54,pointY)}px`;
-  const price=tooltip.querySelector('[data-chart-price]');
-  const time=tooltip.querySelector('[data-chart-time]');
-  if(price) price.textContent=money(value);
-  if(time) time.textContent=formatHoverTime(times[index],wrap.dataset.range||'1D');
-  wrap.classList.add('is-inspecting');
+  <div class="stock-chart-footer"><span class="${delta>=0?'positive':'negative'}">${delta>=0?'+':''}${pct.toFixed(2)}% simulated trend</span><span>High ${money(high)}</span><span>Low ${money(low)}</span></div>`;
 }
 function trendSvg(r,height=130,detailed=false){
   if(detailed) return detailedTrendSvg(r,height);
@@ -493,7 +325,7 @@ function profile(){
       <div class="profile-head"><div class="profile-id">${avatar(r,true)}<div><h1>${esc(r.name)} <span class="ticker">${esc(r.ticker)}</span></h1><p>${esc(r.role)} · ${esc(r.discipline)} · ${esc(r.leagueOrMedium)}${r.teamOrPlatform&&r.teamOrPlatform!=='—'?`<br>${esc(r.teamOrPlatform)}`:''}</p></div></div>
       <div class="profile-price"><strong>${money(localPrice(r))}</strong><span class="${r.dailyChange>=0?'positive':'negative'}">${r.dailyChange>=0?'+':''}${r.dailyChange.toFixed(2)}% simulated</span></div></div>
       <div class="badge-row"><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)} market</span><span class="status-badge">${esc(r.careerStatus)}</span><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span><span class="quality-badge">${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}% price confidence</span></div>
-      <div class="profile-chart detailed">${chartRangeTabs()}${trendSvg(r,260,true)}${chartStats(r)}<div class="chart-inspect-help">Move your cursor or drag across the line to inspect the simulated price at any point.</div></div>
+      <div class="profile-chart detailed">${trendSvg(r,260,true)}${chartStats(r)}</div>
       <div class="tab-row">${['overview','pricing','data'].map(t=>`<button class="${profileTab===t?'active':''}" onclick="setProfileTab('${t}')">${t[0].toUpperCase()+t.slice(1)}</button>`).join('')}</div>
       ${profileTab==='overview'?`<div class="grid info-grid"><div class="info-box"><small>Market segment</small><strong>${esc(r.marketSegment)}</strong></div><div class="info-box"><small>Career model</small><strong>${esc(r.modelType)}</strong></div><div class="info-box"><small>Career stage</small><strong>${esc(r.careerStage||'Stage under review')}</strong></div><div class="info-box"><small>Career score</small><strong>${Number(r.careerScore).toFixed(1)} / 100</strong></div><div class="info-box"><small>Country</small><strong>${esc(r.country)}</strong></div><div class="info-box"><small>Role</small><strong>${esc(r.role)}</strong></div><div class="info-box"><small>Virtual volume</small><strong>${compact(r.volume)}</strong></div></div><p class="page-sub" style="margin-top:18px">${esc(r.description)}</p>`:''}
       ${profileTab==='pricing'?`<div class="grid info-grid"><div class="info-box"><small>Fundamental value</small><strong>${money(r.fundamentalValue)}</strong></div><div class="info-box"><small>Pricing confidence</small><strong>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</strong></div><div class="info-box"><small>Pricing evidence</small><strong>${esc(r.pricingDataStatus||'Model status not listed')}</strong></div><div class="info-box"><small>Model version</small><strong>${esc(r.pricingModelVersion||'Legacy prototype')}</strong></div><div class="info-box"><small>Demand premium</small><strong>${r.demandPremiumPct>=0?'+':''}${Number(r.demandPremiumPct).toFixed(2)}%</strong></div><div class="info-box"><small>Momentum</small><strong>${r.momentumPct>=0?'+':''}${Number(r.momentumPct).toFixed(2)}%</strong></div></div>${r.rookiePricing?rookieProfilePricing(r):metricGrid(metrics)}${Array.isArray(r.pricingEvidence)&&r.pricingEvidence.length?`<div class="source-box"><small>Pricing evidence</small><strong>${r.pricingEvidence.length} cited source${r.pricingEvidence.length===1?'':'s'}</strong><small>${r.pricingEvidence.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener">Open source</a>`).join(' · ')}</small></div>`:''}<div class="formula" style="margin-top:16px">${r.rookiePricing?'Rookie IPO price = draft capital + pre-professional performance + immediate opportunity + position value + development + availability + audience. Draft weight fades as professional evidence arrives.':r.marketSegment==='Legacy'?'Legacy price = weighted legacy score on a non-linear price curve + tightly controlled market activity':'Active price = 30% performance + 25% achievements + 20% potential + 15% audience + 10% availability. High prices require evidence; roster-only records are capped.'}</div>`:''}
@@ -586,7 +418,9 @@ function calculateRookieIpo(values){
 function rookieProfilePricing(r){
   const p=r.rookiePricing||{};
   const rows={draftCapital:p.draftCapitalScore,preProPerformance:p.preProPerformanceScore,opportunity:p.opportunityScore,positionValue:p.positionValueScore,development:p.developmentScore,availability:p.availabilityScore,audience:p.audienceScore};
-  return `<div class="source-box"><small>Rookie IPO</small><strong>${p.draftSport||r.leagueOrMedium} · Pick ${p.overallPick||'—'} · ${p.position||r.role}</strong><small>Opening price ${money(p.ipoPrice||r.fundamentalValue)}. Draft capital is strongest at listing and fades as professional performance data accumulates.</small></div>${metricGrid(Object.fromEntries(Object.entries(rows).filter(([,v])=>v!==undefined)))}`;
+  const draftPct=Number(p.draftInfluencePct??100),proPct=Number(p.professionalEvidencePct??(100-draftPct)),games=Number(p.professionalGames||0);
+  const stage=p.transitionStage||`${draftPct}% draft anchor · ${proPct}% professional evidence`;
+  return `<div class="source-box"><small>Rookie IPO transition</small><strong>${p.draftSport||r.leagueOrMedium} · Pick ${p.overallPick||'—'} · ${p.position||r.role}</strong><small>IPO anchor ${money(p.ipoPrice||r.fundamentalValue)} · current blended value ${money(r.fundamentalValue)} · ${games} professional game${games===1?'':'s'}.</small><small>${esc(stage)}. Draft position establishes the opening value, then fades as real professional performance accumulates.</small></div>${metricGrid(Object.fromEntries(Object.entries(rows).filter(([,v])=>v!==undefined)))}`;
 }
 function readRookieInputs(){
   const val=id=>Number(document.getElementById(id)?.value||0);
