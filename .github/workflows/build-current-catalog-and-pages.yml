@@ -28,7 +28,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 180
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -44,6 +44,12 @@ jobs:
 
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
+
+      - name: Add 9,400 source-linked catalog identities
+        run: >-
+          python scripts/build_large_catalog_expansion.py
+          --workers 8
+          --request-timeout 25
 
       - name: Build 10,000-name current roster expansion
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
@@ -61,12 +67,12 @@ jobs:
       - name: Validate evidence-weighted pricing
         run: >-
           python scripts/validate_pricing_model.py
-          --minimum-current 10000
+          --minimum-current 19500
           --minimum-enriched 2500
           --max-identical-score-rate 0.08
 
       - name: Validate generated current catalog
-        run: python scripts/validate_current_catalog.py --minimum 10000
+        run: python scripts/validate_current_catalog.py --minimum 19500 --minimum-automated 10000
 
       - name: Upload generated catalog files
         uses: actions/upload-artifact@v4
@@ -78,6 +84,7 @@ jobs:
             data/catalog_manifest.json
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
+            data/catalog_expansion_manifest.json
           retention-days: 14
 
       - name: Prepare static Pages site
