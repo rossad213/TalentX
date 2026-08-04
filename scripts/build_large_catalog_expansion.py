@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
-"""Build the large TalentX catalog expansion from Wikipedia and Wikidata.
+"""Build an additive TalentX catalog batch from Wikipedia and Wikidata.
 
-This builder adds approximately 9,400 source-linked identities to the curated
-seed before the live ESPN/NHL roster build runs:
-
-- 5,000 Music listings
-- 300 Actor listings
-- 100 Creator listings
-- 4,000 Athlete listings: 2,000 across baseball, tennis, golf, motorsport,
-  combat sports, and cricket, plus 2,000 soccer players
+Each config version defines one manageable batch. Re-running the same version
+rebuilds that batch idempotently, while records from earlier batch versions stay
+in the seed. This lets the catalog grow in permanent increments without making
+one long, all-or-nothing request for every planned identity.
 
 The source data proves identity and broad profession/category only. It does not
 prove current performance, achievements, audience size, or active career status.
@@ -701,7 +697,7 @@ def collect_group(
     preselected = sorted(
         unique_by_qid.values(),
         key=lambda item: (-item.article_length, item.title.lower(), item.qid),
-    )[: max(target * 3, target + 500)]
+    )[: max(target * 3, target + 100)]
     enriched, entity_stats = enrich_candidates(preselected, timeout, workers)
     stats.merge(entity_stats)
     valid = [candidate for candidate in enriched if candidate_matches_group(candidate, group)]
@@ -778,15 +774,15 @@ def main() -> int:
     if not isinstance(seed, list):
         raise ValueError("current_seed.json must be an array")
 
-    # The workflow runs repeatedly. Remove records created by any earlier
-    # Wikipedia/Wikidata expansion before rebuilding, otherwise every weekly
-    # run would append another full expansion cohort.
+    # A batch is idempotent: replace records from this config version when it
+    # is rerun, but preserve every completed earlier batch. A later config
+    # version can therefore add the next batch without erasing prior progress.
+    current_batch_version = str(config["version"])
     original_seed_count = len(seed)
     seed = [
         dict(record)
         for record in seed
-        if record.get("sourceNamespace") != "wikipedia-wikidata"
-        and not str(record.get("catalogExpansionVersion") or "").startswith(("2.0-", "2.1-"))
+        if str(record.get("catalogExpansionVersion") or "") != current_batch_version
     ]
     removed_previous_expansion = original_seed_count - len(seed)
     before = [dict(record) for record in seed]
@@ -884,7 +880,7 @@ def main() -> int:
         "requestedTotalAdditions": expected,
         "generatedTotalAdditions": len(generated_records),
         "seedRecordsBefore": len(before),
-        "previousExpansionRecordsRemoved": removed_previous_expansion,
+        "currentBatchRecordsReplaced": removed_previous_expansion,
         "seedRecordsAfter": len(combined),
         "finalSeedCategoryCounts": dict(counts),
         "generatedAthleteDisciplineCounts": dict(discipline_counts),
