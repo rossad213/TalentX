@@ -154,13 +154,59 @@
   "pricingModels": {
     "active": {
       "weights": {
-        "performance": 0.3,
+        "performance": 0.35,
         "achievements": 0.25,
-        "potential": 0.2,
-        "audience": 0.15,
+        "consistency": 0.15,
+        "potential": 0.15,
         "availability": 0.1
       },
-      "description": "Current performance, verified career achievements, future potential, audience demand, and availability."
+      "description": "Category-specific fundamental models calibrated onto one universal 0-100 career-value scale.",
+      "categories": {
+        "Athlete": {
+          "weights": {
+            "performance": 0.35,
+            "achievements": 0.25,
+            "consistency": 0.15,
+            "potential": 0.15,
+            "availability": 0.1
+          },
+          "description": "Verified current production, documented achievements, sustained consistency, remaining upside, and availability."
+        },
+        "Music": {
+          "weights": {
+            "performance": 0.25,
+            "consistency": 0.25,
+            "achievements": 0.2,
+            "audience": 0.2,
+            "potential": 0.1
+          },
+          "description": "Current commercial performance, catalog strength and longevity, achievements, global demand, and release momentum."
+        },
+        "Actor": {
+          "weights": {
+            "performance": 0.25,
+            "consistency": 0.25,
+            "achievements": 0.2,
+            "audience": 0.2,
+            "potential": 0.1
+          },
+          "description": "Recent project performance, body of work, recognition, bankability, and upcoming project pipeline."
+        },
+        "Creator": {
+          "weights": {
+            "audience": 0.25,
+            "performance": 0.25,
+            "potential": 0.2,
+            "consistency": 0.15,
+            "achievements": 0.15
+          },
+          "description": "Audience reach, engagement quality, growth, retention and consistency, and commercial strength."
+        }
+      },
+      "calibration": {
+        "absoluteCategoryEvidence": 0.7,
+        "professionPeerPosition": 0.3
+      }
     },
     "legacy": {
       "weights": {
