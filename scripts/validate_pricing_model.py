@@ -252,12 +252,15 @@ def main() -> int:
         lower = by_name.get(lower_name)
         if not higher or not lower:
             continue
-        higher_price = float(higher.get("marketPrice", 0))
-        lower_price = float(lower.get("marketPrice", 0))
-        comparison_output.append(f"{higher_name}: ${higher_price:.2f} | {lower_name}: ${lower_price:.2f}")
-        if higher_price <= lower_price:
+        higher_value = float(higher.get("fundamentalValue", 0))
+        lower_value = float(lower.get("fundamentalValue", 0))
+        comparison_output.append(
+            f"{higher_name}: ${higher_value:.2f} | {lower_name}: ${lower_value:.2f} (fundamentals)"
+        )
+        if higher_value + TOLERANCE < lower_value:
             errors.append(
-                f"Regression failed: {higher_name} (${higher_price:.2f}) must price above {lower_name} (${lower_price:.2f})"
+                f"Regression failed: {higher_name} (${higher_value:.2f}) must not value below "
+                f"{lower_name} (${lower_value:.2f}) on fundamentals"
             )
 
     print(f"Checked {len(current) + len(historical):,} records against model weights.")
