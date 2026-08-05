@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TalentX pricing engine v2: Talent × confidence, adjusted by current market evidence.
+"""TalentX pricing engine v2: talent, market, confidence, and situation.
 
 This module runs after the existing evidence-enrichment model. It preserves the
 v1 fields for rollback/comparison, adds v2 scores, and reprices deterministically.
@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-MODEL_VERSION = "5.0-talent-market-confidence"
+MODEL_VERSION = "5.1-talent-market-confidence-situation"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -43,8 +43,6 @@ def evidence_confidence(record: dict[str, Any]) -> float:
     consistency = clamp(metrics.get("consistency", 55))
     achievements = clamp(metrics.get("achievements", 35))
 
-    # Evidence grows quickly at first, then levels off. Limited samples cannot
-    # receive established-star confidence solely because potential is high.
     sample = 100 * (1 - math.exp(-games / 260.0)) if games else 100 * (1 - math.exp(-years / 5.0))
     sustained = consistency * .55 + achievements * .45
     confidence = data * .45 + sample * .35 + sustained * .20
@@ -81,12 +79,42 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     return round(clamp(score), 2)
 
 
-def fair_value(talent: float, market: float, confidence: float) -> tuple[float, float]:
-    # Confidence discounts uncertain upside rather than changing underlying talent.
+def situation_score(record: dict[str, Any]) -> float:
+    """Measure current opportunity/environment without changing underlying talent.
+
+    Verified event processors may set ``situationAdjustmentPct`` after a transfer,
+    role change, promotion, demotion, contract change, or similar event. In the
+    absence of a verified event, the score remains close to neutral.
+    """
+    score = 50.0
+    adjustment = clamp(record.get("situationAdjustmentPct", 0), -20, 20)
+    score += adjustment * 1.5
+
+    category = str(record.get("primaryCategory") or "")
+    status = str(record.get("careerStatus") or "").lower()
+    role_status = str(record.get("roleStatus") or "").lower()
+    if category == "Athlete":
+        if record.get("starter") is True or role_status in {"starter", "first team", "starting"}:
+            score += 6
+        elif role_status in {"bench", "reserve", "demoted"}:
+            score -= 6
+        if "injured" in status or "suspended" in status:
+            score -= 10
+    else:
+        if role_status in {"lead", "headliner", "featured"}:
+            score += 5
+        elif role_status in {"inactive", "paused", "shelved"}:
+            score -= 7
+
+    return round(clamp(score, 20, 80), 2)
+
+
+def fair_value(talent: float, market: float, confidence: float, situation: float) -> tuple[float, float]:
     certainty = .38 + .62 * confidence / 100.0
     expected = talent * certainty
-    blended = expected * .78 + market * .22
-    # Non-linear but continuous common price scale across categories.
+    # Situation is intentionally a small adjustment. A transfer or opportunity
+    # change can move price, but cannot overwhelm talent and accumulated evidence.
+    blended = expected * .74 + market * .20 + situation * .06
     value = 4.0 + .0325 * blended * blended
     return round(blended, 2), round(max(4.0, min(350.0, value)), 2)
 
@@ -96,7 +124,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     talent = talent_score(result)
     confidence = evidence_confidence(result)
     market = market_score(result, talent)
-    expected, fair = fair_value(talent, market, confidence)
+    situation = situation_score(result)
+    expected, fair = fair_value(talent, market, confidence, situation)
 
     result.setdefault("pricingV1", {
         "marketPrice": result.get("marketPrice"),
@@ -107,6 +136,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     result["talentScore"] = talent
     result["marketScore"] = market
     result["confidenceScore"] = confidence
+    result["situationScore"] = situation
     result["expectedValueScore"] = expected
     result["fairValue"] = fair
     result["fundamentalValue"] = fair
@@ -117,6 +147,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         "talentScore": talent,
         "marketScore": market,
         "confidenceScore": confidence,
+        "situationScore": situation,
         "expectedValueScore": expected,
         "fairValue": fair,
     }
@@ -158,7 +189,7 @@ def main() -> int:
     manifest_path = args.data_dir / "catalog_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest.update({"pricingModelVersion": MODEL_VERSION, "pricingEngine": "v2", "pricingV2CatalogsProcessed": totals,
-                     "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market evidence."})
+                     "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence."})
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print("Applied pricing engine v2:", totals)
     return 0
