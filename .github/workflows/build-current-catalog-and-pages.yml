@@ -7,6 +7,7 @@ on:
       - ".github/workflows/build-current-catalog-and-pages.yml"
       - "scripts/**"
       - "data/**"
+      - "assets/**"
       - "requirements.txt"
       - "index.html"
       - "app.js"
@@ -15,7 +16,6 @@ on:
       - "discovery-profile.css"
       - "styles.css"
   schedule:
-    # Full roster-and-pricing refresh every Sunday at 08:17 UTC.
     - cron: "17 8 * * 0"
   workflow_dispatch:
 
@@ -35,42 +35,33 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
-
       - name: Install catalog dependencies
         run: python -m pip install --upgrade -r requirements.txt
-
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
-
       - name: Build 10,000-name current roster expansion
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
-
       - name: Enrich prices with career statistics and awards
         run: >-
           python scripts/enrich_current_catalog.py
           --workers 24
           --request-timeout 12
           --minimum-enriched 2500
-
       - name: Reprice current, legacy, and under-review catalogs
         run: python scripts/reprice_catalogs.py
-
       - name: Validate evidence-weighted pricing
         run: >-
           python scripts/validate_pricing_model.py
           --minimum-current 10000
           --minimum-enriched 2500
           --max-identical-score-rate 0.08
-
       - name: Validate generated current catalog
         run: python scripts/validate_current_catalog.py --minimum 10000
-
       - name: Upload generated catalog files
         uses: actions/upload-artifact@v4
         with:
@@ -82,17 +73,15 @@ jobs:
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
           retention-days: 14
-
       - name: Prepare static Pages site
         run: |
           rm -rf _site
           mkdir -p _site
           cp index.html app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
           cp -R data _site/data
-
+          cp -R assets _site/assets
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
-
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
