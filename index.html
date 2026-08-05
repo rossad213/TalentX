@@ -11,6 +11,7 @@
   <link rel="icon" type="image/png" sizes="192x192" href="./assets/favicon-192.png">
   <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./discovery-profile.css">
   <style>
     .price-why-btn{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#eef7ff;border-radius:999px;padding:5px 11px;font:inherit;font-size:.78rem;font-weight:750;cursor:pointer;margin-left:8px;vertical-align:middle}
     .price-why-btn:hover,.price-why-btn:focus-visible{background:rgba(255,255,255,.13);outline:none}
@@ -47,7 +48,7 @@
     <header class="topbar">
       <div class="global-search">
         <span>⌕</span>
-        <input id="globalSearch" type="search" placeholder="Search names, sports, leagues, genres, platforms…">
+        <input id="globalSearch" type="search" placeholder="Search names, teams, tickers, leagues, and positions…">
       </div>
       <div class="top-actions">
         <span class="status-dot"></span>
@@ -63,6 +64,7 @@
 <div id="toast" class="toast"></div>
 <script src="./app.js"></script>
 <script src="./chart-history.js"></script>
+<script src="./discovery-profile.js"></script>
 <script>
 (function(){
   const html=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
