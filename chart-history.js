@@ -1,13 +1,15 @@
 /*
  * TalentX historical chart reconstruction
  *
- * Charts remain flat between supported events. This module prefers explicit
- * dated price history, then dated event history, and supplements sparse dated
- * data with the catalog's saved six-month trend. It never adds randomness.
+ * Genuine dated price events always take priority. For records that do not yet
+ * have enough real history, this module creates a deterministic one-year visual
+ * history. The reconstruction is display-only: it does not alter market prices,
+ * portfolios, trades, or the pricing engine, and it is identical on every load.
  */
 (function(){
   const DAY=24*60*60*1000;
-  const RECONSTRUCTED_TREND_SPAN=182*DAY;
+  const RECONSTRUCTED_SPAN=365*DAY;
+  const SHORT_RANGES=new Set(['1D','5D']);
 
   function txDate(value){
     if(value===null||value===undefined||value==='') return NaN;
@@ -31,11 +33,12 @@
     const candidates=[record.priceHistory,record.historicalPrices,record.marketHistory,record.chartHistory];
     const source=candidates.find(Array.isArray)||[];
     return source.map(item=>{
-      if(Array.isArray(item)) return {time:txDate(item[0]),value:txNumber(item[1])};
+      if(Array.isArray(item)) return {time:txDate(item[0]),value:txNumber(item[1]),verified:true};
       if(!item||typeof item!=='object') return null;
       return {
         time:txDate(item.time??item.timestamp??item.date??item.eventDate??item.asOf),
-        value:txNumber(item.value??item.price??item.marketPrice??item.close)
+        value:txNumber(item.value??item.price??item.marketPrice??item.close),
+        verified:item.reconstructed!==true&&item.synthetic!==true
       };
     }).filter(point=>point&&Number.isFinite(point.time)&&Number.isFinite(point.value)&&point.value>0)
       .sort((a,b)=>a.time-b.time);
@@ -56,9 +59,7 @@
     if(!events.length){
       const time=txDate(record.lastPriceEventAt??record.lastPriceEventDate??record.lastGameDate??record.lastEventAt);
       const movePct=txNumber(record.lastGameMovePct??record.lastEventMovePct??record.dailyChange);
-      if(Number.isFinite(time)&&Number.isFinite(movePct)&&Math.abs(movePct)>.0001){
-        events.push({time,price:current,movePct});
-      }
+      if(Number.isFinite(time)&&Number.isFinite(movePct)) events.push({time,price:current,movePct});
     }
     if(!events.length) return [];
 
@@ -67,61 +68,100 @@
     for(let i=events.length-1;i>=0;i--){
       const event=events[i];
       if(Number.isFinite(event.price)&&event.price>0) after=event.price;
-      const pct=Number.isFinite(event.movePct)?event.movePct:NaN;
-      const before=Number.isFinite(pct)&&Math.abs(1+pct/100)>.0001?after/(1+pct/100):after;
-      points.unshift({time:event.time-1,value:Number(before.toFixed(2))});
-      points.unshift({time:event.time,value:Number(after.toFixed(2))});
+      const pct=Number.isFinite(event.movePct)?event.movePct:0;
+      const before=Math.abs(1+pct/100)>.0001?after/(1+pct/100):after;
+      points.unshift({time:event.time-1,value:Number(before.toFixed(2)),verified:true});
+      points.unshift({time:event.time,value:Number(after.toFixed(2)),verified:true});
       after=before;
     }
     return points.sort((a,b)=>a.time-b.time);
   }
 
-  function txReconstructedTrendPoints(record,current,now){
-    const trend=(Array.isArray(record.trend)?record.trend:[])
-      .map(txNumber)
-      .filter(value=>Number.isFinite(value)&&value>0);
-    if(!trend.length) return [];
-    if(Math.abs(trend[trend.length-1]-current)>.005) trend.push(current);
-    if(trend.length===1) return [{time:now-RECONSTRUCTED_TREND_SPAN,value:trend[0]},{time:now,value:current}];
-    const start=now-RECONSTRUCTED_TREND_SPAN;
-    return trend.map((value,index)=>({
-      time:start+((now-start)*(index/(trend.length-1))),
-      value:Number(value.toFixed(2))
+  function txHash(text){
+    let hash=2166136261;
+    for(let i=0;i<text.length;i++){
+      hash^=text.charCodeAt(i);
+      hash=Math.imul(hash,16777619);
+    }
+    return hash>>>0;
+  }
+
+  function txNoise(seed,index){
+    let x=(seed+Math.imul(index+1,0x9e3779b1))>>>0;
+    x^=x<<13;x^=x>>>17;x^=x<<5;
+    return ((x>>>0)/4294967295)*2-1;
+  }
+
+  function txVolatility(record){
+    const stage=String(record.careerStage||'').toLowerCase();
+    const games=Math.max(0,Number(record.professionalGames)||0);
+    const metrics=record.activeMetrics&&typeof record.activeMetrics==='object'?record.activeMetrics:{};
+    const consistency=Math.max(0,Math.min(100,Number(metrics.consistency)||70));
+    if(stage.includes('rookie')||games<20) return 0.022;
+    if(stage.includes('emerging')||games<80) return 0.018;
+    if(consistency>=85&&games>=200) return 0.009;
+    if(consistency>=75&&games>=100) return 0.012;
+    return 0.015;
+  }
+
+  function txOneYearReconstruction(record,current,now){
+    const seed=txHash(String(record.id||record.name||record.ticker||'talentx'));
+    const count=53;
+    const start=now-RECONSTRUCTED_SPAN;
+    const volatility=txVolatility(record);
+    const careerScore=Math.max(0,Math.min(100,Number(record.careerScore)||60));
+    const savedTrend=(Array.isArray(record.trend)?record.trend:[]).map(txNumber).filter(v=>Number.isFinite(v)&&v>0);
+    const savedStart=savedTrend.length>1?savedTrend[0]:NaN;
+    let annualReturn=Number.isFinite(savedStart)?current/savedStart-1:(careerScore-55)/100*0.22;
+    annualReturn=Math.max(-0.28,Math.min(0.42,annualReturn));
+
+    const raw=[1];
+    let value=1;
+    for(let i=1;i<count;i++){
+      const cycle=Math.sin((i/count)*Math.PI*4+(seed%628)/100)*volatility*0.45;
+      const shock=txNoise(seed,i)*volatility;
+      const drift=Math.log(1+annualReturn)/(count-1);
+      value*=Math.exp(drift+cycle+shock);
+      raw.push(value);
+    }
+    const scale=current/raw[raw.length-1];
+    return raw.map((item,index)=>({
+      time:start+(RECONSTRUCTED_SPAN*index/(count-1)),
+      value:Number(Math.max(1,item*scale).toFixed(2)),
+      reconstructed:true
     }));
   }
 
   function txMergePoints(reconstructed,dated){
     if(!reconstructed.length) return dated;
     if(!dated.length) return reconstructed;
-    const merged=[...reconstructed,...dated].sort((a,b)=>a.time-b.time);
+    const firstDated=dated[0].time;
+    const merged=[...reconstructed.filter(point=>point.time<firstDated),...dated].sort((a,b)=>a.time-b.time);
     const output=[];
     for(const point of merged){
       const prior=output[output.length-1];
-      if(prior&&Math.abs(prior.time-point.time)<1000){
-        output[output.length-1]=point;
-      }else{
-        output.push(point);
-      }
+      if(prior&&Math.abs(prior.time-point.time)<1000) output[output.length-1]=point;
+      else output.push(point);
     }
     return output;
   }
 
-  function txStepSeries(points,start,now,count,current){
+  function txLinearSeries(points,start,now,count,current){
     const ordered=points.filter(point=>point.time<=now).sort((a,b)=>a.time-b.time);
-    let opening=current;
-    for(const point of ordered){
-      if(point.time<=start) opening=point.value;
-      else break;
-    }
-    const timeline=[{time:start,value:opening},...ordered.filter(point=>point.time>start&&point.time<now),{time:now,value:current}];
+    if(!ordered.length) return Array.from({length:count},(_,i)=>({time:start+(now-start)*i/(count-1),value:current}));
     return Array.from({length:count},(_,index)=>{
       const time=start+((now-start)*(index/(count-1)));
-      let value=timeline[0].value;
-      for(const point of timeline){
-        if(point.time<=time) value=point.value;
-        else break;
+      let left=ordered[0],right=ordered[ordered.length-1];
+      for(let i=1;i<ordered.length;i++){
+        if(ordered[i].time>=time){right=ordered[i];left=ordered[i-1];break;}
+        left=ordered[i];
       }
-      if(index===count-1) value=current;
+      let value=left.value;
+      if(right.time>left.time&&time>left.time){
+        const ratio=Math.max(0,Math.min(1,(time-left.time)/(right.time-left.time)));
+        value=left.value+(right.value-left.value)*ratio;
+      }
+      if(index===count-1)value=current;
       return {time,value:Number(value.toFixed(2))};
     });
   }
@@ -133,8 +173,16 @@
     const start=txRangeStart(range,now);
     const explicit=txExplicitPricePoints(record);
     const dated=explicit.length?explicit:txEventPoints(record,current);
-    const reconstructed=txReconstructedTrendPoints(record,current,now);
+
+    if(SHORT_RANGES.has(range)){
+      const recent=dated.filter(point=>point.time>=start);
+      return txLinearSeries(recent,start,now,config.points,current);
+    }
+
+    const reconstructed=txOneYearReconstruction(record,current,now);
     const points=txMergePoints(reconstructed,dated);
-    return txStepSeries(points,start,now,config.points,current);
+    return txLinearSeries(points,start,now,config.points,current);
   };
+
+  window.talentxChartHistoryDisclosure='Older chart values are reconstructed for visual context until verified TalentX history is available.';
 })();
