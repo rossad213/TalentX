@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/hourly-price-refresh.yml"
       - "scripts/hourly_price_refresh.py"
+      - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/event_pricing_policy.py"
       - "scripts/append_price_history.py"
       - "scripts/merge_hourly_market_state.py"
@@ -119,10 +120,10 @@ jobs:
 
       - name: Refresh completed-game prices
         run: >-
-          python scripts/hourly_price_refresh.py
+          python scripts/hourly_price_refresh_reliable.py
           --workers 20
           --request-timeout 10
-          --lookback-hours 48
+          --lookback-hours 96
           --max-athletes 1800
           --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
