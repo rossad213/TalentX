@@ -4,8 +4,8 @@
   const columns={
     person:{label:'Person',type:'text',value:r=>r.name},
     category:{label:'Category',type:'text',value:r=>r.primaryCategory},
-    discipline:{label:'Sport / genre / niche',type:'text',value:r=>r.discipline},
-    league:{label:'League / medium',type:'text',value:r=>r.leagueOrMedium},
+    discipline:{label:'Subcategory',type:'text',value:r=>r.discipline},
+    league:{label:'Meduim',type:'text',value:r=>r.leagueOrMedium},
     stage:{label:'Career stage',type:'stage',value:r=>r.careerStage||'Stage under review'},
     market:{label:'Market',type:'text',value:r=>r.marketSegment},
     price:{label:'Price',type:'number',value:r=>localPrice(r)},
