@@ -11,6 +11,8 @@ on:
       - "index.html"
       - "app.js"
       - "chart-history.js"
+      - "discovery-profile.js"
+      - "discovery-profile.css"
       - "styles.css"
   schedule:
     # Full roster-and-pricing refresh every Sunday at 08:17 UTC.
@@ -85,7 +87,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html app.js chart-history.js styles.css .nojekyll _site/
+          cp index.html app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
           cp -R data _site/data
 
       - name: Configure GitHub Pages
