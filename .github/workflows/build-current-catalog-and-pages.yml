@@ -57,6 +57,11 @@ jobs:
           --workers 24
           --request-timeout 12
           --minimum-enriched 2500
+      - name: Add structured career evidence for priority soccer players
+        run: >-
+          python scripts/enrich_priority_soccer_sources.py
+          --catalog data/current_catalog.json
+          --priority data/priority_soccer_names.json
       - name: Normalize evidence with category and discipline adapters
         run: python scripts/enrichment_framework.py --catalog data/current_catalog.json
       - name: Run audited pricing engine v1 baseline
