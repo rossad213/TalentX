@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/build-current-catalog-and-pages.yml"
       - "scripts/**"
+      - "tests/**"
       - "data/**"
       - "assets/**"
       - "requirements.txt"
@@ -42,6 +43,8 @@ jobs:
           cache: pip
       - name: Install catalog dependencies
         run: python -m pip install --upgrade -r requirements.txt
+      - name: Validate pricing engine v2
+        run: python -m unittest tests/test_pricing_engine_v2.py -v
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
       - name: Build 10,000-name current roster expansion
@@ -52,14 +55,16 @@ jobs:
           --workers 24
           --request-timeout 12
           --minimum-enriched 2500
-      - name: Reprice current, legacy, and under-review catalogs
+      - name: Run audited pricing engine v1 baseline
         run: python scripts/reprice_catalogs.py
-      - name: Validate evidence-weighted pricing
+      - name: Validate evidence-weighted v1 baseline
         run: >-
           python scripts/validate_pricing_model.py
           --minimum-current 10000
           --minimum-enriched 2500
           --max-identical-score-rate 0.08
+      - name: Apply Talent Market Confidence pricing engine v2
+        run: python scripts/pricing_engine_v2.py
       - name: Validate generated current catalog
         run: python scripts/validate_current_catalog.py --minimum 10000
       - name: Upload generated catalog files
