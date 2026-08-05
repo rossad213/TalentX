@@ -51,12 +51,14 @@ jobs:
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
       - name: Add priority soccer players from verified rosters
         run: python scripts/add_priority_soccer.py
-      - name: Enrich prices with career statistics and awards
+      - name: Enrich source-specific career statistics and awards
         run: >-
           python scripts/enrich_current_catalog.py
           --workers 24
           --request-timeout 12
           --minimum-enriched 2500
+      - name: Normalize evidence with category and discipline adapters
+        run: python scripts/enrichment_framework.py --catalog data/current_catalog.json
       - name: Run audited pricing engine v1 baseline
         run: python scripts/reprice_catalogs.py
       - name: Validate evidence-weighted v1 baseline
