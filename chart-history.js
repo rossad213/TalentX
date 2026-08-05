@@ -1,10 +1,9 @@
 /*
  * TalentX historical chart reconstruction
  *
- * Genuine dated price events always take priority. For records that do not yet
- * have enough real history, this module creates a deterministic one-year visual
- * history. The reconstruction is display-only: it does not alter market prices,
- * portfolios, trades, or the pricing engine, and it is identical on every load.
+ * Short-range charts use only recorded price events. Longer ranges may use a
+ * deterministic reconstructed history for visual context until enough genuine
+ * TalentX history exists. Reconstruction never affects pricing or portfolios.
  */
 (function(){
   const DAY=24*60*60*1000;
@@ -48,7 +47,7 @@
     const candidates=[record.priceEvents,record.eventHistory,record.events,record.marketEvents];
     const source=candidates.find(Array.isArray)||[];
     const events=source.map(item=>{
-      if(!item||typeof item!=='object') return null;
+      if(!item||typeof item!=='object'||item.reconstructed===true||item.synthetic===true) return null;
       return {
         time:txDate(item.time??item.timestamp??item.date??item.eventDate??item.asOf),
         price:txNumber(item.price??item.marketPrice??item.value??item.close),
@@ -166,23 +165,45 @@
     });
   }
 
+  function txStepSeries(points,start,now,count,current){
+    const ordered=points.filter(point=>point.time<=now&&point.verified!==false).sort((a,b)=>a.time-b.time);
+    let opening=current;
+    for(const point of ordered){
+      if(point.time<=start) opening=point.value;
+      else break;
+    }
+    const inRange=ordered.filter(point=>point.time>start&&point.time<=now);
+    return Array.from({length:count},(_,index)=>{
+      const time=start+((now-start)*(index/(count-1)));
+      let value=opening;
+      for(const point of inRange){
+        if(point.time<=time)value=point.value;
+        else break;
+      }
+      if(index===count-1)value=current;
+      return {time,value:Number(value.toFixed(2))};
+    });
+  }
+
   chartSeries=function(record,range=chartRange){
     const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
     const current=Math.max(1,Number(localPrice(record))||1);
     const now=Date.now();
     const start=txRangeStart(range,now);
-    const explicit=txExplicitPricePoints(record);
-    const dated=explicit.length?explicit:txEventPoints(record,current);
 
     if(SHORT_RANGES.has(range)){
-      const recent=dated.filter(point=>point.time>=start);
-      return txLinearSeries(recent,start,now,config.points,current);
+      // Never use reconstructed trend or generic price-history samples here.
+      // Every short-range movement must come from a recorded pricing event.
+      const events=txEventPoints(record,current);
+      return txStepSeries(events,start,now,config.points,current);
     }
 
+    const explicit=txExplicitPricePoints(record);
+    const dated=explicit.length?explicit:txEventPoints(record,current);
     const reconstructed=txOneYearReconstruction(record,current,now);
     const points=txMergePoints(reconstructed,dated);
     return txLinearSeries(points,start,now,config.points,current);
   };
 
-  window.talentxChartHistoryDisclosure='Older chart values are reconstructed for visual context until verified TalentX history is available.';
+  window.talentxChartHistoryDisclosure='1D and 5D show recorded valuations only. Older chart values may be reconstructed for visual context until verified TalentX history is available.';
 })();
