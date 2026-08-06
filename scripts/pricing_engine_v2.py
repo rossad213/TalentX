@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-MODEL_VERSION = "5.1-talent-market-confidence-situation"
+MODEL_VERSION = "5.2-curated-evidence-calibration"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -21,6 +21,9 @@ CATEGORY_METRICS = {
     "Actor": {"performance": .24, "achievements": .22, "consistency": .20, "audience": .22, "potential": .12},
     "Creator": {"performance": .24, "achievements": .14, "consistency": .18, "audience": .28, "potential": .16},
 }
+
+CURATED_NON_ATHLETE_CATEGORIES = {"Music", "Actor"}
+GENERIC_DISCOVERY_CONFIDENCE_CAP = 76.0
 
 
 def num(value: Any, default: float = 0.0) -> float:
@@ -33,6 +36,42 @@ def num(value: Any, default: float = 0.0) -> float:
 
 def clamp(value: Any, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, num(value)))
+
+
+def is_curated_non_athlete(record: dict[str, Any]) -> bool:
+    category = str(record.get("primaryCategory") or "")
+    return (
+        category in CURATED_NON_ATHLETE_CATEGORIES
+        and bool(record.get("nonAthleteRosterVersion"))
+        and num(record.get("benchmarkRank")) > 0
+    )
+
+
+def curated_confidence_floor(record: dict[str, Any]) -> float:
+    """Return the reviewed-roster evidence floor for Music and Actor records.
+
+    Curated records already carry an editorial rank and category-specific metric
+    review. Missing work-period fields must not make that review count as zero
+    evidence. The floor is intentionally moderate and rank-sensitive; it does not
+    assign a price or guarantee that a higher-ranked record always wins.
+    """
+    explicit = num(record.get("curatedEvidenceFloor"))
+    if explicit > 0:
+        return clamp(explicit, 0, 90)
+    if not is_curated_non_athlete(record):
+        return 0.0
+    rank = max(1.0, num(record.get("benchmarkRank"), 100.0))
+    pool = max(rank, num(record.get("benchmarkPoolSize"), 100.0))
+    percentile = 1.0 if pool <= 1 else 1.0 - (rank - 1.0) / (pool - 1.0)
+    return round(76.0 + 6.0 * clamp(percentile, 0, 1), 2)
+
+
+def is_generic_wikidata_discovery(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("sourceNamespace") or "") == "wikidata-non-athlete"
+        and not is_curated_non_athlete(record)
+        and not bool(record.get("professionEvidenceVerified"))
+    )
 
 
 def evidence_confidence(record: dict[str, Any]) -> float:
@@ -51,6 +90,14 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         confidence = min(confidence, 58)
     elif "early" in stage or (games and games < 120):
         confidence = min(confidence, 72)
+
+    if is_generic_wikidata_discovery(record):
+        confidence = min(confidence, GENERIC_DISCOVERY_CONFIDENCE_CAP)
+
+    floor = curated_confidence_floor(record)
+    if floor:
+        confidence = max(confidence, floor)
+
     return round(clamp(confidence, 15, 99), 2)
 
 
@@ -112,8 +159,6 @@ def situation_score(record: dict[str, Any]) -> float:
 def fair_value(talent: float, market: float, confidence: float, situation: float) -> tuple[float, float]:
     certainty = .38 + .62 * confidence / 100.0
     expected = talent * certainty
-    # Situation is intentionally a small adjustment. A transfer or opportunity
-    # change can move price, but cannot overwhelm talent and accumulated evidence.
     blended = expected * .74 + market * .20 + situation * .06
     value = 4.0 + .0325 * blended * blended
     return round(blended, 2), round(max(4.0, min(350.0, value)), 2)
@@ -189,7 +234,7 @@ def main() -> int:
     manifest_path = args.data_dir / "catalog_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     manifest.update({"pricingModelVersion": MODEL_VERSION, "pricingEngine": "v2", "pricingV2CatalogsProcessed": totals,
-                     "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence."})
+                     "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence. Curated Music and Actor reviews receive a moderate evidence floor; generic Wikidata-only discoveries are capped until profession-specific evidence is present."})
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print("Applied pricing engine v2:", totals)
     return 0
