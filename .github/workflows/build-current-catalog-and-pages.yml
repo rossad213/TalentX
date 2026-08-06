@@ -58,6 +58,8 @@ jobs:
           --minimum-sitelinks 10
           --request-timeout 45
           --allow-shortfall
+      - name: Keep discovered records outside curated benchmark rankings
+        run: python scripts/normalize_non_athlete_benchmarks.py
       - name: Build 10,000-name current roster expansion
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
       - name: Add priority soccer players from verified rosters
