@@ -49,7 +49,7 @@ jobs:
         run: python -m unittest tests/test_expand_non_athlete_sources.py -v
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
-      - name: Add 1,000 source-backed musicians and actors
+      - name: Add up to 1,000 source-backed musicians and actors
         run: >-
           python scripts/expand_non_athlete_sources.py
           --music-additions 1000
@@ -57,6 +57,7 @@ jobs:
           --per-occupation-limit 650
           --minimum-sitelinks 10
           --request-timeout 45
+          --allow-shortfall
       - name: Build 10,000-name current roster expansion
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
       - name: Add priority soccer players from verified rosters
