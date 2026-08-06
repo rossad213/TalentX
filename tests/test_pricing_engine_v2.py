@@ -15,6 +15,13 @@ class PricingEngineV2Tests(unittest.TestCase):
               "demandPremiumPct":0,"lastGameMovePct":0,"marketPrice":200,"fundamentalValue":190,
               "trend":[180,200],"starter":False,"careerStatus":"Active"}
         base.update(updates);return base
+    def music_record(self, **updates):
+        base={"id":"music","primaryCategory":"Music","careerStage":"Active career","careerScore":80,
+              "pricingConfidence":.70,"dataConfidence":.70,"activeMetrics":{"performance":88,"achievements":87,
+              "consistency":89,"potential":80,"availability":82,"audience":91},"momentumPct":0,
+              "demandPremiumPct":0,"lastGameMovePct":0,"marketPrice":150,"fundamentalValue":145,
+              "trend":[140,150],"careerStatus":"Active"}
+        base.update(updates);return base
     def test_adds_v2_fields(self):
         r=apply_v2(self.record())
         for key in ('talentScore','marketScore','confidenceScore','situationScore','expectedValueScore','fairValue'):
@@ -38,6 +45,23 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertGreater(favorable['situationScore'],neutral['situationScore'])
         self.assertGreater(favorable['fairValue'],neutral['fairValue'])
         self.assertLess((favorable['fairValue']/neutral['fairValue']-1)*100,8)
+    def test_curated_music_review_has_evidence_floor(self):
+        curated=self.music_record(nonAthleteRosterVersion='1.0.0',benchmarkRank=1,benchmarkPoolSize=100,
+                                  yearsActive=None,curatedEvidenceFloor=82)
+        self.assertGreaterEqual(evidence_confidence(curated),82)
+    def test_generic_wikidata_discovery_confidence_is_capped(self):
+        discovered=self.music_record(sourceNamespace='wikidata-non-athlete',yearsActive=25,
+                                     pricingConfidence=.94,dataConfidence=.94)
+        self.assertLessEqual(evidence_confidence(discovered),76)
+    def test_stronger_curated_artist_stays_above_generic_longevity_proxy(self):
+        curated=apply_v2(self.music_record(
+            id='taylor',nonAthleteRosterVersion='1.0.0',benchmarkRank=1,benchmarkPoolSize=100,
+            yearsActive=None,curatedEvidenceFloor=82,
+            activeMetrics={"performance":96,"achievements":97,"consistency":96,"potential":88,"availability":84,"audience":99}))
+        discovered=apply_v2(self.music_record(
+            id='generic',sourceNamespace='wikidata-non-athlete',yearsActive=25,pricingConfidence=.94,dataConfidence=.94,
+            activeMetrics={"performance":88,"achievements":86,"consistency":90,"potential":68,"availability":78,"audience":91}))
+        self.assertGreater(curated['fairValue'],discovered['fairValue'])
     def test_deterministic(self):
         self.assertEqual(apply_v2(self.record()),apply_v2(self.record()))
 
