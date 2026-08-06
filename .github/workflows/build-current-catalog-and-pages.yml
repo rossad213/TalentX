@@ -47,6 +47,10 @@ jobs:
         run: python -m unittest tests/test_pricing_engine_v2.py -v
       - name: Validate actor and musician discovery logic
         run: python -m unittest tests/test_expand_non_athlete_sources.py -v
+      - name: Validate curated actor and musician enrichment logic
+        run: python -m unittest tests/test_enrich_curated_non_athletes.py -v
+      - name: Validate non-athlete pricing regression logic
+        run: python -m unittest tests/test_validate_non_athlete_pricing.py -v
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
       - name: Add up to 1,000 source-backed musicians and actors
@@ -60,6 +64,13 @@ jobs:
           --allow-shortfall
       - name: Keep discovered records outside curated benchmark rankings
         run: python scripts/normalize_non_athlete_benchmarks.py
+      - name: Enrich existing curated musicians and actors
+        run: >-
+          python scripts/enrich_curated_non_athletes.py
+          --workers 8
+          --request-timeout 12
+          --minimum-resolved 100
+          --allow-shortfall
       - name: Build 10,000-name current roster expansion
         run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
       - name: Add priority soccer players from verified rosters
@@ -87,6 +98,8 @@ jobs:
           --max-identical-score-rate 0.08
       - name: Apply Talent Market Confidence pricing engine v2
         run: python scripts/pricing_engine_v2.py
+      - name: Validate reviewed non-athlete pricing relationships
+        run: python scripts/validate_non_athlete_pricing.py
       - name: Validate generated current catalog
         run: python scripts/validate_current_catalog.py --minimum 10000
       - name: Upload generated catalog files
@@ -100,6 +113,7 @@ jobs:
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
             data/non_athlete_discovery_manifest.json
+            data/curated_non_athlete_evidence_manifest.json
           retention-days: 14
       - name: Prepare static Pages site
         run: |
