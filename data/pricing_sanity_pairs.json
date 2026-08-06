@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "description": "Regression checks for obvious pricing inversions between reviewed benchmark records and generic source discoveries.",
+  "pairs": [
+    {
+      "category": "Music",
+      "higher": "Taylor Swift",
+      "lower": "Demi Lovato",
+      "minimumGapPct": 0,
+      "reason": "Taylor Swift is the No. 1 reviewed Music benchmark; a generic Wikidata-only confidence advantage must not invert the relationship."
+    }
+  ]
+}
