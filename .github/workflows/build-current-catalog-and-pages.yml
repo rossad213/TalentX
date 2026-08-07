@@ -1,4 +1,4 @@
-# Music expansion target: 5,000 total Music listings; individual sports: 200 each
+# Music discovery is strict-source verified; individual sports target 200 each
 name: Build current catalog and deploy TalentX
 
 on:
@@ -48,10 +48,8 @@ jobs:
         run: python -m unittest tests/test_pricing_engine_v2.py -v
       - name: Validate actor and musician discovery logic
         run: python -m unittest tests/test_expand_non_athlete_sources.py -v
-      - name: Validate large Music catalog expansion logic
-        run: python -m unittest tests/test_top_up_music_catalog.py -v
-      - name: Validate Music versus screen category resolution
-        run: python -m unittest tests/test_resolve_music_screen_conflicts.py -v
+      - name: Validate strict Music source discovery
+        run: python -m unittest tests/test_discover_strict_music.py -v
       - name: Validate strict Music verification logic
         run: python -m unittest tests/test_strict_music_catalog.py -v
       - name: Validate discovered benchmark cleanup
@@ -66,31 +64,25 @@ jobs:
         run: python -m unittest tests/test_expand_individual_sport_sources.py -v
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
-      - name: Add up to 2,000 musicians and 1,000 actors
+      - name: Add source-backed actors only
         run: >-
           python scripts/expand_non_athlete_sources.py
-          --music-additions 2000
+          --music-additions 0
           --actor-additions 1000
           --per-occupation-limit 900
           --minimum-sitelinks 10
           --request-timeout 60
           --allow-shortfall
-      - name: Top up Music catalog toward 5,000 current listings
+      - name: Discover strictly verified musicians
         run: >-
-          python scripts/top_up_music_catalog.py
+          python scripts/discover_strict_music.py
           --target-total 5000
-          --minimum-total 3500
-          --per-occupation-limit 1000
-          --page-size 250
+          --minimum-total 1000
+          --per-occupation-limit 1200
+          --page-size 200
           --minimum-sitelinks 5
           --request-timeout 30
           --allow-shortfall
-      - name: Resolve screen-first people out of Music
-        run: >-
-          python scripts/resolve_music_screen_conflicts.py
-          --batch-size 50
-          --request-timeout 15
-          --allow-source-errors
       - name: Strictly verify discovered musicians
         run: >-
           python scripts/strict_music_catalog.py
@@ -159,6 +151,8 @@ jobs:
         run: python scripts/validate_current_catalog.py --minimum 10000
       - name: Validate Music category consistency
         run: python scripts/validate_music_category_consistency.py
+      - name: Enforce final strict Music contract
+        run: python scripts/validate_strict_music_contract.py
       - name: Upload generated catalog files
         uses: actions/upload-artifact@v4
         with:
@@ -170,8 +164,7 @@ jobs:
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
             data/non_athlete_discovery_manifest.json
-            data/music_expansion_manifest.json
-            data/music_category_resolution_manifest.json
+            data/strict_music_discovery_manifest.json
             data/strict_music_seed_manifest.json
             data/strict_music_final_manifest.json
             data/curated_non_athlete_evidence_manifest.json
