@@ -14,7 +14,6 @@ Screen-first people are moved to Actor unless an Actor copy already exists.
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import re
 import time
@@ -31,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "current_seed.json"
 DEFAULT_MANIFEST = ROOT / "data" / "strict_music_manifest.json"
 ENTITY_ENDPOINT = "https://www.wikidata.org/w/api.php"
-USER_AGENT = "TalentX-Strict-Music/1.0 (+https://github.com/rossad213/TalentX)"
+USER_AGENT = "TalentX-Strict-Music/1.1 (+https://github.com/rossad213/TalentX)"
 
 STRONG_MUSIC_OCCUPATIONS = {
     "Q177220": "Singer",
@@ -48,6 +47,26 @@ STRONG_MUSIC_OCCUPATIONS = {
     "Q36834": "Composer",
     "Q183945": "Record producer",
 }
+MUSIC_DISCIPLINES = {
+    "Singer-songwriter": "Singer-Songwriter",
+    "Rapper": "Hip-Hop",
+    "Singer": "Vocal",
+    "Disc jockey": "Electronic / DJ",
+    "Guitarist": "Guitar",
+    "Pianist": "Piano / Keys",
+    "Drummer": "Drums / Percussion",
+    "Bassist": "Bass",
+    "Violinist": "Violin / Strings",
+    "Saxophonist": "Saxophone / Woodwind",
+    "Songwriter": "Songwriting",
+    "Composer": "Composition",
+    "Record producer": "Production",
+}
+ROLE_PRIORITY = [
+    "Singer-songwriter", "Rapper", "Singer", "Disc jockey", "Guitarist",
+    "Pianist", "Drummer", "Bassist", "Violinist", "Saxophonist",
+    "Songwriter", "Composer", "Record producer",
+]
 SCREEN_OCCUPATIONS = {
     "Q33999", "Q10800557", "Q10798782", "Q2259451", "Q2405480",
     "Q2526255", "Q6102247", "Q28389", "Q1414443",
@@ -63,6 +82,7 @@ MUSIC_TERMS = (
     "pianist", "drummer", "bassist", "violinist", "saxophonist",
 )
 KNOWN_SCREEN_FIRST = {"zacefron", "tomhanks", "quentintarantino"}
+GENERIC_ROLES = {"", "music", "musician", "artist", "performer"}
 
 
 def normalize(value: Any) -> str:
@@ -173,6 +193,14 @@ def actor_role(occupations: set[str]) -> tuple[str, str]:
     return "Actor / filmmaker", "Film & Television"
 
 
+def preferred_music_role(strong_music: set[str]) -> str:
+    labels = {STRONG_MUSIC_OCCUPATIONS[qid] for qid in strong_music}
+    for role in ROLE_PRIORITY:
+        if role in labels:
+            return role
+    return sorted(labels)[0]
+
+
 def filter_records(records: list[dict[str, Any]], evidence: dict[str, dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     actor_names = {normalize(r.get("name")) for r in records if r.get("primaryCategory") == "Actor"}
     output: list[dict[str, Any]] = []
@@ -213,7 +241,6 @@ def filter_records(records: list[dict[str, Any]], evidence: dict[str, dict[str, 
         strong_music = occupations & set(STRONG_MUSIC_OCCUPATIONS)
         dominant = primary_description_category(str(info.get("description") or ""))
 
-        # Screen-first public identity always loses the Music primary category.
         if dominant == "Actor":
             if key in actor_names:
                 duplicate_actor_removals.append(name)
@@ -225,8 +252,6 @@ def filter_records(records: list[dict[str, Any]], evidence: dict[str, dict[str, 
             output.append(record)
             continue
 
-        # A generic music tag is not enough. Require a specific profession and a
-        # MusicBrainz artist identity. Ambiguous screen crossovers also fail closed.
         if not strong_music or not mbids:
             excluded.append(name)
             continue
@@ -234,10 +259,20 @@ def filter_records(records: list[dict[str, Any]], evidence: dict[str, dict[str, 
             excluded.append(name)
             continue
 
+        verified_role = preferred_music_role(strong_music)
+        if normalize(record.get("role")) in {normalize(role) for role in GENERIC_ROLES}:
+            record["role"] = verified_role
+            record["discipline"] = MUSIC_DISCIPLINES.get(verified_role, record.get("discipline") or "Music")
+            record["teamOrPlatform"] = record.get("teamOrPlatform") or "Independent / label not listed"
         record["musicCategoryVerified"] = True
         record["musicCategoryVerification"] = "Specific Wikidata music profession + MusicBrainz artist ID; screen-first descriptions excluded"
         record["musicBrainzArtistIds"] = mbids
         record["verifiedMusicOccupations"] = sorted(STRONG_MUSIC_OCCUPATIONS[qid_] for qid_ in strong_music)
+        record["searchText"] = " ".join([
+            name, "Music", str(record.get("discipline") or "Music"),
+            str(record.get("leagueOrMedium") or "Music"), str(record.get("role") or verified_role),
+            str(record.get("country") or ""), "Current active",
+        ]).lower()
         kept_verified.append(name)
         output.append(record)
 
@@ -296,7 +331,7 @@ def main() -> int:
         batch = qids[start:start + batch_size]
         try:
             evidence.update(fetch_entities(session, batch, args.request_timeout))
-        except Exception as exc:  # fail closed below: missing evidence is excluded
+        except Exception as exc:
             errors.append(f"batch={start // batch_size + 1}:{type(exc).__name__}:{exc}")
         if args.sleep:
             time.sleep(max(0.0, args.sleep))
@@ -315,7 +350,7 @@ def main() -> int:
         update_manifest_counts(filtered)
 
     manifest = {
-        "version": "1.0-strict",
+        "version": "1.1-strict",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "catalog": str(args.catalog),
         "entitySource": ENTITY_ENDPOINT,
