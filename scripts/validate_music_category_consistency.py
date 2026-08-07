@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail a TalentX build when known screen-first profiles leak into Music."""
+"""Fail a TalentX build when non-musicians leak into the Music category."""
 from __future__ import annotations
 
 import argparse
@@ -10,12 +10,16 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "current_catalog.json"
-SOURCE_NAMESPACES = {"wikidata-non-athlete", "wikidata-music-expanded"}
 SCREEN_FIRST_REGRESSIONS = {"zacefron", "tomhanks", "quentintarantino"}
+GENERIC_MUSIC_ROLES = {"", "music", "musician", "artist", "performer"}
 
 
 def normalize(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def is_curated_music(record: dict[str, Any]) -> bool:
+    return bool(record.get("nonAthleteRosterVersion")) or str(record.get("statusSource") or "") == "TalentX curated non-athlete roster"
 
 
 def validate(records: list[dict[str, Any]]) -> list[str]:
@@ -25,28 +29,31 @@ def validate(records: list[dict[str, Any]]) -> list[str]:
         for record in records
         if record.get("primaryCategory") == "Actor"
     }
-    actor_source_ids = {
-        str(record.get("sourceRecordId"))
-        for record in records
-        if record.get("primaryCategory") == "Actor" and record.get("sourceRecordId")
-    }
 
     for record in records:
         if record.get("primaryCategory") != "Music":
             continue
         name = str(record.get("name") or "")
         key = normalize(name)
-        source_namespace = str(record.get("sourceNamespace") or "")
-        source_id = str(record.get("sourceRecordId") or "")
 
         if key in SCREEN_FIRST_REGRESSIONS:
             errors.append(f"Known screen-first profile remains in Music: {name}")
 
-        if source_namespace in SOURCE_NAMESPACES:
-            if source_id and source_id in actor_source_ids:
-                errors.append(f"Same source identity exists in both Actor and Music: {name} ({source_id})")
-            elif key in actor_names:
-                errors.append(f"Source-discovered Music profile conflicts with Actor primary category: {name}")
+        if is_curated_music(record):
+            continue
+
+        if record.get("musicCategoryVerified") is not True:
+            errors.append(f"Discovered Music profile lacks strict music verification: {name}")
+            continue
+
+        if not record.get("musicBrainzArtistIds"):
+            errors.append(f"Verified Music profile lacks MusicBrainz artist identity: {name}")
+        if not record.get("verifiedMusicOccupations"):
+            errors.append(f"Verified Music profile lacks a specific music profession: {name}")
+        if normalize(record.get("role")) in {normalize(role) for role in GENERIC_MUSIC_ROLES}:
+            errors.append(f"Generic Music role survived strict verification: {name} ({record.get('role')})")
+        if key in actor_names and "screen-first" in str(record.get("categoryResolution") or "").lower():
+            errors.append(f"Screen-first Actor/Music collision remains: {name}")
 
     return errors
 
@@ -63,10 +70,18 @@ def main() -> int:
     errors = validate(records)
     if errors:
         print("MUSIC CATEGORY CONSISTENCY ERRORS")
-        for error in errors[:50]:
+        for error in errors[:100]:
             print(f"- {error}")
         return 1
-    print("Music category consistency passed.")
+    strict_count = sum(
+        1 for record in records
+        if record.get("primaryCategory") == "Music" and record.get("musicCategoryVerified") is True
+    )
+    curated_count = sum(
+        1 for record in records
+        if record.get("primaryCategory") == "Music" and is_curated_music(record)
+    )
+    print(f"Music category consistency passed: {curated_count} curated + {strict_count} strictly verified discovered Music profiles.")
     return 0
 
 
