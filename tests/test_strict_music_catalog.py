@@ -58,7 +58,7 @@ class StrictMusicCatalogTests(unittest.TestCase):
         self.assertTrue(filtered[0]["musicCategoryVerified"])
         self.assertEqual(summary["verifiedDiscoveredMusic"], 1)
 
-    def test_generic_musician_without_specific_profession_is_excluded(self):
+    def test_generic_musician_screen_first_profile_moves_out_of_music(self):
         records = [{
             "name": "Incidental Music Credit",
             "primaryCategory": "Music",
@@ -67,6 +67,24 @@ class StrictMusicCatalogTests(unittest.TestCase):
         }]
         evidence = {"Q102": {
             "description": "American filmmaker",
+            "occupations": {"Q639669"},
+            "musicbrainz": {"mbid-generic"},
+        }}
+        filtered, summary = filter_records(records, evidence)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["primaryCategory"], "Actor")
+        self.assertNotEqual(filtered[0]["primaryCategory"], "Music")
+        self.assertEqual(summary["movedToActor"], 1)
+
+    def test_generic_musician_without_specific_profession_is_excluded_when_not_screen_first(self):
+        records = [{
+            "name": "Generic Music Tag",
+            "primaryCategory": "Music",
+            "sourceRecordId": "Q105",
+            "role": "Musician",
+        }]
+        evidence = {"Q105": {
+            "description": "American entertainer",
             "occupations": {"Q639669"},
             "musicbrainz": {"mbid-generic"},
         }}
