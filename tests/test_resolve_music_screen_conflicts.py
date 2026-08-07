@@ -96,6 +96,41 @@ class MusicScreenConflictTests(unittest.TestCase):
         self.assertEqual(updated[0]["primaryCategory"], "Actor")
         self.assertEqual(summary["removedDuplicateMusicCopies"], 1)
 
+    def test_existing_actor_copy_wins_even_when_source_lookup_returns_nothing(self):
+        records = [
+            {
+                "id": "actor-zac-efron",
+                "name": "Zac Efron",
+                "primaryCategory": "Actor",
+            },
+            {
+                "id": "music-zac-efron",
+                "name": "Zac Efron",
+                "primaryCategory": "Music",
+                "role": "Singer",
+                "sourceNamespace": "wikidata-music-expanded",
+                "sourceRecordId": "Q45229",
+            },
+        ]
+        updated, summary = resolve_records(records, {})
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0]["id"], "actor-zac-efron")
+        self.assertEqual(summary["deterministicActorCollisionRemovals"], 1)
+
+    def test_known_screen_first_regression_moves_without_network_evidence(self):
+        records = [{
+            "id": "music-quentin-tarantino",
+            "name": "Quentin Tarantino",
+            "primaryCategory": "Music",
+            "role": "Musician",
+            "sourceNamespace": "wikidata-music-expanded",
+            "sourceRecordId": "Q3772",
+        }]
+        updated, summary = resolve_records(records, {})
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0]["primaryCategory"], "Actor")
+        self.assertEqual(summary["regressionGuardMoves"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
