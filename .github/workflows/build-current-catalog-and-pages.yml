@@ -50,6 +50,8 @@ jobs:
         run: python -m unittest tests/test_expand_non_athlete_sources.py -v
       - name: Validate large Music catalog expansion logic
         run: python -m unittest tests/test_top_up_music_catalog.py -v
+      - name: Validate Music versus screen category resolution
+        run: python -m unittest tests/test_resolve_music_screen_conflicts.py -v
       - name: Validate discovered benchmark cleanup
         run: python -m unittest tests/test_normalize_non_athlete_benchmarks.py -v
       - name: Validate curated actor and musician enrichment logic
@@ -81,6 +83,12 @@ jobs:
           --minimum-sitelinks 5
           --request-timeout 30
           --allow-shortfall
+      - name: Resolve screen-first people out of Music
+        run: >-
+          python scripts/resolve_music_screen_conflicts.py
+          --batch-size 120
+          --request-timeout 20
+          --allow-source-errors
       - name: Keep discovered records outside curated benchmark rankings
         run: python scripts/normalize_non_athlete_benchmarks.py
       - name: Enrich existing curated musicians and actors
@@ -145,6 +153,7 @@ jobs:
             data/pricing_enrichment_manifest.json
             data/non_athlete_discovery_manifest.json
             data/music_expansion_manifest.json
+            data/music_category_resolution_manifest.json
             data/curated_non_athlete_evidence_manifest.json
             data/individual_sport_roster_manifest.json
             data/individual_sport_discovery_manifest.json
