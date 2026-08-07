@@ -16,12 +16,22 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SEED = ROOT / "data" / "current_seed.json"
+DISCOVERY_NAMESPACES = {
+    "wikidata-non-athlete",
+    "wikidata-music-expanded",
+}
+
+
+def is_source_discovered_non_athlete(record: dict[str, Any]) -> bool:
+    namespace = str(record.get("sourceNamespace") or "")
+    category = str(record.get("primaryCategory") or "")
+    return namespace in DISCOVERY_NAMESPACES and category in {"Music", "Actor", "Creator"}
 
 
 def normalize(records: list[dict[str, Any]]) -> int:
     changed = 0
     for record in records:
-        if str(record.get("sourceNamespace") or "") != "wikidata-non-athlete":
+        if not is_source_discovered_non_athlete(record):
             continue
         removed = False
         for key in ("benchmarkRank", "benchmarkPoolSize"):
