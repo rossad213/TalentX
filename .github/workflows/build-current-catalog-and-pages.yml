@@ -33,7 +33,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 150
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -50,6 +50,8 @@ jobs:
         run: python -m unittest tests/test_expand_non_athlete_sources.py -v
       - name: Validate large Music catalog expansion logic
         run: python -m unittest tests/test_top_up_music_catalog.py -v
+      - name: Validate discovered benchmark cleanup
+        run: python -m unittest tests/test_normalize_non_athlete_benchmarks.py -v
       - name: Validate curated actor and musician enrichment logic
         run: python -m unittest tests/test_enrich_curated_non_athletes.py -v
       - name: Validate non-athlete pricing regression logic
