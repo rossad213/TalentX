@@ -1,4 +1,4 @@
-# Individual-sport expansion target: 200 per category
+# Music expansion target: 2,000 discovered musicians; individual sports: 200 each
 name: Build current catalog and deploy TalentX
 
 on:
@@ -58,14 +58,14 @@ jobs:
         run: python -m unittest tests/test_expand_individual_sport_sources.py -v
       - name: Build curated Music, Actor, and Creator rosters
         run: python scripts/build_non_athlete_catalog.py
-      - name: Add up to 1,000 source-backed musicians and actors
+      - name: Add up to 2,000 musicians and 1,000 actors
         run: >-
           python scripts/expand_non_athlete_sources.py
-          --music-additions 1000
+          --music-additions 2000
           --actor-additions 1000
-          --per-occupation-limit 650
+          --per-occupation-limit 900
           --minimum-sitelinks 10
-          --request-timeout 45
+          --request-timeout 60
           --allow-shortfall
       - name: Keep discovered records outside curated benchmark rankings
         run: python scripts/normalize_non_athlete_benchmarks.py
