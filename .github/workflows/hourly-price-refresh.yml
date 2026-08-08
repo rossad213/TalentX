@@ -7,10 +7,16 @@ on:
       - ".github/workflows/hourly-price-refresh.yml"
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
+      - "scripts/game_event_history.py"
+      - "scripts/restore_hourly_event_market_state.py"
+      - "scripts/explain_event_pricing_only.py"
+      - "scripts/append_game_event_history.py"
       - "scripts/event_pricing_policy.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/append_price_history.py"
       - "scripts/merge_hourly_market_state.py"
+      - "tests/test_hourly_price_refresh.py"
+      - "tests/test_game_event_history.py"
       - "tests/test_event_pricing_policy.py"
       - "tests/test_pricing_engine_v2.py"
       - "index.html"
@@ -88,7 +94,7 @@ jobs:
           fi
           echo "WEEKLY_BASELINE_RUN_ID=$weekly_run_id" >> "$GITHUB_ENV"
       - name: Validate pricing logic
-        run: python -m unittest tests/test_hourly_price_refresh.py tests/test_event_pricing_policy.py tests/test_pricing_engine_v2.py -v
+        run: python -m unittest tests/test_hourly_price_refresh.py tests/test_game_event_history.py tests/test_event_pricing_policy.py tests/test_pricing_engine_v2.py -v
       - name: Refresh completed-game evidence
         run: >-
           python scripts/hourly_price_refresh_reliable.py
@@ -98,10 +104,19 @@ jobs:
           --max-athletes 1800
           --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
-      - name: Create explainable event record
-        run: python scripts/event_pricing_policy.py --catalog data/current_catalog.json
-      - name: Apply Talent Market Confidence pricing engine v2
+      - name: Save authoritative game-event market state
+        run: cp data/current_catalog.json data/hourly_event_market_state.json
+      - name: Recalculate Talent Market Confidence fair values
         run: python scripts/pricing_engine_v2.py
+      - name: Restore game-by-game market prices after fair-value calculation
+        run: >-
+          python scripts/restore_hourly_event_market_state.py
+          --base data/current_catalog.json
+          --snapshot data/hourly_event_market_state.json
+      - name: Create explainable latest-event record without repricing
+        run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
+      - name: Append every dated game move to chart history
+        run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
       - name: Append dated price history
         run: python scripts/append_price_history.py --catalog data/current_catalog.json
       - name: Validate current catalog
