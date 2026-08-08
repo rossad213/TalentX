@@ -20,6 +20,9 @@ MARKET_STATE_FIELDS = (
     "lastPriceEventAt",
     "lastPriceEvent",
     "lastPriceEventId",
+    "lastEventMovePct",
+    "lastEventType",
+    "lastEventSource",
     "lastGameMovePct",
     "lastGamePerformanceDeltaPct",
     "lastGameStats",
@@ -52,8 +55,8 @@ def merge_market_state(
             for field in MARKET_STATE_FIELDS:
                 if field in prior:
                     result[field] = prior[field]
-            # The historical event remains available through its explanation;
-            # the rebuild itself must not manufacture another price move.
+            # A rebuild refreshes fundamentals but does not manufacture another
+            # observable market move. Existing verified events stay durable.
             result["dailyChange"] = 0.0
             result["hourlyChangePct"] = 0.0
             carried += 1
