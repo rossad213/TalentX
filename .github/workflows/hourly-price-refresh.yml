@@ -8,6 +8,7 @@ on:
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/non_athlete_event_refresh.py"
+      - "scripts/non_athlete_outcome_refresh.py"
       - "scripts/normalize_non_athlete_event_timestamps.py"
       - "scripts/game_event_history.py"
       - "scripts/restore_hourly_event_market_state.py"
@@ -19,6 +20,7 @@ on:
       - "scripts/merge_hourly_market_state.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_non_athlete_event_refresh.py"
+      - "tests/test_non_athlete_outcome_refresh.py"
       - "tests/test_game_event_history.py"
       - "tests/test_event_pricing_policy.py"
       - "tests/test_pricing_engine_v2.py"
@@ -88,6 +90,8 @@ jobs:
             if [ -n "$processed_manifest" ]; then cp "$processed_manifest" data/hourly_refresh_manifest.json; fi
             non_athlete_manifest="$(find _hourly -name non_athlete_event_manifest.json -print -quit)"
             if [ -n "$non_athlete_manifest" ]; then cp "$non_athlete_manifest" data/non_athlete_event_manifest.json; fi
+            outcome_manifest="$(find _hourly -name non_athlete_outcome_manifest.json -print -quit)"
+            if [ -n "$outcome_manifest" ]; then cp "$outcome_manifest" data/non_athlete_outcome_manifest.json; fi
           fi
           if [ -n "$hourly_run_id" ] && [ "$hourly_created_at" \> "$weekly_created_at" ]; then
             for filename in current_catalog.json current_catalog.csv catalog_manifest.json current_source_manifest.json pricing_enrichment_manifest.json; do
@@ -103,6 +107,7 @@ jobs:
           python -m unittest
           tests/test_hourly_price_refresh.py
           tests/test_non_athlete_event_refresh.py
+          tests/test_non_athlete_outcome_refresh.py
           tests/test_game_event_history.py
           tests/test_event_pricing_policy.py
           tests/test_pricing_engine_v2.py -v
@@ -132,6 +137,17 @@ jobs:
           --allow-source-errors
       - name: Timestamp newly verified upcoming Actor projects
         run: python scripts/normalize_non_athlete_event_timestamps.py --catalog data/current_catalog.json
+      - name: Refresh Music and Actor outcome evidence
+        run: >-
+          python scripts/non_athlete_outcome_refresh.py
+          --catalog data/current_catalog.json
+          --manifest data/non_athlete_outcome_manifest.json
+          --lookback-days 30
+          --minimum-interval-hours 6
+          --request-timeout 15
+          --max-pageview-checks 80
+          --max-events 200
+          --allow-source-errors
       - name: Save authoritative event-driven market state
         run: cp data/current_catalog.json data/hourly_event_market_state.json
       - name: Recalculate Talent Market Confidence fair values
@@ -161,6 +177,7 @@ jobs:
             data/pricing_enrichment_manifest.json
             data/hourly_refresh_manifest.json
             data/non_athlete_event_manifest.json
+            data/non_athlete_outcome_manifest.json
             data/taxonomy.json
           retention-days: 10
       - name: Prepare static Pages site
