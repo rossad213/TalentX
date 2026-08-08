@@ -7,6 +7,7 @@ on:
       - ".github/workflows/hourly-price-refresh.yml"
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
+      - "scripts/non_athlete_event_refresh.py"
       - "scripts/game_event_history.py"
       - "scripts/restore_hourly_event_market_state.py"
       - "scripts/explain_event_pricing_only.py"
@@ -16,6 +17,7 @@ on:
       - "scripts/append_price_history.py"
       - "scripts/merge_hourly_market_state.py"
       - "tests/test_hourly_price_refresh.py"
+      - "tests/test_non_athlete_event_refresh.py"
       - "tests/test_game_event_history.py"
       - "tests/test_event_pricing_policy.py"
       - "tests/test_pricing_engine_v2.py"
@@ -47,7 +49,7 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -83,6 +85,8 @@ jobs:
             gh run download "$hourly_run_id" -R "$GITHUB_REPOSITORY" -n talentx-hourly-catalog -D _hourly
             processed_manifest="$(find _hourly -name hourly_refresh_manifest.json -print -quit)"
             if [ -n "$processed_manifest" ]; then cp "$processed_manifest" data/hourly_refresh_manifest.json; fi
+            non_athlete_manifest="$(find _hourly -name non_athlete_event_manifest.json -print -quit)"
+            if [ -n "$non_athlete_manifest" ]; then cp "$non_athlete_manifest" data/non_athlete_event_manifest.json; fi
           fi
           if [ -n "$hourly_run_id" ] && [ "$hourly_created_at" \> "$weekly_created_at" ]; then
             for filename in current_catalog.json current_catalog.csv catalog_manifest.json current_source_manifest.json pricing_enrichment_manifest.json; do
@@ -94,7 +98,13 @@ jobs:
           fi
           echo "WEEKLY_BASELINE_RUN_ID=$weekly_run_id" >> "$GITHUB_ENV"
       - name: Validate pricing logic
-        run: python -m unittest tests/test_hourly_price_refresh.py tests/test_game_event_history.py tests/test_event_pricing_policy.py tests/test_pricing_engine_v2.py -v
+        run: >-
+          python -m unittest
+          tests/test_hourly_price_refresh.py
+          tests/test_non_athlete_event_refresh.py
+          tests/test_game_event_history.py
+          tests/test_event_pricing_policy.py
+          tests/test_pricing_engine_v2.py -v
       - name: Refresh completed-game evidence
         run: >-
           python scripts/hourly_price_refresh_reliable.py
@@ -104,18 +114,33 @@ jobs:
           --max-athletes 1800
           --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
-      - name: Save authoritative game-event market state
+      - name: Refresh verified Music and Actor career events
+        run: >-
+          python scripts/non_athlete_event_refresh.py
+          --catalog data/current_catalog.json
+          --manifest data/non_athlete_event_manifest.json
+          --lookback-days 21
+          --bootstrap-lookback-days 7
+          --lookahead-days 365
+          --minimum-interval-hours 6
+          --wikidata-batch-size 40
+          --request-timeout 25
+          --max-music-confirmations 80
+          --max-events 250
+          --max-events-per-record 3
+          --allow-source-errors
+      - name: Save authoritative event-driven market state
         run: cp data/current_catalog.json data/hourly_event_market_state.json
       - name: Recalculate Talent Market Confidence fair values
         run: python scripts/pricing_engine_v2.py
-      - name: Restore game-by-game market prices after fair-value calculation
+      - name: Restore verified event market prices after fair-value calculation
         run: >-
           python scripts/restore_hourly_event_market_state.py
           --base data/current_catalog.json
           --snapshot data/hourly_event_market_state.json
-      - name: Create explainable latest-event record without repricing
+      - name: Create explainable latest-game record without repricing
         run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
-      - name: Append every dated game move to chart history
+      - name: Append every dated verified event to chart history
         run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
       - name: Append dated price history
         run: python scripts/append_price_history.py --catalog data/current_catalog.json
@@ -132,6 +157,7 @@ jobs:
             data/current_source_manifest.json
             data/pricing_enrichment_manifest.json
             data/hourly_refresh_manifest.json
+            data/non_athlete_event_manifest.json
             data/taxonomy.json
           retention-days: 10
       - name: Prepare static Pages site
