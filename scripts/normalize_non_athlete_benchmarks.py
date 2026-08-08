@@ -19,6 +19,8 @@ DEFAULT_SEED = ROOT / "data" / "current_seed.json"
 DISCOVERY_NAMESPACES = {
     "wikidata-non-athlete",
     "wikidata-music-expanded",
+    "wikidata-music-strict",
+    "wikidata-actor-only",
 }
 
 
