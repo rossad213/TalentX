@@ -8,6 +8,7 @@ game moves that was just applied in the same refresh.
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 from pathlib import Path
 from typing import Any
@@ -54,6 +55,14 @@ def restore(base: list[dict[str, Any]], snapshot: list[dict[str, Any]]) -> tuple
     return output, restored
 
 
+def write_csv(path: Path, records: list[dict[str, Any]]) -> None:
+    fields = sorted({key for record in records for key, value in record.items() if not isinstance(value, (dict, list))})
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(records)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", type=Path, required=True)
@@ -63,6 +72,8 @@ def main() -> int:
     snapshot = load(args.snapshot)
     restored_records, count = restore(base, snapshot)
     args.base.write_text(json.dumps(restored_records, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    if args.base.name == "current_catalog.json":
+        write_csv(args.base.with_suffix(".csv"), restored_records)
     print(f"Restored event-driven market state for {count:,} records after fair-value recalculation.")
     return 0
 
