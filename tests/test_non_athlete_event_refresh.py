@@ -97,11 +97,12 @@ class NonAthleteEventPricingTests(unittest.TestCase):
         }
         updated, count = apply_events(self.actor, [event])
         self.assertEqual(count, 1)
+        updated["lastPriceRefreshAt"] = "2026-08-08T11:55:00Z"
         normalized, changed = normalize_record(updated, datetime(2026, 8, 8, 12, tzinfo=timezone.utc))
         self.assertEqual(changed, 1)
         stored = normalized["priceEvents"][0]
         self.assertEqual(stored["scheduledFor"], "2027-01-01T00:00:00Z")
-        self.assertLessEqual(stored["startedAt"], "2026-08-08T12:00:00Z")
+        self.assertEqual(stored["startedAt"], "2026-08-08T11:55:00Z")
         self.assertEqual(normalized["lastPriceEventAt"], stored["startedAt"])
 
     def test_duplicate_event_cannot_move_price_twice(self) -> None:
