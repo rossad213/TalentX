@@ -9,6 +9,7 @@ on:
       - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/non_athlete_event_refresh.py"
       - "scripts/non_athlete_outcome_refresh.py"
+      - "scripts/repair_non_athlete_outcome_manifest.py"
       - "scripts/normalize_non_athlete_event_timestamps.py"
       - "scripts/game_event_history.py"
       - "scripts/restore_hourly_event_market_state.py"
@@ -148,6 +149,10 @@ jobs:
           --max-pageview-checks 80
           --max-events 200
           --allow-source-errors
+      - name: Keep incomplete outcome checks retryable
+        run: >-
+          python scripts/repair_non_athlete_outcome_manifest.py
+          --manifest data/non_athlete_outcome_manifest.json
       - name: Save authoritative event-driven market state
         run: cp data/current_catalog.json data/hourly_event_market_state.json
       - name: Recalculate Talent Market Confidence fair values
