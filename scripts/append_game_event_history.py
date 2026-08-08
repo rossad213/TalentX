@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Convert durable game price events into permanent dated priceHistory points."""
+"""Convert durable TalentX price events into permanent dated priceHistory points."""
 from __future__ import annotations
 
 import argparse
@@ -50,7 +50,8 @@ def append_events(record: dict[str, Any]) -> tuple[dict[str, Any], int]:
         after = price(event.get("priceAfter"))
         if not event_key or when is None or after is None:
             continue
-        label = str(event.get("name") or "Completed game")
+        label = str(event.get("name") or "Verified career event")
+        event_type = str(event.get("eventType") or "game")
         if before is not None and (event_key, "open") not in existing:
             history.append({
                 "time": iso(when - timedelta(seconds=1)),
@@ -59,7 +60,7 @@ def append_events(record: dict[str, Any]) -> tuple[dict[str, Any], int]:
                 "label": label,
                 "phase": "open",
                 "historyType": "verified",
-                "eventType": "game",
+                "eventType": event_type,
             })
             existing.add((event_key, "open"))
             added += 1
@@ -71,7 +72,7 @@ def append_events(record: dict[str, Any]) -> tuple[dict[str, Any], int]:
                 "label": label,
                 "phase": "close",
                 "historyType": "verified",
-                "eventType": "game",
+                "eventType": event_type,
             })
             existing.add((event_key, "close"))
             added += 1
@@ -96,7 +97,7 @@ def main() -> int:
         output.append(record)
         total += added
     args.catalog.write_text(json.dumps(output, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Appended {total:,} verified game-event price-history points.")
+    print(f"Appended {total:,} verified event price-history points.")
     return 0
 
 
