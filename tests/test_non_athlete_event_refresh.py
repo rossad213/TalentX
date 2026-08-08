@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from append_game_event_history import append_events
 from non_athlete_event_refresh import apply_events, event_move_pct, qid_for
 
 
@@ -60,6 +61,12 @@ class NonAthleteEventPricingTests(unittest.TestCase):
         self.assertEqual(updated["priceEvents"][0]["priceAfter"], updated["marketPrice"])
         self.assertEqual(updated["lastEventType"], "music-release")
         self.assertEqual(updated["priceExplanation"]["headline"], "New album release")
+
+        with_history, added = append_events(updated)
+        self.assertEqual(added, 2)
+        points = [point for point in with_history["priceHistory"] if point.get("eventId") == "musicbrainz:abc"]
+        self.assertEqual(len(points), 2)
+        self.assertTrue(all(point.get("eventType") == "music-release" for point in points))
 
     def test_actor_release_creates_separate_event(self) -> None:
         event = {
