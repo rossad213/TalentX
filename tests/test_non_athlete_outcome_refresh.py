@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +20,7 @@ from non_athlete_outcome_refresh import (
     music_chart_positions,
     outcome_event,
 )
+from repair_non_athlete_outcome_manifest import apply_verified_overrides, matches_override
 
 
 class NonAthleteOutcomePricingTests(unittest.TestCase):
@@ -128,6 +131,72 @@ class NonAthleteOutcomePricingTests(unittest.TestCase):
         updated, count = apply_outcome_events(self.music, [])
         self.assertEqual(count, 0)
         self.assertEqual(updated["marketPrice"], 100.0)
+
+    def test_verified_fallback_matches_exact_wikidata_identity(self) -> None:
+        steve = {
+            "id": "steve-lacy",
+            "name": "Steve Lacy",
+            "primaryCategory": "Music",
+            "sourceNamespace": "wikidata-music-strict",
+            "sourceRecordId": "Q56733980",
+            "marketPrice": 100.0,
+            "pricingConfidence": 0.85,
+            "activeMetrics": {"audience": 85},
+            "trend": [100.0],
+            "priceEvents": [],
+        }
+        override = {
+            "profileName": "Steve Lacy",
+            "primaryCategory": "Music",
+            "wikidataQid": "Q56733980",
+            "eventKey": "verified:steve-lacy:oh-yeah:2026-07-17",
+            "eventId": "6773775032",
+            "eventType": "music-release",
+            "provider": "Sony Music + Apple Music",
+            "name": "Oh yeah? — Album",
+            "startedAt": "2026-07-17T00:00:00Z",
+            "releaseType": "Album",
+        }
+        self.assertTrue(matches_override(steve, override))
+        wrong_steve = {**steve, "sourceRecordId": "Q504641"}
+        self.assertFalse(matches_override(wrong_steve, override))
+
+    def test_verified_release_fallback_creates_price_event(self) -> None:
+        steve = {
+            "id": "steve-lacy",
+            "name": "Steve Lacy",
+            "primaryCategory": "Music",
+            "sourceNamespace": "wikidata-music-strict",
+            "sourceRecordId": "Q56733980",
+            "marketPrice": 100.0,
+            "pricingConfidence": 0.85,
+            "activeMetrics": {"audience": 85},
+            "trend": [100.0],
+            "priceEvents": [],
+        }
+        override = [{
+            "profileName": "Steve Lacy",
+            "primaryCategory": "Music",
+            "wikidataQid": "Q56733980",
+            "eventKey": "verified:steve-lacy:oh-yeah:2026-07-17",
+            "eventId": "6773775032",
+            "eventType": "music-release",
+            "provider": "Sony Music + Apple Music",
+            "name": "Oh yeah? — Album",
+            "startedAt": "2026-07-17T00:00:00Z",
+            "releaseType": "Album",
+        }]
+        with tempfile.TemporaryDirectory() as directory:
+            catalog_path = Path(directory) / "catalog.json"
+            override_path = Path(directory) / "overrides.json"
+            catalog_path.write_text(json.dumps([steve]), encoding="utf-8")
+            override_path.write_text(json.dumps(override), encoding="utf-8")
+            changed, applied = apply_verified_overrides(catalog_path, override_path)
+            self.assertEqual((changed, applied), (1, 1))
+            result = json.loads(catalog_path.read_text(encoding="utf-8"))[0]
+            self.assertGreater(result["marketPrice"], 100.0)
+            self.assertEqual(result["priceEvents"][0]["startedAt"], "2026-07-17T00:00:00Z")
+            self.assertEqual(result["priceEvents"][0]["eventType"], "music-release")
 
 
 if __name__ == "__main__":
