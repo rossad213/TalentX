@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,6 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from append_game_event_history import append_events
 from non_athlete_event_refresh import apply_events, event_move_pct, qid_for
+from normalize_non_athlete_event_timestamps import normalize_record
 
 
 class NonAthleteEventPricingTests(unittest.TestCase):
@@ -83,6 +85,24 @@ class NonAthleteEventPricingTests(unittest.TestCase):
         self.assertGreater(updated["marketPrice"], 80.0)
         self.assertEqual(updated["lastPriceEventId"], event["eventKey"])
         self.assertEqual(updated["priceExplanation"]["headline"], "New screen release")
+
+    def test_upcoming_actor_project_is_charted_when_verified_not_on_release_day(self) -> None:
+        event = {
+            "eventKey": "wikidata:actor-upcoming-project:Q456:Q777:2027-01-01",
+            "eventId": "Q777",
+            "eventType": "actor-upcoming-project",
+            "provider": "Wikidata",
+            "name": "Upcoming project: Future Film",
+            "startedAt": "2027-01-01T00:00:00Z",
+        }
+        updated, count = apply_events(self.actor, [event])
+        self.assertEqual(count, 1)
+        normalized, changed = normalize_record(updated, datetime(2026, 8, 8, 12, tzinfo=timezone.utc))
+        self.assertEqual(changed, 1)
+        stored = normalized["priceEvents"][0]
+        self.assertEqual(stored["scheduledFor"], "2027-01-01T00:00:00Z")
+        self.assertLessEqual(stored["startedAt"], "2026-08-08T12:00:00Z")
+        self.assertEqual(normalized["lastPriceEventAt"], stored["startedAt"])
 
     def test_duplicate_event_cannot_move_price_twice(self) -> None:
         event = {
