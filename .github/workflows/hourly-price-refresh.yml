@@ -8,6 +8,7 @@ on:
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/non_athlete_event_refresh.py"
+      - "scripts/normalize_non_athlete_event_timestamps.py"
       - "scripts/game_event_history.py"
       - "scripts/restore_hourly_event_market_state.py"
       - "scripts/explain_event_pricing_only.py"
@@ -49,7 +50,7 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 75
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -123,12 +124,14 @@ jobs:
           --bootstrap-lookback-days 7
           --lookahead-days 365
           --minimum-interval-hours 6
-          --wikidata-batch-size 40
-          --request-timeout 25
-          --max-music-confirmations 80
+          --wikidata-batch-size 80
+          --request-timeout 18
+          --max-music-confirmations 60
           --max-events 250
           --max-events-per-record 3
           --allow-source-errors
+      - name: Timestamp newly verified upcoming Actor projects
+        run: python scripts/normalize_non_athlete_event_timestamps.py --catalog data/current_catalog.json
       - name: Save authoritative event-driven market state
         run: cp data/current_catalog.json data/hourly_event_market_state.json
       - name: Recalculate Talent Market Confidence fair values
