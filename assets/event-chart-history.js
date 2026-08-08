@@ -1,6 +1,6 @@
 /* TalentX short-range event chart v2.
- * 1D/5D charts are step charts built only from verified dated market/game events.
- * No random or reconstructed movement is introduced in these ranges.
+ * 1D/5D charts are step charts built only from verified dated price-changing events.
+ * No random, reconstructed, or generic hourly snapshot movement is introduced.
  */
 (function(){
   if(typeof chartSeries!=='function') return;
@@ -25,7 +25,9 @@
     return history.map(item=>{
       if(!item||typeof item!=='object') return null;
       const historyType=String(item.historyType||'verified').toLowerCase();
+      const eventType=String(item.eventType||'').toLowerCase();
       if(historyType==='reconstructed'||item.reconstructed===true||item.synthetic===true) return null;
+      if(eventType==='market'||eventType==='historical-baseline') return null;
       const time=asTime(item.time??item.timestamp??item.date);
       const value=asPrice(item.price??item.value??item.marketPrice);
       if(!Number.isFinite(time)||!Number.isFinite(value)) return null;
@@ -90,5 +92,5 @@
     if(range==='1D'||range==='5D') return eventStepSeries(record,range);
     return originalChartSeries(record,range);
   };
-  window.talentxShortRangeChartMode='verified-game-event-step-history-v2';
+  window.talentxShortRangeChartMode='verified-price-changing-events-v2';
 })();
