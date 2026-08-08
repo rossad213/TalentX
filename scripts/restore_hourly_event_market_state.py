@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Restore event-driven market state after recalculating v2 fair values.
 
-The hourly game processor owns the observable market price. Pricing engine v2 may
+Verified event processors own the observable market price. Pricing engine v2 may
 recalculate fair/fundamental value, but it must not erase a sequence of verified
-game moves that was just applied in the same refresh.
+game, music, actor, award, or other supported career-event moves.
 """
 from __future__ import annotations
 
@@ -20,12 +20,16 @@ EVENT_STATE_FIELDS = (
     "trend",
     "priceEvents",
     "priceHistory",
+    "priceExplanation",
     "dailyChange",
     "hourlyChangePct",
     "lastPriceRefreshAt",
     "lastPriceEventAt",
     "lastPriceEvent",
     "lastPriceEventId",
+    "lastEventMovePct",
+    "lastEventType",
+    "lastEventSource",
     "lastGameMovePct",
     "lastGamePerformanceDeltaPct",
     "lastGameStats",
