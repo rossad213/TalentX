@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """Reliability wrapper for the TalentX hourly game refresh.
 
-A completed game may be marked processed even when one or more player records
-failed to match during that run. The original discovery function then skipped
-the whole game on every retry. This wrapper always re-opens completed games in
-the lookback window and relies on the existing per-player event keys to prevent
-duplicate price changes.
+This wrapper keeps the original retry behavior and adds durable game-by-game
+market events. A completed game can therefore affect both price and dated chart
+history exactly once per athlete.
 """
 from __future__ import annotations
 
 import hourly_price_refresh as refresh
+from game_event_history import attach_price_events
 
 _original_discover = refresh.discover_recent_events
+_original_apply_game_market_moves = refresh.apply_game_market_moves
 
 
 def discover_recent_events_reliably(
@@ -39,7 +39,28 @@ def discover_recent_events_reliably(
     )
 
 
+def apply_game_market_moves_with_history(
+    old_record,
+    new_record,
+    item,
+    events,
+    max_game_move_pct,
+    refreshed_at,
+):
+    result, change_pct, event_results = _original_apply_game_market_moves(
+        old_record,
+        new_record,
+        item,
+        events,
+        max_game_move_pct,
+        refreshed_at,
+    )
+    result = attach_price_events(old_record, result, event_results)
+    return result, change_pct, event_results
+
+
 refresh.discover_recent_events = discover_recent_events_reliably
+refresh.apply_game_market_moves = apply_game_market_moves_with_history
 
 if __name__ == "__main__":
     raise SystemExit(refresh.main())
