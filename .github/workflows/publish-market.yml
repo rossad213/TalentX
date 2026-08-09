@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/publish-market.yml"
-      - "scripts/category_market_store.py"
       - "scripts/validate_current_catalog.py"
       - "index.html"
       - "app.js"
@@ -70,29 +69,30 @@ jobs:
             target_dir="$5"
             required="$6"
 
-            # A cancelled/failed upstream baseline can create a category workflow
-            # whose job is entirely skipped. That no-op run does not represent
-            # category health and must not hide the last real category execution.
-            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=20")"
-            meaningful="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion != "skipped")][0] // {}')"
-            run_id="$(printf '%s' "$meaningful" | jq -r '.id // empty')"
-            conclusion="$(printf '%s' "$meaningful" | jq -r '.conclusion // empty')"
-            created_at="$(printf '%s' "$meaningful" | jq -r '.created_at // empty')"
+            # Cancelled/skipped runs are non-authoritative. They commonly occur
+            # when a newer category refresh supersedes an older one. Use the
+            # newest decisive result instead: success is publishable; an actual
+            # failure/timed-out run blocks required category publication.
+            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=30")"
+            decisive="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required")][0] // {}')"
+            run_id="$(printf '%s' "$decisive" | jq -r '.id // empty')"
+            conclusion="$(printf '%s' "$decisive" | jq -r '.conclusion // empty')"
+            created_at="$(printf '%s' "$decisive" | jq -r '.created_at // empty')"
 
             if [ -z "$run_id" ]; then
               if [ "$required" = "required" ]; then
-                echo "Required ${category} market state has no meaningful completed workflow run."
+                echo "Required ${category} market state has no decisive completed workflow run."
                 exit 1
               fi
-              echo "No meaningful completed ${category} market state yet; using baseline."
+              echo "No decisive completed ${category} market state yet; using baseline."
               return 0
             fi
             if [ "$conclusion" != "success" ]; then
               if [ "$required" = "required" ]; then
-                echo "Latest meaningful ${category} market run ${run_id} concluded ${conclusion}; refusing stale fallback."
+                echo "Latest decisive ${category} market run ${run_id} concluded ${conclusion}; refusing stale fallback."
                 exit 1
               fi
-              echo "Latest meaningful optional ${category} run concluded ${conclusion}; using baseline."
+              echo "Latest decisive optional ${category} run concluded ${conclusion}; using baseline."
               return 0
             fi
             rm -rf "$target_dir"; mkdir -p "$target_dir"
@@ -116,7 +116,7 @@ jobs:
             mode="market"
             if [ -n "$created_at" ] && [ "$created_at" \> "$baseline_time" ]; then mode="replace"; fi
             python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$state" --category "$category" --mode "$mode"
-            echo "Published ${category} from meaningful run ${run_id} in ${mode} mode."
+            echo "Published ${category} from decisive run ${run_id} in ${mode} mode."
           }
 
           apply_state sports-market-refresh.yml talentx-sports-market sports.json sports _sports required
