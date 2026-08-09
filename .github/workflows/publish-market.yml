@@ -69,24 +69,30 @@ jobs:
             category="$4"
             target_dir="$5"
             required="$6"
-            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=1")"
-            run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
-            conclusion="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].conclusion // empty')"
-            created_at="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].created_at // empty')"
+
+            # A cancelled/failed upstream baseline can create a category workflow
+            # whose job is entirely skipped. That no-op run does not represent
+            # category health and must not hide the last real category execution.
+            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=20")"
+            meaningful="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion != "skipped")][0] // {}')"
+            run_id="$(printf '%s' "$meaningful" | jq -r '.id // empty')"
+            conclusion="$(printf '%s' "$meaningful" | jq -r '.conclusion // empty')"
+            created_at="$(printf '%s' "$meaningful" | jq -r '.created_at // empty')"
+
             if [ -z "$run_id" ]; then
               if [ "$required" = "required" ]; then
-                echo "Required ${category} market state has no completed workflow run."
+                echo "Required ${category} market state has no meaningful completed workflow run."
                 exit 1
               fi
-              echo "No completed ${category} market state yet; using baseline."
+              echo "No meaningful completed ${category} market state yet; using baseline."
               return 0
             fi
             if [ "$conclusion" != "success" ]; then
               if [ "$required" = "required" ]; then
-                echo "Latest completed ${category} market run ${run_id} concluded ${conclusion}; refusing stale fallback."
+                echo "Latest meaningful ${category} market run ${run_id} concluded ${conclusion}; refusing stale fallback."
                 exit 1
               fi
-              echo "Latest optional ${category} run concluded ${conclusion}; using baseline."
+              echo "Latest meaningful optional ${category} run concluded ${conclusion}; using baseline."
               return 0
             fi
             rm -rf "$target_dir"; mkdir -p "$target_dir"
@@ -110,7 +116,7 @@ jobs:
             mode="market"
             if [ -n "$created_at" ] && [ "$created_at" \> "$baseline_time" ]; then mode="replace"; fi
             python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$state" --category "$category" --mode "$mode"
-            echo "Published ${category} from run ${run_id} in ${mode} mode."
+            echo "Published ${category} from meaningful run ${run_id} in ${mode} mode."
           }
 
           apply_state sports-market-refresh.yml talentx-sports-market sports.json sports _sports required
