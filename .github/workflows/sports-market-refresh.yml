@@ -8,6 +8,7 @@ on:
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/game_event_history.py"
+      - "scripts/athlete_career_event_refresh.py"
       - "scripts/restore_hourly_event_market_state.py"
       - "scripts/explain_event_pricing_only.py"
       - "scripts/append_game_event_history.py"
@@ -15,8 +16,10 @@ on:
       - "scripts/pricing_engine_v2.py"
       - "scripts/pricing_engine_v2_catalog.py"
       - "scripts/category_market_store.py"
+      - "data/verified_athlete_events.json"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_game_event_history.py"
+      - "tests/test_athlete_career_event_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
   workflow_run:
@@ -53,6 +56,7 @@ jobs:
           set -euo pipefail
           rm -rf _baseline _prior
           mkdir -p _baseline _prior data/market
+          printf '[]' > data/prior_sports_state.json
           baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
           baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
           baseline_time="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].created_at // empty')"
@@ -70,6 +74,7 @@ jobs:
             prior_manifest="$(find _prior -name hourly_refresh_manifest.json -print -quit)"
             if [ -n "$prior_manifest" ]; then cp "$prior_manifest" data/hourly_refresh_manifest.json; fi
             if [ -n "$prior_state" ]; then
+              cp "$prior_state" data/prior_sports_state.json
               if [ -n "$prior_time" ] && [ "$prior_time" \> "$baseline_time" ]; then
                 cp "$prior_state" data/current_catalog.json
               else
@@ -83,6 +88,7 @@ jobs:
           python -m unittest
           tests/test_hourly_price_refresh.py
           tests/test_game_event_history.py
+          tests/test_athlete_career_event_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
       - name: Refresh completed-game evidence
@@ -94,7 +100,7 @@ jobs:
           --max-athletes 1800
           --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
-      - name: Save authoritative Sports market state
+      - name: Save authoritative Sports game-market state
         run: cp data/current_catalog.json data/sports_event_market_state.json
       - name: Recalculate Sports fair values
         run: python scripts/pricing_engine_v2_catalog.py --catalog data/current_catalog.json
@@ -105,7 +111,13 @@ jobs:
           --snapshot data/sports_event_market_state.json
       - name: Explain latest game without repricing
         run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
-      - name: Append durable game events
+      - name: Apply verified athlete signings and team changes
+        run: >-
+          python scripts/athlete_career_event_refresh.py
+          --catalog data/current_catalog.json
+          --prior data/prior_sports_state.json
+          --events data/verified_athlete_events.json
+      - name: Append durable Sports events
         run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
       - name: Append dated Sports history
         run: python scripts/append_price_history.py --catalog data/current_catalog.json
