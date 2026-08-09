@@ -13,7 +13,13 @@
   }[char]));
   const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(value||0));
   const number=value=>{const parsed=Number(value);return Number.isFinite(parsed)?parsed:null;};
-  const time=value=>{const parsed=Date.parse(String(value||''));return Number.isFinite(parsed)?parsed:null;};
+  const isDateOnlyUtc=value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/i.test(value.trim());
+  const time=value=>{
+    const text=String(value||'').trim();
+    const parsed=Date.parse(text);
+    if(!Number.isFinite(parsed))return null;
+    return isDateOnlyUtc(text)?parsed+12*60*60*1000:parsed;
+  };
 
   function selectedRecord(){
     try{
