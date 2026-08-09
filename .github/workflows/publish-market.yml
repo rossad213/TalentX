@@ -7,6 +7,7 @@ on:
       - ".github/workflows/publish-market.yml"
       - "scripts/validate_current_catalog.py"
       - "index.html"
+      - "site.webmanifest"
       - "app.js"
       - "chart-history.js"
       - "discovery-profile.js"
@@ -158,7 +159,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
+          cp index.html site.webmanifest app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
           cp -R data _site/data
           cp -R assets _site/assets
       - uses: actions/configure-pages@v5
