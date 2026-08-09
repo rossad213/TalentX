@@ -5,9 +5,11 @@
   const SVG_NS='http://www.w3.org/2000/svg';
   const MAX_COLLAPSED=8;
   let expanded=false;
+  let lastRecordId='';
+  let renderScheduled=false;
 
   const html=value=>String(value??'').replace(/[&<>"']/g,char=>({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'
   }[char]));
   const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(value||0));
   const number=value=>{const parsed=Number(value);return Number.isFinite(parsed)?parsed:null;};
@@ -82,7 +84,8 @@
   function renderTimeline(){
     const record=selectedRecord();
     const chart=document.querySelector('.profile-chart.detailed');
-    if(!record||!chart){document.querySelector('#talentxEventTimeline')?.remove();return;}
+    if(!record||!chart){document.querySelector('#talentxEventTimeline')?.remove();lastRecordId='';return;}
+    if(String(record.id||'')!==lastRecordId){expanded=false;lastRecordId=String(record.id||'');}
     const events=normalizedEvents(record);
     let timeline=document.querySelector('#talentxEventTimeline');
     if(!timeline){
@@ -91,19 +94,23 @@
       timeline.className='tx-event-timeline';
       chart.insertAdjacentElement('afterend',timeline);
     }
-    const visible=expanded?events:events.slice(0,MAX_COLLAPSED);
-    timeline.innerHTML=`<div class="tx-event-head">
-      <div><small>PRICE HISTORY</small><h3>Recent market events</h3><p>Every item below is a saved price-changing event from TalentX data.</p></div>
-      <span>${events.length} event${events.length===1?'':'s'}</span>
-    </div>
-    <div class="tx-event-list">${visible.length?visible.map(row).join(''):`<div class="tx-event-empty">No verified price-changing events have been recorded for this profile yet.</div>`}</div>
-    ${events.length>MAX_COLLAPSED?`<button class="tx-event-more" type="button">${expanded?'Show recent only':`Show all ${events.length} events`}</button>`:''}`;
+    const signature=[record.id,expanded?'all':'recent',...events.map(event=>`${event._key}:${event._time}:${event._after}:${event._move}`)].join('|');
+    if(timeline.dataset.signature!==signature){
+      const visible=expanded?events:events.slice(0,MAX_COLLAPSED);
+      timeline.dataset.signature=signature;
+      timeline.innerHTML=`<div class="tx-event-head">
+        <div><small>PRICE HISTORY</small><h3>Recent market events</h3><p>Every item below is a saved price-changing event from TalentX data.</p></div>
+        <span>${events.length} event${events.length===1?'':'s'}</span>
+      </div>
+      <div class="tx-event-list">${visible.length?visible.map(row).join(''):`<div class="tx-event-empty">No verified price-changing events have been recorded for this profile yet.</div>`}</div>
+      ${events.length>MAX_COLLAPSED?`<button class="tx-event-more" type="button">${expanded?'Show recent only':`Show all ${events.length} events`}</button>`:''}`;
 
-    timeline.querySelectorAll('.tx-event-row').forEach(button=>button.addEventListener('click',()=>{
-      const event=events.find(item=>item._key===button.dataset.eventKey);
-      if(event)openDetail(event);
-    }));
-    timeline.querySelector('.tx-event-more')?.addEventListener('click',()=>{expanded=!expanded;renderTimeline();});
+      timeline.querySelectorAll('.tx-event-row').forEach(button=>button.addEventListener('click',()=>{
+        const event=events.find(item=>item._key===button.dataset.eventKey);
+        if(event)openDetail(event);
+      }));
+      timeline.querySelector('.tx-event-more')?.addEventListener('click',()=>{expanded=!expanded;scheduleRender();});
+    }
     addChartMarkers(events);
   }
 
@@ -158,15 +165,19 @@
     const wrap=document.querySelector('.stock-chart-wrap');
     const svg=wrap?.querySelector('svg.stock-chart');
     if(!wrap||!svg)return;
-    svg.querySelector('.tx-chart-event-markers')?.remove();
     const times=String(wrap.dataset.times||'').split(',').map(Number).filter(Number.isFinite);
     const floor=number(wrap.dataset.floor),ceil=number(wrap.dataset.ceil);
     if(times.length<2||floor===null||ceil===null||ceil<=floor)return;
     const start=times[0],end=times[times.length-1];
     const inRange=events.filter(event=>event._time>=start&&event._time<=end);
+    const markerSignature=[wrap.dataset.range,start,end,...inRange.map(event=>`${event._key}:${event._time}:${event._after}`)].join('|');
+    const prior=svg.querySelector('.tx-chart-event-markers');
+    if(prior?.dataset.signature===markerSignature)return;
+    prior?.remove();
     if(!inRange.length)return;
     const group=document.createElementNS(SVG_NS,'g');
     group.setAttribute('class','tx-chart-event-markers');
+    group.dataset.signature=markerSignature;
     const W=1000,H=340,padL=18,padR=108,padT=18,padB=38;
     const usableW=W-padL-padR,usableH=H-padT-padB;
     for(const event of inRange){
@@ -187,10 +198,16 @@
     svg.appendChild(group);
   }
 
+  function scheduleRender(){
+    if(renderScheduled)return;
+    renderScheduled=true;
+    requestAnimationFrame(()=>{renderScheduled=false;renderTimeline();});
+  }
+
   document.addEventListener('keydown',event=>{if(event.key==='Escape')document.querySelector('.tx-event-overlay')?.remove();});
   const app=document.getElementById('app');
-  if(app)new MutationObserver(()=>requestAnimationFrame(renderTimeline)).observe(app,{childList:true,subtree:true});
-  document.addEventListener('DOMContentLoaded',renderTimeline);
-  requestAnimationFrame(renderTimeline);
-  window.renderTalentxEventTimeline=renderTimeline;
+  if(app)new MutationObserver(scheduleRender).observe(app,{childList:true,subtree:true});
+  document.addEventListener('DOMContentLoaded',scheduleRender);
+  scheduleRender();
+  window.renderTalentxEventTimeline=scheduleRender;
 })();
