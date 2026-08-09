@@ -7,7 +7,7 @@
   if(typeof detailedTrendSvg!=='function'||typeof chartStats!=='function') return;
   const priorDetailedTrendSvg=detailedTrendSvg;
   const priorChartStats=chartStats;
-  const EVENT_CATEGORIES=new Set(['Athlete','Music','Actor']);
+  const EVENT_CATEGORIES=new Set(['Athlete','Music','Actor','Creator']);
 
   function eventCategory(record){
     return EVENT_CATEGORIES.has(String(record?.primaryCategory||''));
@@ -84,5 +84,5 @@
     </div>`;
   };
 
-  window.talentxChartCoveragePresentation='verified-range-coverage-v2-pending-aware';
+  window.talentxChartCoveragePresentation='verified-range-coverage-v3-all-categories';
 })();
