@@ -68,18 +68,34 @@ jobs:
             state_filename="$3"
             category="$4"
             target_dir="$5"
+            required="$6"
             meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=success&per_page=1")"
             run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
             created_at="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].created_at // empty')"
             if [ -z "$run_id" ]; then
+              if [ "$required" = "required" ]; then
+                echo "Required ${category} market state has no successful workflow run."
+                exit 1
+              fi
               echo "No successful ${category} market state yet; using baseline."
               return 0
             fi
             rm -rf "$target_dir"; mkdir -p "$target_dir"
-            gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n "$artifact_name" -D "$target_dir" || return 0
+            if ! gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n "$artifact_name" -D "$target_dir"; then
+              if [ "$required" = "required" ]; then
+                echo "Required ${category} artifact ${artifact_name} could not be downloaded from run ${run_id}."
+                exit 1
+              fi
+              echo "Optional ${category} artifact unavailable; using baseline."
+              return 0
+            fi
             state="$(find "$target_dir" -name "$state_filename" -print -quit)"
             if [ -z "$state" ]; then
-              echo "${category} artifact had no ${state_filename}; using baseline."
+              if [ "$required" = "required" ]; then
+                echo "Required ${category} artifact had no ${state_filename}."
+                exit 1
+              fi
+              echo "Optional ${category} artifact had no ${state_filename}; using baseline."
               return 0
             fi
             mode="market"
@@ -88,10 +104,10 @@ jobs:
             echo "Published ${category} from run ${run_id} in ${mode} mode."
           }
 
-          apply_state sports-market-refresh.yml talentx-sports-market sports.json sports _sports
-          apply_state music-market-refresh.yml talentx-music-market music.json music _music
-          apply_state actor-market-refresh.yml talentx-actor-market actors.json actors _actors
-          apply_state creator-market-refresh.yml talentx-creator-market creators.json creators _creators
+          apply_state sports-market-refresh.yml talentx-sports-market sports.json sports _sports required
+          apply_state music-market-refresh.yml talentx-music-market music.json music _music required
+          apply_state actor-market-refresh.yml talentx-actor-market actors.json actors _actors required
+          apply_state creator-market-refresh.yml talentx-creator-market creators.json creators _creators optional
 
           python scripts/category_market_store.py csv --catalog data/current_catalog.json --output data/current_catalog.csv
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category sports --output data/market/sports.json
