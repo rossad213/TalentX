@@ -38,6 +38,7 @@ on:
       - "!tests/test_category_market_store.py"
       - "!tests/test_historical_event_overlay.py"
       - "!tests/test_athlete_career_event_refresh.py"
+      - "!tests/test_soccer_event_history.py"
       - "data/**"
       - "!data/market/**"
       - "!data/verified_non_athlete_events.json"
