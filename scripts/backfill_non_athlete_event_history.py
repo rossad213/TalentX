@@ -4,12 +4,15 @@
 Historical releases/projects are discovered with the same source contracts used
 by live TalentX non-athlete pricing. New historical events are merged with
 existing durable ``priceEvents`` and the whole chain is reconstructed backward
-from today's unchanged market price.
+from today's unchanged market price. Music release checks are stateful so each
+run expands coverage instead of repeatedly checking the same candidates.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -31,6 +34,7 @@ from non_athlete_event_refresh import (
 )
 
 MAX_PRICE_EVENTS = 2500
+MAX_ATTEMPTS_SAVED = 50000
 
 
 def number(value: Any, default: float = 0.0) -> float:
@@ -40,8 +44,30 @@ def number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def load_json(path: Path | None, fallback: Any) -> Any:
+    if path is None or not path.exists():
+        return fallback
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return fallback
+
+
 def load_catalog(path: Path) -> list[dict[str, Any]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = load_json(path, [])
     if not isinstance(payload, list):
         raise SystemExit(f"{path} must contain a JSON array")
     return [dict(item) for item in payload if isinstance(item, dict)]
@@ -58,6 +84,22 @@ def event_time(event: dict[str, Any]) -> str:
 def existing_events(record: dict[str, Any]) -> list[dict[str, Any]]:
     raw = record.get("priceEvents")
     return [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+
+
+def candidate_key(qid: str, candidate: dict[str, Any]) -> str:
+    date = candidate.get("date")
+    date_key = date.date().isoformat() if isinstance(date, datetime) else str(date or "")[:10]
+    return f"{qid}:{candidate.get('workQid') or ''}:{date_key}"
+
+
+def already_has_work(record: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    work_qid = str(candidate.get("workQid") or "")
+    for event in existing_events(record):
+        if str(event.get("eventType") or "") != "music-release":
+            continue
+        if work_qid and str(event.get("workQid") or "") == work_qid:
+            return True
+    return False
 
 
 def merge_events(existing: list[dict[str, Any]], generated: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -153,14 +195,21 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--category", choices=["Music", "Actor"], required=True)
+    parser.add_argument("--manifest", type=Path)
     parser.add_argument("--days", type=int, default=365)
     parser.add_argument("--wikidata-batch-size", type=int, default=60)
     parser.add_argument("--request-timeout", type=float, default=15.0)
-    parser.add_argument("--max-music-confirmations", type=int, default=500)
-    parser.add_argument("--max-events-per-record", type=int, default=12)
+    parser.add_argument("--max-music-confirmations", type=int, default=1200)
+    parser.add_argument("--max-events-per-record", type=int, default=20)
+    parser.add_argument("--retry-unmatched-days", type=int, default=14)
     args = parser.parse_args()
 
     records = load_catalog(args.catalog)
+    manifest = load_json(args.manifest, {}) if args.category == "Music" else {}
+    manifest = manifest if isinstance(manifest, dict) else {}
+    attempts = manifest.get("attempts") if isinstance(manifest.get("attempts"), dict) else {}
+    attempts = {str(key): dict(value) for key, value in attempts.items() if isinstance(value, dict)}
+
     now = utc_now()
     start = now - timedelta(days=max(1, args.days))
     qid_to_indexes: dict[str, list[int]] = defaultdict(list)
@@ -201,41 +250,72 @@ def main() -> int:
             mbid = existing_mbid(record)
             if not mbid:
                 values = claim_strings(entities.get(qid, {}), "P434")
-                if values:
-                    mbid = str(values[0]).lower()
+                value = str(values[0]).lower() if values else ""
+                if re.fullmatch(r"[0-9a-fA-F-]{36}", value):
+                    mbid = value
             if mbid:
                 mbids[qid] = mbid
 
+        retry_after = timedelta(days=max(1, args.retry_unmatched_days))
+        candidates: list[tuple[bool, datetime, str, dict[str, Any]]] = []
         for qid in qids:
             mbid = mbids.get(qid)
             if not mbid:
                 continue
-            candidates = works.get(qid, [])[-max(1, args.max_events_per_record):]
-            for candidate in candidates:
-                if confirmations >= max(0, args.max_music_confirmations):
-                    break
-                confirmations += 1
-                try:
-                    match = musicbrainz_release_match(session, mbid, candidate, args.request_timeout)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"MusicBrainz warning for {qid}: {type(exc).__name__}: {exc}")
+            representative = records[qid_to_indexes[qid][0]]
+            for candidate in works.get(qid, [])[-max(1, args.max_events_per_record):]:
+                if already_has_work(representative, candidate):
                     continue
-                if not match:
+                key = candidate_key(qid, candidate)
+                prior = attempts.get(key, {})
+                if prior.get("matched") is True:
                     continue
-                for index in qid_to_indexes[qid]:
-                    event = release_event(records[index], candidate, match)
-                    move = event_move_pct(records[index], event)
-                    if abs(move) < 0.001:
-                        continue
-                    generated_by_index[index].append({
-                        **event,
-                        "movePct": move,
-                        "verified": True,
-                        "historicalBackfill": True,
-                        "backfillModel": "verified-music-release-history-v1",
-                    })
+                checked = parse_time(prior.get("checkedAt"))
+                if checked is not None and now - checked < retry_after:
+                    continue
+                never_checked = checked is None
+                when = candidate.get("date") if isinstance(candidate.get("date"), datetime) else start
+                candidates.append((never_checked, when, qid, candidate))
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+
+        last_request = 0.0
+        for _never_checked, _when, qid, candidate in candidates:
             if confirmations >= max(0, args.max_music_confirmations):
                 break
+            elapsed = time.time() - last_request
+            if elapsed < 1.05:
+                time.sleep(1.05 - elapsed)
+            key = candidate_key(qid, candidate)
+            try:
+                match = musicbrainz_release_match(session, mbids[qid], candidate, args.request_timeout)
+                last_request = time.time()
+            except Exception as exc:  # noqa: BLE001
+                last_request = time.time()
+                attempts[key] = {
+                    "checkedAt": iso(now),
+                    "matched": False,
+                    "sourceError": f"{type(exc).__name__}: {exc}",
+                }
+                confirmations += 1
+                print(f"MusicBrainz warning for {qid}: {type(exc).__name__}: {exc}")
+                continue
+            confirmations += 1
+            attempts[key] = {"checkedAt": iso(now), "matched": bool(match)}
+            if not match:
+                continue
+            for index in qid_to_indexes[qid]:
+                event = release_event(records[index], candidate, match)
+                move = event_move_pct(records[index], event)
+                if abs(move) < 0.001:
+                    continue
+                attempts[key]["eventKey"] = event.get("eventKey")
+                generated_by_index[index].append({
+                    **event,
+                    "movePct": move,
+                    "verified": True,
+                    "historicalBackfill": True,
+                    "backfillModel": "verified-music-release-history-v2-stateful",
+                })
     else:
         for qid in qids:
             candidates = works.get(qid, [])[-max(1, args.max_events_per_record):]
@@ -250,7 +330,7 @@ def main() -> int:
                         "movePct": move,
                         "verified": True,
                         "historicalBackfill": True,
-                        "backfillModel": "verified-actor-release-history-v1",
+                        "backfillModel": "verified-actor-release-history-v2",
                     })
 
     updated = list(records)
@@ -270,17 +350,30 @@ def main() -> int:
         result["priceHistoryBackfilledAt"] = iso(now)
         result["priceHistoryBackfillDays"] = args.days
         result["priceHistoryBackfillModel"] = (
-            "verified-music-release-history-v1" if args.category == "Music"
-            else "verified-actor-release-history-v1"
+            "verified-music-release-history-v2-stateful" if args.category == "Music"
+            else "verified-actor-release-history-v2"
         )
         updated[index] = result
         touched += 1
         generated_count += len(generated)
 
     args.catalog.write_text(json.dumps(updated, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Backfilled {touched:,} {args.category} records with {generated_count:,} verified historical events.")
+    print(f"Backfilled {touched:,} {args.category} records with {generated_count:,} new verified historical events.")
     if args.category == "Music":
-        print(f"MusicBrainz release confirmations attempted: {confirmations:,}")
+        print(f"MusicBrainz historical confirmations attempted: {confirmations:,}")
+        if args.manifest is not None:
+            ordered_attempts = sorted(
+                attempts.items(),
+                key=lambda item: str(item[1].get("checkedAt") or ""),
+            )[-MAX_ATTEMPTS_SAVED:]
+            args.manifest.write_text(json.dumps({
+                "version": "2.0-stateful-music-history-coverage",
+                "generatedAt": iso(now),
+                "lookbackDays": args.days,
+                "retryUnmatchedDays": args.retry_unmatched_days,
+                "checksAttemptedThisRun": confirmations,
+                "attempts": dict(ordered_attempts),
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
     return 0
 
 
