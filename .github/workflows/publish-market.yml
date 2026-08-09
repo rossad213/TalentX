@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/publish-market.yml"
       - "scripts/validate_current_catalog.py"
+      - "scripts/merge_historical_event_overlay.py"
       - "index.html"
       - "site.webmanifest"
       - "app.js"
@@ -21,6 +22,7 @@ on:
       - "Music market refresh"
       - "Actor market refresh"
       - "Creator market refresh"
+      - "Backfill verified 1Y event history"
     types: [completed]
   schedule:
     - cron: "52 * * * *"
@@ -51,7 +53,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -rf _baseline _sports _music _actors _creators
+          rm -rf _baseline _sports _music _actors _creators _history
           mkdir -p _baseline data/market
           baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
           baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
@@ -78,7 +80,6 @@ jobs:
             latest="$(printf '%s' "$meta" | jq -c '.workflow_runs[0] // {}')"
             latest_id="$(printf '%s' "$latest" | jq -r '.id // empty')"
             latest_conclusion="$(printf '%s' "$latest" | jq -r '.conclusion // empty')"
-            latest_time="$(printf '%s' "$latest" | jq -r '.created_at // empty')"
 
             healthy="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion == "success")][0] // {}')"
             run_id="$(printf '%s' "$healthy" | jq -r '.id // empty')"
@@ -126,9 +127,44 @@ jobs:
           apply_state actor-market-refresh.yml talentx-actor-market actors.json actors _actors required
           apply_state creator-market-refresh.yml talentx-creator-market creators.json creators _creators optional
 
+          # Historical backfill is an optional, history-only layer. It can never
+          # replace current category state or today's market price. A failed or
+          # expired history artifact simply leaves the live market untouched.
+          history_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/backfill-price-history.yml/runs?status=success&per_page=1")"
+          history_id="$(printf '%s' "$history_meta" | jq -r '.workflow_runs[0].id // empty')"
+          if [ -n "$history_id" ]; then
+            mkdir -p _history/sports _history/music _history/actors
+            if gh run download "$history_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-history-backfill -D _history/sports; then
+              history_state="$(find _history/sports -name sports.json -print -quit)"
+              if [ -n "$history_state" ]; then
+                python scripts/merge_historical_event_overlay.py --base data/current_catalog.json --overlay "$history_state" --category sports
+              fi
+            else
+              echo "WARNING: Sports history artifact unavailable; publishing live Sports state only."
+            fi
+            if gh run download "$history_id" -R "$GITHUB_REPOSITORY" -n talentx-music-history-backfill -D _history/music; then
+              history_state="$(find _history/music -name music.json -print -quit)"
+              if [ -n "$history_state" ]; then
+                python scripts/merge_historical_event_overlay.py --base data/current_catalog.json --overlay "$history_state" --category music
+              fi
+            else
+              echo "WARNING: Music history artifact unavailable; publishing live Music state only."
+            fi
+            if gh run download "$history_id" -R "$GITHUB_REPOSITORY" -n talentx-actor-history-backfill -D _history/actors; then
+              history_state="$(find _history/actors -name actors.json -print -quit)"
+              if [ -n "$history_state" ]; then
+                python scripts/merge_historical_event_overlay.py --base data/current_catalog.json --overlay "$history_state" --category actors
+              fi
+            else
+              echo "WARNING: Actor history artifact unavailable; publishing live Actor state only."
+            fi
+            echo "Applied latest successful verified 1Y history run ${history_id}."
+          else
+            echo "No successful verified 1Y history run exists yet; publishing live event history only."
+          fi
+
           # Global identity/display constraints only make sense after all category
-          # databases have been recombined. Repair deterministic ticker collisions,
-          # regenerate CSV, and refresh manifest counts from the real merged market.
+          # databases and optional history have been recombined.
           python scripts/category_market_store.py finalize \
             --catalog data/current_catalog.json \
             --csv data/current_catalog.csv \
@@ -140,7 +176,7 @@ jobs:
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category creators --output data/market/creators.json
       - name: Validate unified market
         run: |
-          python -m unittest tests/test_category_market_store.py -v
+          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py -v
           python scripts/validate_current_catalog.py --minimum 10000
           node --check assets/event-timeline.js
           node --check assets/chart-visual-fixes.js
