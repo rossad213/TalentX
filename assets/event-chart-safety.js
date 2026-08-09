@@ -8,7 +8,7 @@
   if(typeof chartSeries!=='function') return;
   const priorChartSeries=chartSeries;
   const DAY=24*60*60*1000;
-  const EVENT_CATEGORIES=new Set(['Athlete','Music','Actor']);
+  const EVENT_CATEGORIES=new Set(['Athlete','Music','Actor','Creator']);
 
   function dateOnlyUtc(value){
     return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/i.test(value.trim());
@@ -189,5 +189,5 @@
 
   window.talentxEventCoverage=coverage;
   window.talentxDurablePriceEvents=durableEvents;
-  window.talentxEventChartSafety='durable-price-events-coverage-aware-v3-rebased';
+  window.talentxEventChartSafety='durable-price-events-coverage-aware-v4-all-categories';
 })();
