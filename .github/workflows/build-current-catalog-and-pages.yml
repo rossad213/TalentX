@@ -25,6 +25,7 @@ on:
       - "!scripts/category_market_store.py"
       - "!scripts/backfill_price_history.py"
       - "!scripts/backfill_non_athlete_event_history.py"
+      - "!scripts/backfill_non_athlete_outcome_history.py"
       - "!scripts/merge_historical_event_overlay.py"
       - "tests/**"
       - "!tests/test_hourly_price_refresh.py"
