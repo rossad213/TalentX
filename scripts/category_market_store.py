@@ -14,7 +14,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-from merge_hourly_market_state import MARKET_STATE_FIELDS
+try:
+    from merge_hourly_market_state import MARKET_STATE_FIELDS
+except ModuleNotFoundError:  # Imported as scripts.category_market_store in tests.
+    from scripts.merge_hourly_market_state import MARKET_STATE_FIELDS
 
 CATEGORY_ALIASES = {
     "sports": "Athlete",
@@ -98,6 +101,7 @@ def merge_category(
     merged: list[dict[str, Any]] = []
     touched = 0
     seen: set[str] = set()
+    base_ids = {str(item.get("id") or "") for item in base}
 
     for record in base:
         result = dict(record)
@@ -124,7 +128,7 @@ def merge_category(
     # but retaining an independently discovered category record is safer than
     # silently dropping it during publication.
     for record_id, record in overlay_by_id.items():
-        if record_id not in seen and not any(str(item.get("id") or "") == record_id for item in base):
+        if record_id not in seen and record_id not in base_ids:
             merged.append(dict(record))
             touched += 1
 
