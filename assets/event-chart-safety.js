@@ -1,8 +1,8 @@
 /* TalentX event-chart safety layer.
  * Durable priceEvents are the only source allowed to create event-driven steps.
  * Legacy priceHistory may come from an older pricing scale and is never allowed
- * to manufacture a current chart move. Coverage metadata distinguishes a real
- * flat market from periods TalentX has not actually observed yet.
+ * to manufacture a current chart move. Verified event percentages may be
+ * rebased onto the current valuation scale after a pricing-model migration.
  */
 (function(){
   if(typeof chartSeries!=='function') return;
@@ -25,6 +25,15 @@
     const parsed=Number(value);
     return Number.isFinite(parsed)&&parsed>0?parsed:NaN;
   }
+  function asMove(event,before,after){
+    const recorded=Number(event?.movePct);
+    if(Number.isFinite(recorded)&&Math.abs(recorded)<=15) return recorded;
+    if(Number.isFinite(before)&&before>0&&Number.isFinite(after)&&after>0){
+      const derived=((after/before)-1)*100;
+      if(Number.isFinite(derived)&&Math.abs(derived)<=15) return derived;
+    }
+    return NaN;
+  }
   function pctGap(a,b){
     return Number.isFinite(a)&&a>0&&Number.isFinite(b)&&b>0?Math.abs((b/a)-1):Infinity;
   }
@@ -32,6 +41,30 @@
     const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
     if(range==='YTD') return new Date(new Date(now).getFullYear(),0,1).getTime();
     return now-(config.duration||DAY);
+  }
+
+  function rebaseEvents(events,record){
+    const current=Math.max(1,Number(record?.marketPrice)||Number(localPrice(record))||1);
+    let after=current;
+    const rebuilt=[];
+    for(let index=events.length-1;index>=0;index--){
+      const item=events[index];
+      const move=asMove(item.event,item.before,item.after);
+      if(!Number.isFinite(move)||Math.abs(move)>.15*100) continue;
+      const denominator=1+(move/100);
+      if(!Number.isFinite(denominator)||denominator<=0) continue;
+      const before=after/denominator;
+      if(!Number.isFinite(before)||before<=0) continue;
+      rebuilt.push({
+        time:item.time,
+        before,
+        after,
+        event:{...item.event,movePct:move,chartPriceRebased:true}
+      });
+      after=before;
+    }
+    rebuilt.reverse();
+    return rebuilt;
   }
 
   function durableEvents(record){
@@ -42,43 +75,46 @@
       const time=asTime(event.startedAt??event.time??event.date??event.eventDate);
       const before=asPrice(event.priceBefore);
       const after=asPrice(event.priceAfter??event.price??event.marketPrice);
-      if(!Number.isFinite(time)||!Number.isFinite(after)) continue;
-      // TalentX event policies are deliberately bounded. A giant single-event
-      // jump indicates an old price scale or malformed history, not a real move.
-      if(Number.isFinite(before)&&pctGap(before,after)>.15) continue;
-      events.push({time,before,after,event});
+      const move=asMove(event,before,after);
+      if(!Number.isFinite(time)||!Number.isFinite(move)) continue;
+      // Verified event policies are bounded. An implausibly large event move is
+      // malformed evidence and is ignored rather than displayed.
+      if(Math.abs(move)>15) continue;
+      events.push({time,before,after,event:{...event,movePct:move}});
     }
     events.sort((a,b)=>a.time-b.time);
     if(!events.length) return [];
 
-    // Keep only the newest continuous chain. A pricing-model migration can leave
-    // older event prices on a different scale; never draw a bridge across it.
+    // Prefer the stored price chain when it is internally continuous and still
+    // on the current valuation scale.
     let chain=[];
     for(const item of events){
+      if(!Number.isFinite(item.before)||!Number.isFinite(item.after)) continue;
+      if(pctGap(item.before,item.after)>.15) continue;
       if(!chain.length){
         chain=[item];
         continue;
       }
       const prior=chain[chain.length-1];
-      const expected=prior.after;
-      const nextOpen=Number.isFinite(item.before)?item.before:item.after;
-      if(pctGap(expected,nextOpen)>.08) chain=[item];
+      if(pctGap(prior.after,item.before)>.08) chain=[item];
       else chain.push(item);
     }
 
-    const current=Math.max(1,Number(localPrice(record))||1);
-    const last=chain[chain.length-1];
-    // Event-driven market price should remain close to the last durable event.
-    // A large mismatch means the chain belongs to an obsolete pricing scale.
-    if(pctGap(last.after,current)>.25) return [];
-    return chain;
+    const current=Math.max(1,Number(record?.marketPrice)||Number(localPrice(record))||1);
+    if(chain.length&&pctGap(chain[chain.length-1].after,current)<=.25) return chain;
+
+    // A pricing-model migration can invalidate absolute historical dollars while
+    // leaving the verified event and its percentage move perfectly valid. In
+    // that case reconstruct the event chain backward from today's market price.
+    // This preserves real event direction/magnitude without inventing movement.
+    return rebaseEvents(events,record);
   }
 
   function eventPoints(record){
     const points=[];
     for(const item of durableEvents(record)){
       if(Number.isFinite(item.before)) points.push({time:item.time-1000,value:item.before});
-      points.push({time:item.time,value:item.after});
+      if(Number.isFinite(item.after)) points.push({time:item.time,value:item.after});
     }
     return points.sort((a,b)=>a.time-b.time);
   }
@@ -153,5 +189,5 @@
 
   window.talentxEventCoverage=coverage;
   window.talentxDurablePriceEvents=durableEvents;
-  window.talentxEventChartSafety='durable-price-events-coverage-aware-v2';
+  window.talentxEventChartSafety='durable-price-events-coverage-aware-v3-rebased';
 })();
