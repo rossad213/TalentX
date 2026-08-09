@@ -5,20 +5,229 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/backfill-price-history.yml"
+      - "scripts/backfill_price_history.py"
+      - "scripts/backfill_non_athlete_event_history.py"
   workflow_dispatch:
+    inputs:
+      days:
+        description: "Verified historical lookback in days"
+        required: false
+        default: "365"
+      max_athletes:
+        description: "Maximum matched athletes to backfill"
+        required: false
+        default: "3000"
+      max_music_confirmations:
+        description: "Maximum MusicBrainz release confirmations"
+        required: false
+        default: "500"
+  schedule:
+    - cron: "41 7 1 * *"
 
 permissions:
+  actions: read
   contents: read
 
-# Temporary handoff guard: this shares the old Pages concurrency group so this
-# tiny run cancels any legacy backfill that may still be preparing a direct Pages
-# deployment. The next commit moves the real backfill to its own concurrency group.
 concurrency:
-  group: talentx-pages
+  group: talentx-history-backfill
   cancel-in-progress: true
 
 jobs:
-  disable-legacy-deploy:
+  sports:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     steps:
-      - run: echo "Legacy direct-deploy historical backfill is disabled; unified publishing remains authoritative."
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Restore latest healthy Sports state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _sports; mkdir -p _sports data
+          meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/sports-market-refresh.yml/runs?status=success&per_page=1")"
+          run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
+          test -n "$run_id" || { echo "No successful Sports state exists."; exit 1; }
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _sports
+          state="$(find _sports -name sports.json -print -quit)"
+          test -n "$state" || { echo "Sports artifact missing sports.json"; exit 1; }
+          cp "$state" data/sports.json
+      - name: Snapshot Sports live market fields
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          records=json.loads(Path("data/sports.json").read_text())
+          snap={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          Path("data/sports-live-fields.json").write_text(json.dumps(snap,sort_keys=True,separators=(",",":")))
+          PY
+      - name: Backfill one year of verified completed games
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '365' }}
+          MAX_ATHLETES: ${{ inputs.max_athletes || '3000' }}
+        run: >-
+          python scripts/backfill_price_history.py
+          --catalog data/sports.json
+          --days "$BACKFILL_DAYS"
+          --workers 20
+          --request-timeout 12
+          --max-athletes "$MAX_ATHLETES"
+          --max-game-move-pct 2.5
+      - name: Prove Sports live price was not changed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          before=json.loads(Path("data/sports-live-fields.json").read_text())
+          records=json.loads(Path("data/sports.json").read_text())
+          after={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          if before != after:
+              raise SystemExit("Sports historical backfill changed live market fields")
+          print("Sports live market fields unchanged.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-sports-history-backfill
+          path: data/sports.json
+          retention-days: 90
+
+  music:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Restore latest healthy Music state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _music; mkdir -p _music data
+          meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/music-market-refresh.yml/runs?status=success&per_page=1")"
+          run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
+          test -n "$run_id" || { echo "No successful Music state exists."; exit 1; }
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n talentx-music-market -D _music
+          state="$(find _music -name music.json -print -quit)"
+          test -n "$state" || { echo "Music artifact missing music.json"; exit 1; }
+          cp "$state" data/music.json
+      - name: Snapshot Music live market fields
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          records=json.loads(Path("data/music.json").read_text())
+          snap={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          Path("data/music-live-fields.json").write_text(json.dumps(snap,sort_keys=True,separators=(",",":")))
+          PY
+      - name: Backfill one year of verified Music releases
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '365' }}
+          MAX_CONFIRMATIONS: ${{ inputs.max_music_confirmations || '500' }}
+        run: >-
+          python scripts/backfill_non_athlete_event_history.py
+          --catalog data/music.json
+          --category Music
+          --days "$BACKFILL_DAYS"
+          --wikidata-batch-size 60
+          --request-timeout 15
+          --max-music-confirmations "$MAX_CONFIRMATIONS"
+          --max-events-per-record 20
+      - name: Prove Music live price was not changed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          before=json.loads(Path("data/music-live-fields.json").read_text())
+          records=json.loads(Path("data/music.json").read_text())
+          after={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          if before != after:
+              raise SystemExit("Music historical backfill changed live market fields")
+          print("Music live market fields unchanged.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-music-history-backfill
+          path: data/music.json
+          retention-days: 90
+
+  actors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Restore latest healthy Actor state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _actors; mkdir -p _actors data
+          meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/actor-market-refresh.yml/runs?status=success&per_page=1")"
+          run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
+          test -n "$run_id" || { echo "No successful Actor state exists."; exit 1; }
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n talentx-actor-market -D _actors
+          state="$(find _actors -name actors.json -print -quit)"
+          test -n "$state" || { echo "Actor artifact missing actors.json"; exit 1; }
+          cp "$state" data/actors.json
+      - name: Snapshot Actor live market fields
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          records=json.loads(Path("data/actors.json").read_text())
+          snap={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          Path("data/actors-live-fields.json").write_text(json.dumps(snap,sort_keys=True,separators=(",",":")))
+          PY
+      - name: Backfill one year of verified Actor releases
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '365' }}
+        run: >-
+          python scripts/backfill_non_athlete_event_history.py
+          --catalog data/actors.json
+          --category Actor
+          --days "$BACKFILL_DAYS"
+          --wikidata-batch-size 60
+          --request-timeout 15
+          --max-music-confirmations 0
+          --max-events-per-record 20
+      - name: Prove Actor live price was not changed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          before=json.loads(Path("data/actors-live-fields.json").read_text())
+          records=json.loads(Path("data/actors.json").read_text())
+          after={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          if before != after:
+              raise SystemExit("Actor historical backfill changed live market fields")
+          print("Actor live market fields unchanged.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-actor-history-backfill
+          path: data/actors.json
+          retention-days: 90
+
+  complete:
+    runs-on: ubuntu-latest
+    needs: [sports, music, actors]
+    steps:
+      - run: echo "Verified 1Y Sports, Music and Actor history artifacts are ready for unified publishing."
