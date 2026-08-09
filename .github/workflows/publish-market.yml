@@ -69,15 +69,24 @@ jobs:
             category="$4"
             target_dir="$5"
             required="$6"
-            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=success&per_page=1")"
+            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=1")"
             run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
+            conclusion="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].conclusion // empty')"
             created_at="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].created_at // empty')"
             if [ -z "$run_id" ]; then
               if [ "$required" = "required" ]; then
-                echo "Required ${category} market state has no successful workflow run."
+                echo "Required ${category} market state has no completed workflow run."
                 exit 1
               fi
-              echo "No successful ${category} market state yet; using baseline."
+              echo "No completed ${category} market state yet; using baseline."
+              return 0
+            fi
+            if [ "$conclusion" != "success" ]; then
+              if [ "$required" = "required" ]; then
+                echo "Latest completed ${category} market run ${run_id} concluded ${conclusion}; refusing stale fallback."
+                exit 1
+              fi
+              echo "Latest optional ${category} run concluded ${conclusion}; using baseline."
               return 0
             fi
             rm -rf "$target_dir"; mkdir -p "$target_dir"
