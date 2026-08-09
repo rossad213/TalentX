@@ -39,7 +39,7 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -87,24 +87,24 @@ jobs:
           tests/test_non_athlete_outcome_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
-      - name: Refresh verified Actor career events with 60-day backfill
+      - name: Refresh verified Actor career events with broad coverage
         run: >-
           python scripts/non_athlete_event_refresh.py
           --catalog data/current_catalog.json
           --manifest data/actor_event_manifest.json
-          --lookback-days 60
+          --lookback-days 30
           --bootstrap-lookback-days 60
           --lookahead-days 365
           --minimum-interval-hours 0
           --wikidata-batch-size 80
           --request-timeout 18
           --max-music-confirmations 0
-          --max-events 300
-          --max-events-per-record 5
+          --max-events 1000
+          --max-events-per-record 12
           --allow-source-errors
       - name: Timestamp newly verified upcoming Actor projects
         run: python scripts/normalize_non_athlete_event_timestamps.py --catalog data/current_catalog.json
-      - name: Refresh Actor outcome evidence with 60-day backfill
+      - name: Refresh Actor outcome evidence broadly
         run: >-
           python scripts/non_athlete_outcome_refresh.py
           --catalog data/current_catalog.json
@@ -112,8 +112,8 @@ jobs:
           --lookback-days 60
           --minimum-interval-hours 0
           --request-timeout 15
-          --max-pageview-checks 100
-          --max-events 250
+          --max-pageview-checks 300
+          --max-events 800
           --allow-source-errors
       - name: Keep incomplete Actor outcome checks retryable
         run: python scripts/repair_non_athlete_outcome_manifest.py --manifest data/actor_outcome_manifest.json
