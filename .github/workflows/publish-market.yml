@@ -133,7 +133,7 @@ jobs:
           history_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/backfill-price-history.yml/runs?status=success&per_page=1")"
           history_id="$(printf '%s' "$history_meta" | jq -r '.workflow_runs[0].id // empty')"
           if [ -n "$history_id" ]; then
-            mkdir -p _history/sports _history/music _history/actors
+            mkdir -p _history/sports _history/music _history/actors _history/creators
             if gh run download "$history_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-history-backfill -D _history/sports; then
               history_state="$(find _history/sports -name sports.json -print -quit)"
               if [ -n "$history_state" ]; then
@@ -157,6 +157,14 @@ jobs:
               fi
             else
               echo "WARNING: Actor history artifact unavailable; publishing live Actor state only."
+            fi
+            if gh run download "$history_id" -R "$GITHUB_REPOSITORY" -n talentx-creator-history-backfill -D _history/creators; then
+              history_state="$(find _history/creators -name creators.json -print -quit)"
+              if [ -n "$history_state" ]; then
+                python scripts/merge_historical_event_overlay.py --base data/current_catalog.json --overlay "$history_state" --category Creator
+              fi
+            else
+              echo "WARNING: Creator history artifact unavailable; publishing live Creator state only."
             fi
             echo "Applied latest successful verified 1Y history run ${history_id}."
           else
