@@ -7,6 +7,7 @@ on:
       - ".github/workflows/backfill-price-history.yml"
       - "scripts/backfill_price_history.py"
       - "scripts/backfill_non_athlete_event_history.py"
+      - "scripts/backfill_non_athlete_outcome_history.py"
       - "scripts/merge_historical_event_overlay.py"
   workflow_dispatch:
     inputs:
@@ -168,6 +169,15 @@ jobs:
           --max-music-confirmations "$MAX_CONFIRMATIONS"
           --max-events-per-record 24
           --retry-unmatched-days 14
+      - name: Add verified historical Music chart outcomes
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '365' }}
+        run: >-
+          python scripts/backfill_non_athlete_outcome_history.py
+          --catalog data/music.json
+          --category Music
+          --days "$BACKFILL_DAYS"
+          --request-timeout 15
       - name: Prove Music live price was not changed
         run: |
           python - <<'PY'
@@ -244,6 +254,15 @@ jobs:
           --request-timeout 15
           --max-music-confirmations 0
           --max-events-per-record 30
+      - name: Add verified historical Actor box-office outcomes
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '365' }}
+        run: >-
+          python scripts/backfill_non_athlete_outcome_history.py
+          --catalog data/actors.json
+          --category Actor
+          --days "$BACKFILL_DAYS"
+          --request-timeout 15
       - name: Prove Actor live price was not changed
         run: |
           python - <<'PY'
