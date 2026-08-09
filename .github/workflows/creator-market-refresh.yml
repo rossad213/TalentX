@@ -1,6 +1,16 @@
 name: Creator market refresh
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/creator-market-refresh.yml"
+      - "scripts/creator_attention_refresh.py"
+      - "scripts/append_game_event_history.py"
+      - "scripts/append_price_history.py"
+      - "scripts/category_market_store.py"
+      - "tests/test_creator_attention_refresh.py"
+      - "tests/test_category_market_store.py"
   workflow_run:
     workflows: ["Build current catalog baseline"]
     types: [completed]
@@ -20,12 +30,14 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
       - name: Build Creator-owned state from latest baseline
         env:
           GH_TOKEN: ${{ github.token }}
@@ -47,6 +59,8 @@ jobs:
           if [ -n "$prior_id" ]; then
             gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-creator-market -D _prior || true
             prior_state="$(find _prior -name creators.json -print -quit)"
+            prior_manifest="$(find _prior -name creator_attention_manifest.json -print -quit)"
+            if [ -n "$prior_manifest" ]; then cp "$prior_manifest" data/creator_attention_manifest.json; fi
             if [ -n "$prior_state" ]; then
               if [ -n "$prior_time" ] && [ "$prior_time" \> "$baseline_time" ]; then
                 cp "$prior_state" data/market/creators.json
@@ -55,10 +69,26 @@ jobs:
               fi
             fi
           fi
-      - name: Validate category state utility
-        run: python -m unittest tests/test_category_market_store.py -v
+      - name: Validate Creator event pricing
+        run: >-
+          python -m unittest
+          tests/test_creator_attention_refresh.py
+          tests/test_category_market_store.py -v
+      - name: Refresh verified Creator audience-attention outcomes
+        run: >-
+          python scripts/creator_attention_refresh.py
+          --catalog data/market/creators.json
+          --manifest data/creator_attention_manifest.json
+          --lookback-days 45
+          --request-timeout 12
+      - name: Append durable Creator events
+        run: python scripts/append_game_event_history.py --catalog data/market/creators.json
+      - name: Append dated Creator history
+        run: python scripts/append_price_history.py --catalog data/market/creators.json
       - uses: actions/upload-artifact@v4
         with:
           name: talentx-creator-market
-          path: data/market/creators.json
+          path: |
+            data/market/creators.json
+            data/creator_attention_manifest.json
           retention-days: 14
