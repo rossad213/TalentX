@@ -38,7 +38,7 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -86,22 +86,22 @@ jobs:
           tests/test_non_athlete_outcome_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
-      - name: Refresh verified Music career events with 60-day backfill
+      - name: Refresh verified Music career events with broad coverage
         run: >-
           python scripts/non_athlete_event_refresh.py
           --catalog data/current_catalog.json
           --manifest data/music_event_manifest.json
-          --lookback-days 60
+          --lookback-days 30
           --bootstrap-lookback-days 60
           --lookahead-days 365
           --minimum-interval-hours 0
           --wikidata-batch-size 80
           --request-timeout 18
-          --max-music-confirmations 100
-          --max-events 300
-          --max-events-per-record 5
+          --max-music-confirmations 900
+          --max-events 1200
+          --max-events-per-record 12
           --allow-source-errors
-      - name: Refresh Music outcome evidence with 60-day backfill
+      - name: Refresh Music outcome evidence broadly
         run: >-
           python scripts/non_athlete_outcome_refresh.py
           --catalog data/current_catalog.json
@@ -109,8 +109,8 @@ jobs:
           --lookback-days 60
           --minimum-interval-hours 0
           --request-timeout 15
-          --max-pageview-checks 100
-          --max-events 250
+          --max-pageview-checks 400
+          --max-events 800
           --allow-source-errors
       - name: Keep incomplete Music outcome checks retryable
         run: python scripts/repair_non_athlete_outcome_manifest.py --manifest data/music_outcome_manifest.json
