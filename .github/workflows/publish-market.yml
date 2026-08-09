@@ -124,7 +124,14 @@ jobs:
           apply_state actor-market-refresh.yml talentx-actor-market actors.json actors _actors required
           apply_state creator-market-refresh.yml talentx-creator-market creators.json creators _creators optional
 
-          python scripts/category_market_store.py csv --catalog data/current_catalog.json --output data/current_catalog.csv
+          # Global identity/display constraints only make sense after all category
+          # databases have been recombined. Repair deterministic ticker collisions,
+          # regenerate CSV, and refresh manifest counts from the real merged market.
+          python scripts/category_market_store.py finalize \
+            --catalog data/current_catalog.json \
+            --csv data/current_catalog.csv \
+            --manifest data/catalog_manifest.json
+
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category sports --output data/market/sports.json
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category music --output data/market/music.json
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category actors --output data/market/actors.json
