@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
-"""Create and compose category-owned TalentX market state.
+"""Create, compose, and finalize category-owned TalentX market state.
 
 TalentX publishes one catalog, but each market category can own its operational
 state independently. Category workflows use ``extract`` to create a small
 working catalog and the publisher uses ``merge`` to compose those states back
-onto the latest full-catalog baseline.
+onto the latest full-catalog baseline. ``finalize`` performs the global checks
+that only make sense after all categories have been recombined.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +53,13 @@ EXTRA_MARKET_FIELDS = (
     "hourlyEvidenceCheckedAt",
     "hourlyEvidenceWarning",
 )
+
+TICKER_CATEGORY_CODES = {
+    "Athlete": "S",
+    "Music": "M",
+    "Actor": "A",
+    "Creator": "C",
+}
 
 
 def primary_category(value: str) -> str:
@@ -143,6 +154,99 @@ def write_csv(records: list[dict[str, Any]], path: Path) -> None:
         writer.writerows(records)
 
 
+def _ticker_key(value: Any) -> str:
+    return str(value or "").strip().upper()
+
+
+def _replacement_ticker(record: dict[str, Any], original: str, used: set[str]) -> str:
+    stem = "".join(character for character in original.upper() if character.isalnum()) or "TX"
+    category_code = TICKER_CATEGORY_CODES.get(str(record.get("primaryCategory") or ""), "X")
+    record_id = str(record.get("id") or record.get("name") or original)
+    digest = hashlib.sha1(record_id.encode("utf-8")).hexdigest().upper()
+    # Keep replacement tickers compact while making them stable across every
+    # publisher run. Extend the hash only if an extremely rare collision occurs.
+    for hash_length in range(2, len(digest) + 1):
+        candidate = f"{stem[:5]}{category_code}{digest[:hash_length]}"
+        if candidate not in used:
+            return candidate
+    raise RuntimeError(f"Could not create a unique ticker for {record_id}")
+
+
+def dedupe_tickers(records: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Resolve only global ticker collisions after category composition.
+
+    The first occurrence keeps its existing ticker. Later records with the same
+    ticker receive a deterministic ID-derived ticker, so rerunning publication
+    does not churn symbols from one deploy to the next.
+    """
+    used: set[str] = set()
+    repairs: list[dict[str, str]] = []
+    for record in records:
+        original = _ticker_key(record.get("ticker"))
+        if not original:
+            continue
+        if original not in used:
+            used.add(original)
+            continue
+        replacement = _replacement_ticker(record, original, used)
+        record["ticker"] = replacement
+        used.add(replacement)
+        repairs.append({
+            "id": str(record.get("id") or ""),
+            "name": str(record.get("name") or ""),
+            "category": str(record.get("primaryCategory") or ""),
+            "from": original,
+            "to": replacement,
+        })
+    return repairs
+
+
+def refresh_manifest(records: list[dict[str, Any]], path: Path, ticker_repairs: int = 0) -> dict[str, Any]:
+    manifest: dict[str, Any] = {}
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict):
+                manifest = dict(payload)
+        except (json.JSONDecodeError, OSError):
+            manifest = {}
+
+    categories = Counter(str(record.get("primaryCategory") or "") for record in records)
+    disciplines = Counter(
+        str(record.get("discipline") or "")
+        for record in records
+        if record.get("primaryCategory") == "Athlete"
+    )
+    automated = [record for record in records if record.get("sourceNamespace") in {"espn", "nhl"}]
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    manifest.update({
+        "buildDate": now.date().isoformat(),
+        "totalRecords": len(records),
+        "categories": dict(categories),
+        "currentDisciplines": dict(disciplines),
+        "currentCatalogRecords": len(records),
+        "automatedRosterVerifiedRecords": len(automated),
+        "currentCatalogFile": "data/current_catalog.json",
+        "currentCatalogCsv": "data/current_catalog.csv",
+        "marketDataMode": "Category-owned event-driven simulated market",
+        "statusDataMode": "Unified from latest healthy category market states",
+        "unifiedMarketFinalizedAt": now.isoformat().replace("+00:00", "Z"),
+        "tickerCollisionRepairs": int(ticker_repairs),
+    })
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
+
+
+def finalize_catalog(catalog: Path, csv_path: Path, manifest_path: Path) -> tuple[int, int]:
+    records = load_records(catalog)
+    repairs = dedupe_tickers(records)
+    write_records(catalog, records)
+    write_csv(records, csv_path)
+    refresh_manifest(records, manifest_path, ticker_repairs=len(repairs))
+    return len(records), len(repairs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -162,6 +266,11 @@ def main() -> int:
     csv_parser.add_argument("--catalog", type=Path, required=True)
     csv_parser.add_argument("--output", type=Path, required=True)
 
+    finalize = subparsers.add_parser("finalize")
+    finalize.add_argument("--catalog", type=Path, required=True)
+    finalize.add_argument("--csv", type=Path, required=True)
+    finalize.add_argument("--manifest", type=Path, required=True)
+
     args = parser.parse_args()
     if args.command == "extract":
         records = load_records(args.catalog)
@@ -178,6 +287,11 @@ def main() -> int:
         merged, touched = merge_category(base, overlay, args.category, args.mode)
         write_records(args.base, merged)
         print(f"Merged {touched:,} {primary_category(args.category)} records in {args.mode} mode.")
+        return 0
+
+    if args.command == "finalize":
+        count, repaired = finalize_catalog(args.catalog, args.csv, args.manifest)
+        print(f"Finalized {count:,} unified records; repaired {repaired:,} ticker collision(s).")
         return 0
 
     records = load_records(args.catalog)
