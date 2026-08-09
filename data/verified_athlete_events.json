@@ -1,0 +1,19 @@
+[
+  {
+    "eventKey": "nba:2026-07-26:lebron-james-sixers-signing",
+    "match": {
+      "name": "LeBron James",
+      "discipline": "Basketball",
+      "league": "NBA"
+    },
+    "eventType": "athlete-signing",
+    "name": "Signed with Philadelphia 76ers",
+    "startedAt": "2026-07-26T00:00:00Z",
+    "datePrecision": "day",
+    "provider": "NBA.com",
+    "sourceUrl": "https://www.nba.com/news/lebron-james-free-agency-sixers-2026",
+    "destinationTeam": "Philadelphia 76ers",
+    "targetMovePct": 1.25,
+    "reason": "Major verified free-agent signing that removed retirement/free-agency uncertainty and confirmed continued competition with a new team."
+  }
+]
