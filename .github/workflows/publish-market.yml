@@ -136,6 +136,7 @@ jobs:
           node --check assets/event-timeline.js
           node --check assets/chart-visual-fixes.js
           node --check assets/event-chart-safety.js
+          node --check assets/event-chart-coverage.js
       - name: Upload composed market artifact
         uses: actions/upload-artifact@v4
         with:
