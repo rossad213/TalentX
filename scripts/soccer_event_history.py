@@ -11,9 +11,8 @@ all TalentX charts.
 
 Only completed matches with a player-level box-score entry are eligible. Historical
 prices are reconstructed backward from the unchanged current market price. Each
-pass prioritizes teams whose players still lack durable event history so coverage
-expands across the Soccer catalog instead of repeatedly spending the whole budget
-on already-covered clubs.
+pass prioritizes teams whose players still lack durable verified game history so
+signings or other career events cannot make an unfilled match chart look covered.
 """
 from __future__ import annotations
 
@@ -173,8 +172,18 @@ def saved_baseline(record: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def has_verified_game_history(record: dict[str, Any]) -> bool:
+    """Return True only when the record has a durable verified game event."""
+    for event in existing_events(record):
+        if event.get("verified") is False:
+            continue
+        if str(event.get("eventType") or "game") == "game":
+            return True
+    return False
+
+
 def team_priority(records: list[dict[str, Any]], indexes: list[int]) -> tuple[int, int, float]:
-    missing = sum(1 for index in indexes if not existing_events(records[index]))
+    missing = sum(1 for index in indexes if not has_verified_game_history(records[index]))
     confidence = max((float(records[index].get("pricingConfidence") or 0) for index in indexes), default=0.0)
     return missing, len(indexes), confidence
 
@@ -203,7 +212,7 @@ def main() -> int:
     ]
     soccer_indexes.sort(
         key=lambda index: (
-            1 if not existing_events(records[index]) else 0,
+            1 if not has_verified_game_history(records[index]) else 0,
             float(records[index].get("pricingConfidence") or 0),
             str(records[index].get("name") or ""),
         ),
@@ -331,7 +340,7 @@ def main() -> int:
             player_events.get(athlete_id, []),
             args.max_game_move_pct,
         )
-        if not generated and not existing_events(record):
+        if not generated:
             continue
         result = dict(record)
         combined = merge_event_evidence(existing_events(result), generated)
@@ -341,7 +350,7 @@ def main() -> int:
         result["priceHistoryStatus"] = "verified-event-backfill"
         result["priceHistoryBackfilledAt"] = iso_utc(now)
         result["priceHistoryBackfillDays"] = max(int(result.get("priceHistoryBackfillDays") or 0), args.days)
-        result["priceHistoryBackfillModel"] = "soccer-team-schedule-game-events-v2"
+        result["priceHistoryBackfillModel"] = "soccer-team-schedule-game-events-v3"
         updated[index] = result
         touched += 1
         generated_count += len(generated)
