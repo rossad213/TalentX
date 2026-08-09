@@ -1,8 +1,8 @@
 /* TalentX event-chart safety layer.
  * Durable priceEvents are the only source allowed to create event-driven steps.
  * Legacy priceHistory may come from an older pricing scale and is never allowed
- * to manufacture a current chart move. If the durable event chain is stale or
- * discontinuous, event-driven categories show a flat current price instead.
+ * to manufacture a current chart move. Coverage metadata distinguishes a real
+ * flat market from periods TalentX has not actually observed yet.
  */
 (function(){
   if(typeof chartSeries!=='function') return;
@@ -80,21 +80,44 @@
       if(Number.isFinite(item.before)) points.push({time:item.time-1000,value:item.before});
       points.push({time:item.time,value:item.after});
     }
-    return points;
+    return points.sort((a,b)=>a.time-b.time);
   }
 
-  function stepSeries(record,range,points){
+  function coverage(record,range=chartRange){
+    const now=Date.now();
+    const start=rangeStart(range,now);
+    const points=eventPoints(record).filter(point=>point.time<=now);
+    if(!points.length){
+      return {status:'none',range,start,now,coverageStart:null,points:[]};
+    }
+    const beforeStart=points.filter(point=>point.time<=start);
+    if(beforeStart.length){
+      return {status:'complete',range,start,now,coverageStart:start,points};
+    }
+    const first=points.find(point=>point.time>start&&point.time<=now);
+    if(!first){
+      return {status:'none',range,start,now,coverageStart:null,points:[]};
+    }
+    return {status:'partial',range,start,now,coverageStart:first.time,points};
+  }
+
+  function stepSeries(record,range,coverageInfo){
     const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
     const count=Math.max(2,Number(config.points)||48);
     const current=Math.max(1,Number(localPrice(record))||1);
-    const now=Date.now();
-    const start=rangeStart(range,now);
+    const now=coverageInfo.now;
+    const start=coverageInfo.start;
+    const points=coverageInfo.points;
     if(!points.length){
       return Array.from({length:count},(_,index)=>({
         time:start+((now-start)*(index/(count-1))),
-        value:Number(current.toFixed(2))
+        value:Number(current.toFixed(2)),
+        verified:false,
+        coverageStatus:'none',
+        coverageStart:null
       }));
     }
+
     const ordered=points.filter(point=>point.time<=now).sort((a,b)=>a.time-b.time);
     let opening=current;
     const beforeStart=ordered.filter(point=>point.time<=start);
@@ -109,16 +132,26 @@
         else break;
       }
       if(index===count-1) value=current;
-      return {time,value:Number(value.toFixed(2))};
+      const verified=coverageInfo.status==='complete'||(coverageInfo.coverageStart!==null&&time>=coverageInfo.coverageStart);
+      return {
+        time,
+        value:Number(value.toFixed(2)),
+        verified,
+        coverageStatus:coverageInfo.status,
+        coverageStart:coverageInfo.coverageStart
+      };
     });
   }
 
   chartSeries=function(record,range=chartRange){
     if(EVENT_CATEGORIES.has(String(record?.primaryCategory||''))){
-      return stepSeries(record,range,eventPoints(record));
+      const info=coverage(record,range);
+      return stepSeries(record,range,info);
     }
     return priorChartSeries(record,range);
   };
 
-  window.talentxEventChartSafety='durable-price-events-current-scale-v1';
+  window.talentxEventCoverage=coverage;
+  window.talentxDurablePriceEvents=durableEvents;
+  window.talentxEventChartSafety='durable-price-events-coverage-aware-v2';
 })();
