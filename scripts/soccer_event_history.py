@@ -10,7 +10,10 @@ stores the resulting games in the same durable ``priceEvents`` contract used by
 all TalentX charts.
 
 Only completed matches with a player-level box-score entry are eligible. Historical
-prices are reconstructed backward from the unchanged current market price.
+prices are reconstructed backward from the unchanged current market price. Each
+pass prioritizes teams whose players still lack durable event history so coverage
+expands across the Soccer catalog instead of repeatedly spending the whole budget
+on already-covered clubs.
 """
 from __future__ import annotations
 
@@ -36,6 +39,7 @@ from hourly_price_refresh import (
     extract_espn_game_stats,
     fetch_hourly_evidence,
     iso_utc,
+    numeric_box_value,
     parse_datetime,
     utc_now,
 )
@@ -121,6 +125,22 @@ def schedule_event_info(event: dict[str, Any], start: datetime, end: datetime) -
     }
 
 
+def normalized_soccer_game_stats(stats: dict[str, Any]) -> dict[str, Any]:
+    """Add one verified appearance when the box score proves participation."""
+    output = dict(stats)
+    minutes = numeric_box_value(output.get("minutes"))
+    participated = minutes is not None and minutes > 0
+    if not participated:
+        participated = any(
+            numeric_box_value(output.get(key)) not in (None, 0)
+            for key in ("goals", "assists", "shots", "shotsOnTarget", "saves")
+        )
+    if participated:
+        output.setdefault("appearances", 1.0)
+        output.setdefault("gamesPlayed", 1.0)
+    return output
+
+
 def saved_baseline(record: dict[str, Any]) -> dict[str, Any] | None:
     """Use already-enriched season signals when a live overview is temporarily thin."""
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
@@ -153,6 +173,12 @@ def saved_baseline(record: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def team_priority(records: list[dict[str, Any]], indexes: list[int]) -> tuple[int, int, float]:
+    missing = sum(1 for index in indexes if not existing_events(records[index]))
+    confidence = max((float(records[index].get("pricingConfidence") or 0) for index in indexes), default=0.0)
+    return missing, len(indexes), confidence
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
@@ -160,6 +186,7 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=20)
     parser.add_argument("--request-timeout", type=float, default=12.0)
     parser.add_argument("--max-players", type=int, default=3500)
+    parser.add_argument("--max-teams", type=int, default=350)
     parser.add_argument("--max-game-move-pct", type=float, default=2.5)
     args = parser.parse_args()
 
@@ -174,16 +201,33 @@ def main() -> int:
         and str(record.get("sourceLeagueSlug") or "").strip()
         and team_id_for(record)
     ]
+    soccer_indexes.sort(
+        key=lambda index: (
+            1 if not existing_events(records[index]) else 0,
+            float(records[index].get("pricingConfidence") or 0),
+            str(records[index].get("name") or ""),
+        ),
+        reverse=True,
+    )
     if args.max_players > 0:
         soccer_indexes = soccer_indexes[: args.max_players]
     print(f"Soccer players eligible for team-schedule history: {len(soccer_indexes):,}")
     if not soccer_indexes:
         return 0
 
-    groups: dict[tuple[str, str], list[int]] = defaultdict(list)
+    all_groups: dict[tuple[str, str], list[int]] = defaultdict(list)
     for index in soccer_indexes:
         record = records[index]
-        groups[(str(record.get("sourceLeagueSlug")), team_id_for(record))].append(index)
+        all_groups[(str(record.get("sourceLeagueSlug")), team_id_for(record))].append(index)
+    ordered_groups = sorted(
+        all_groups.items(),
+        key=lambda item: team_priority(records, item[1]),
+        reverse=True,
+    )
+    if args.max_teams > 0:
+        ordered_groups = ordered_groups[: args.max_teams]
+    groups = dict(ordered_groups)
+    print(f"Soccer teams selected for this coverage pass: {len(groups):,} of {len(all_groups):,}")
 
     seasons = range(start.year, now.year + 1)
     schedule_jobs = [(league, team_id, season) for (league, team_id) in groups for season in seasons]
@@ -238,6 +282,9 @@ def main() -> int:
             if warning:
                 warnings.append(warning)
             for athlete_id, performance in stats_by_player.items():
+                stats = normalized_soccer_game_stats(performance.get("stats", {}))
+                if not stats.get("appearances"):
+                    continue
                 player_events[str(athlete_id)].append({
                     "eventKey": info["eventKey"],
                     "eventId": info["eventId"],
@@ -246,7 +293,7 @@ def main() -> int:
                     "league": info["league"],
                     "name": info["name"],
                     "startedAt": info["startedAt"],
-                    "stats": performance.get("stats", {}),
+                    "stats": stats,
                     "teamWon": performance.get("teamWon"),
                 })
 
@@ -294,7 +341,7 @@ def main() -> int:
         result["priceHistoryStatus"] = "verified-event-backfill"
         result["priceHistoryBackfilledAt"] = iso_utc(now)
         result["priceHistoryBackfillDays"] = max(int(result.get("priceHistoryBackfillDays") or 0), args.days)
-        result["priceHistoryBackfillModel"] = "soccer-team-schedule-game-events-v1"
+        result["priceHistoryBackfillModel"] = "soccer-team-schedule-game-events-v2"
         updated[index] = result
         touched += 1
         generated_count += len(generated)
