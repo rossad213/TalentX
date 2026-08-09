@@ -76,18 +76,29 @@ def event_from_override(item: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def matches_override(record: dict[str, Any], item: dict[str, Any]) -> bool:
-    wanted_id = str(item.get("profileId") or "").strip()
-    if wanted_id and str(record.get("id") or "") == wanted_id:
-        return True
-    wanted_qid = str(item.get("wikidataQid") or "").strip()
-    if wanted_qid and re.fullmatch(r"Q\d+", wanted_qid) and qid_for(record) == wanted_qid:
-        return str(record.get("primaryCategory") or "") == str(item.get("primaryCategory") or record.get("primaryCategory") or "")
-    wanted_name = str(item.get("profileName") or "").strip().casefold()
     wanted_category = str(item.get("primaryCategory") or "").strip()
+    record_category = str(record.get("primaryCategory") or "").strip()
+    if wanted_category and record_category != wanted_category:
+        return False
+
+    wanted_id = str(item.get("profileId") or "").strip()
+    record_id = str(record.get("id") or "").strip()
+    if wanted_id:
+        return bool(record_id and record_id == wanted_id)
+
+    wanted_qid = str(item.get("wikidataQid") or "").strip()
+    record_qid = qid_for(record)
+    if wanted_qid and re.fullmatch(r"Q\d+", wanted_qid):
+        # If the catalog record has structured identity, a mismatch is final.
+        # Never fall through to same-name matching (e.g. the two Steve Lacys).
+        if record_qid:
+            return record_qid == wanted_qid
+        # Name fallback is allowed only when the record genuinely has no QID.
+
+    wanted_name = str(item.get("profileName") or "").strip().casefold()
     return bool(
         wanted_name
         and str(record.get("name") or "").strip().casefold() == wanted_name
-        and (not wanted_category or str(record.get("primaryCategory") or "") == wanted_category)
     )
 
 
