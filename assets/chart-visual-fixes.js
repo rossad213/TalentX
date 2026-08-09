@@ -19,8 +19,6 @@
     const text=String(value).trim();
     const parsed=Date.parse(text);
     if(!Number.isFinite(parsed)) return NaN;
-    // Midnight UTC is how TalentX stores date-only releases/awards. Put those
-    // at noon UTC for chart placement so US time zones do not show yesterday.
     return dateOnlyUtc(text)?parsed+12*60*60*1000:parsed;
   }
   function asPrice(value){
@@ -58,8 +56,6 @@
       const historyId=String(item.eventId||item.eventKey||'');
       if(historyType==='reconstructed'||item.reconstructed===true||item.synthetic===true) continue;
       if(eventType==='market'||eventType==='historical-baseline') continue;
-      // priceHistory mirrors priceEvents. Prefer the direct event copy because
-      // it preserves the intended date-only calendar semantics.
       if(historyId&&directIds.has(historyId)) continue;
       const time=asTime(item.time??item.timestamp??item.date??item.eventDate??item.asOf);
       const value=asPrice(item.price??item.value??item.marketPrice??item.close);
@@ -109,9 +105,6 @@
 
   chartSeries=function(record,range=chartRange){
     const points=verifiedEventPoints(record);
-    // Once TalentX has genuine event history, never invent a slope between
-    // events on any range. Older reconstruction remains only for profiles that
-    // have no verified price-changing events yet.
     if(points.length) return eventStepSeries(record,range,points);
     return priorChartSeries(record,range);
   };
@@ -163,9 +156,21 @@
     return {floor,ceil,step,ticks};
   }
 
+  function staircasePoints(values,x,y){
+    if(!values.length) return '';
+    const output=[`${x(0).toFixed(2)},${y(values[0]).toFixed(2)}`];
+    for(let index=1;index<values.length;index++){
+      const nextX=x(index).toFixed(2);
+      output.push(`${nextX},${y(values[index-1]).toFixed(2)}`);
+      output.push(`${nextX},${y(values[index]).toFixed(2)}`);
+    }
+    return output.join(' ');
+  }
+
   detailedTrendSvg=function(r,height=250){
     const series=chartSeries(r);
     const a=series.map(point=>point.value); if(!a.length) return `<div class="chart-empty">No chart history yet.</div>`;
+    const verifiedMode=verifiedEventPoints(r).length>0;
     const up=a[a.length-1]>=a[0];
     const color=up?'#58ef78':'#ff5e79';
     const W=1000,H=340,padL=18,padR=108,padT=18,padB=38;
@@ -174,8 +179,8 @@
     const usableW=W-padL-padR,usableH=H-padT-padB;
     const x=i=>padL+(a.length===1?usableW:(i/(a.length-1))*usableW);
     const y=v=>padT+((ceil-v)/Math.max(.0001,ceil-floor))*usableH;
-    const points=a.map((v,i)=>`${x(i).toFixed(2)},${y(v).toFixed(2)}`);
-    const linePoints=points.join(' ');
+    const ordinaryPoints=a.map((v,i)=>`${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(' ');
+    const linePoints=verifiedMode?staircasePoints(a,x,y):ordinaryPoints;
     const fillPoints=`${padL},${H-padB} ${linePoints} ${x(a.length-1)},${H-padB}`;
     const highIndex=a.indexOf(high),lowIndex=a.indexOf(low);
     const currentY=y(current),currentX=x(a.length-1);
@@ -215,11 +220,11 @@
     const text=String(value||'').trim();
     const parsed=Date.parse(text);
     if(!Number.isFinite(parsed)) return '';
-    return new Date(parsed).toLocaleDateString([],{month:'short',day:'numeric',timeZone:dateOnlyUtc(text)?'UTC':undefined});
+    const options={month:'short',day:'numeric'};
+    if(dateOnlyUtc(text)) options.timeZone='UTC';
+    return new Date(parsed).toLocaleDateString([],options);
   }
 
-  // discovery-profile.js formats lastPriceEventAt in local time. Wrap the final
-  // profile renderer so date-only releases keep the published calendar date.
   if(priorProfile){
     profile=function(){
       let output=priorProfile();
