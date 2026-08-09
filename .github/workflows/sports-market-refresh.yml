@@ -13,6 +13,7 @@ on:
       - "scripts/append_game_event_history.py"
       - "scripts/append_price_history.py"
       - "scripts/pricing_engine_v2.py"
+      - "scripts/pricing_engine_v2_catalog.py"
       - "scripts/category_market_store.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_game_event_history.py"
@@ -96,7 +97,7 @@ jobs:
       - name: Save authoritative Sports market state
         run: cp data/current_catalog.json data/sports_event_market_state.json
       - name: Recalculate Sports fair values
-        run: python scripts/pricing_engine_v2.py
+        run: python scripts/pricing_engine_v2_catalog.py --catalog data/current_catalog.json
       - name: Restore verified game market prices
         run: >-
           python scripts/restore_hourly_event_market_state.py
