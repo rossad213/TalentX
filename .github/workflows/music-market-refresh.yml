@@ -1,0 +1,138 @@
+name: Music market refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/music-market-refresh.yml"
+      - "scripts/non_athlete_event_refresh.py"
+      - "scripts/non_athlete_outcome_refresh.py"
+      - "scripts/repair_non_athlete_outcome_manifest.py"
+      - "scripts/restore_hourly_event_market_state.py"
+      - "scripts/append_game_event_history.py"
+      - "scripts/append_price_history.py"
+      - "scripts/pricing_engine_v2.py"
+      - "scripts/category_market_store.py"
+      - "data/verified_non_athlete_events.json"
+      - "tests/test_non_athlete_event_refresh.py"
+      - "tests/test_non_athlete_outcome_refresh.py"
+      - "tests/test_pricing_engine_v2.py"
+      - "tests/test_category_market_store.py"
+  workflow_run:
+    workflows: ["Build current catalog baseline"]
+    types: [completed]
+  schedule:
+    - cron: "7 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: talentx-music-market
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Restore Music-owned market state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _baseline _prior
+          mkdir -p _baseline _prior data/market
+          baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+          baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
+          baseline_time="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+          test -n "$baseline_id" || { echo "No successful full-catalog baseline exists."; exit 1; }
+          gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline
+          baseline_catalog="$(find _baseline -name current_catalog.json -print -quit)"
+          test -n "$baseline_catalog" || { echo "Baseline artifact missing current_catalog.json"; exit 1; }
+          python scripts/category_market_store.py extract --catalog "$baseline_catalog" --category music --output data/current_catalog.json
+          prior_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/music-market-refresh.yml/runs?status=success&per_page=1")"
+          prior_id="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].id // empty')"
+          prior_time="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+          if [ -n "$prior_id" ]; then
+            gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-music-market -D _prior || true
+            prior_state="$(find _prior -name music.json -print -quit)"
+            prior_events="$(find _prior -name music_event_manifest.json -print -quit)"
+            prior_outcomes="$(find _prior -name music_outcome_manifest.json -print -quit)"
+            if [ -n "$prior_events" ]; then cp "$prior_events" data/music_event_manifest.json; fi
+            if [ -n "$prior_outcomes" ]; then cp "$prior_outcomes" data/music_outcome_manifest.json; fi
+            if [ -n "$prior_state" ]; then
+              if [ -n "$prior_time" ] && [ "$prior_time" \> "$baseline_time" ]; then
+                cp "$prior_state" data/current_catalog.json
+              else
+                python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$prior_state" --category music --mode market
+              fi
+            fi
+          fi
+      - name: Validate Music event pricing
+        run: >-
+          python -m unittest
+          tests/test_non_athlete_event_refresh.py
+          tests/test_non_athlete_outcome_refresh.py
+          tests/test_pricing_engine_v2.py
+          tests/test_category_market_store.py -v
+      - name: Refresh verified Music career events with 60-day backfill
+        run: >-
+          python scripts/non_athlete_event_refresh.py
+          --catalog data/current_catalog.json
+          --manifest data/music_event_manifest.json
+          --lookback-days 60
+          --bootstrap-lookback-days 60
+          --lookahead-days 365
+          --minimum-interval-hours 0
+          --wikidata-batch-size 80
+          --request-timeout 18
+          --max-music-confirmations 100
+          --max-events 300
+          --max-events-per-record 5
+          --allow-source-errors
+      - name: Refresh Music outcome evidence with 60-day backfill
+        run: >-
+          python scripts/non_athlete_outcome_refresh.py
+          --catalog data/current_catalog.json
+          --manifest data/music_outcome_manifest.json
+          --lookback-days 60
+          --minimum-interval-hours 0
+          --request-timeout 15
+          --max-pageview-checks 100
+          --max-events 250
+          --allow-source-errors
+      - name: Keep incomplete Music outcome checks retryable
+        run: python scripts/repair_non_athlete_outcome_manifest.py --manifest data/music_outcome_manifest.json
+      - name: Save authoritative Music market state
+        run: cp data/current_catalog.json data/music_event_market_state.json
+      - name: Recalculate Music fair values
+        run: python scripts/pricing_engine_v2.py
+      - name: Restore verified Music event prices
+        run: >-
+          python scripts/restore_hourly_event_market_state.py
+          --base data/current_catalog.json
+          --snapshot data/music_event_market_state.json
+      - name: Append durable Music events
+        run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
+      - name: Append dated Music history
+        run: python scripts/append_price_history.py --catalog data/current_catalog.json
+      - name: Save Music category database
+        run: cp data/current_catalog.json data/market/music.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-music-market
+          path: |
+            data/market/music.json
+            data/music_event_manifest.json
+            data/music_outcome_manifest.json
+          retention-days: 14
