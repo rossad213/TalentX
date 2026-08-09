@@ -2,10 +2,10 @@
 """Reliability wrapper for the TalentX hourly game refresh.
 
 This wrapper keeps the original retry behavior, adds durable game-by-game
-market events, and normalizes inherited Sports ticker collisions before the
-hourly validator runs. A completed game can therefore affect both price and
-dated chart history exactly once per athlete without an unrelated baseline
-ticker collision breaking the refresh.
+market events, normalizes inherited Sports ticker collisions, and repairs thin
+Soccer box-score participation before pricing. A completed game can therefore
+affect both price and dated chart history exactly once per athlete without an
+unrelated catalog issue breaking the refresh.
 """
 from __future__ import annotations
 
@@ -31,6 +31,31 @@ def normalize_sports_tickers(catalog_path: Path = Path("data/current_catalog.jso
     return len(repairs)
 
 
+def add_soccer_participation(records, athlete_events) -> None:
+    """Give a verified Soccer appearance a one-game participation baseline.
+
+    ESPN Soccer summaries often expose minutes/goals/assists/shots but omit an
+    explicit appearances column. TalentX's season model includes appearances, so
+    a player who logs minutes must receive ``appearances=1`` for the one-game
+    comparison. Without this normalization, a scoreless 90-minute appearance can
+    be mistaken for zero production.
+    """
+    soccer_keys = {
+        (str(record.get("sourceNamespace") or ""), str(record.get("sourceRecordId") or ""))
+        for record in records
+        if str(record.get("discipline") or "") == "Soccer"
+    }
+    for athlete_key, events in athlete_events.items():
+        if athlete_key not in soccer_keys:
+            continue
+        for event in events:
+            stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
+            minutes = refresh.numeric_box_value(stats.get("minutes"))
+            if minutes is not None and minutes > 0:
+                stats.setdefault("appearances", 1.0)
+                stats.setdefault("gamesPlayed", 1.0)
+
+
 def discover_recent_events_reliably(
     records,
     *,
@@ -45,7 +70,7 @@ def discover_recent_events_reliably(
     # an earlier partial run. The underlying function still checks
     # processed_player_keys before returning each athlete/event pair, so an
     # already-priced player cannot be priced twice for the same game.
-    return _original_discover(
+    result = _original_discover(
         records,
         now=now,
         lookback_hours=lookback_hours,
@@ -54,6 +79,9 @@ def discover_recent_events_reliably(
         processed_keys=set(),
         processed_player_keys=processed_player_keys,
     )
+    participant_ids, athlete_events, events, warnings = result
+    add_soccer_participation(records, athlete_events)
+    return participant_ids, athlete_events, events, warnings
 
 
 def apply_game_market_moves_with_history(
