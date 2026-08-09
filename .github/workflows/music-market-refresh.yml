@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/music-market-refresh.yml"
       - "scripts/non_athlete_event_refresh.py"
+      - "scripts/music_release_coverage_sweep.py"
       - "scripts/non_athlete_outcome_refresh.py"
       - "scripts/repair_non_athlete_outcome_manifest.py"
       - "scripts/restore_hourly_event_market_state.py"
@@ -69,8 +70,10 @@ jobs:
             prior_state="$(find _prior -name music.json -print -quit)"
             prior_events="$(find _prior -name music_event_manifest.json -print -quit)"
             prior_outcomes="$(find _prior -name music_outcome_manifest.json -print -quit)"
+            prior_coverage="$(find _prior -name music_release_coverage_manifest.json -print -quit)"
             if [ -n "$prior_events" ]; then cp "$prior_events" data/music_event_manifest.json; fi
             if [ -n "$prior_outcomes" ]; then cp "$prior_outcomes" data/music_outcome_manifest.json; fi
+            if [ -n "$prior_coverage" ]; then cp "$prior_coverage" data/music_release_coverage_manifest.json; fi
             if [ -n "$prior_state" ]; then
               if [ -n "$prior_time" ] && [ "$prior_time" \> "$baseline_time" ]; then
                 cp "$prior_state" data/current_catalog.json
@@ -86,7 +89,7 @@ jobs:
           tests/test_non_athlete_outcome_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
-      - name: Refresh verified Music career events with broad coverage
+      - name: Refresh Music awards and verified career claims
         run: >-
           python scripts/non_athlete_event_refresh.py
           --catalog data/current_catalog.json
@@ -97,9 +100,20 @@ jobs:
           --minimum-interval-hours 0
           --wikidata-batch-size 80
           --request-timeout 18
-          --max-music-confirmations 900
+          --max-music-confirmations 0
           --max-events 1200
           --max-events-per-record 12
+          --allow-source-errors
+      - name: Sweep unchecked Music releases for two-source verification
+        run: >-
+          python scripts/music_release_coverage_sweep.py
+          --catalog data/current_catalog.json
+          --manifest data/music_release_coverage_manifest.json
+          --lookback-days 60
+          --wikidata-batch-size 80
+          --request-timeout 15
+          --max-checks 700
+          --retry-unmatched-days 7
           --allow-source-errors
       - name: Refresh Music outcome evidence broadly
         run: >-
@@ -135,5 +149,6 @@ jobs:
           path: |
             data/market/music.json
             data/music_event_manifest.json
+            data/music_release_coverage_manifest.json
             data/music_outcome_manifest.json
           retention-days: 14
