@@ -12,6 +12,7 @@ on:
       - "scripts/append_game_event_history.py"
       - "scripts/append_price_history.py"
       - "scripts/pricing_engine_v2.py"
+      - "scripts/pricing_engine_v2_catalog.py"
       - "scripts/category_market_store.py"
       - "data/verified_non_athlete_events.json"
       - "tests/test_non_athlete_event_refresh.py"
@@ -116,7 +117,7 @@ jobs:
       - name: Save authoritative Music market state
         run: cp data/current_catalog.json data/music_event_market_state.json
       - name: Recalculate Music fair values
-        run: python scripts/pricing_engine_v2.py
+        run: python scripts/pricing_engine_v2_catalog.py --catalog data/current_catalog.json
       - name: Restore verified Music event prices
         run: >-
           python scripts/restore_hourly_event_market_state.py
