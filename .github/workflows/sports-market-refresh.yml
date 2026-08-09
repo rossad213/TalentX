@@ -1,0 +1,119 @@
+name: Sports market refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/sports-market-refresh.yml"
+      - "scripts/hourly_price_refresh.py"
+      - "scripts/hourly_price_refresh_reliable.py"
+      - "scripts/game_event_history.py"
+      - "scripts/restore_hourly_event_market_state.py"
+      - "scripts/explain_event_pricing_only.py"
+      - "scripts/append_game_event_history.py"
+      - "scripts/append_price_history.py"
+      - "scripts/pricing_engine_v2.py"
+      - "scripts/category_market_store.py"
+      - "tests/test_hourly_price_refresh.py"
+      - "tests/test_game_event_history.py"
+      - "tests/test_pricing_engine_v2.py"
+      - "tests/test_category_market_store.py"
+  workflow_run:
+    workflows: ["Build current catalog baseline"]
+    types: [completed]
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: talentx-sports-market
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Restore Sports-owned market state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _baseline _prior
+          mkdir -p _baseline _prior data/market
+          baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+          baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
+          baseline_time="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+          test -n "$baseline_id" || { echo "No successful full-catalog baseline exists."; exit 1; }
+          gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline
+          baseline_catalog="$(find _baseline -name current_catalog.json -print -quit)"
+          test -n "$baseline_catalog" || { echo "Baseline artifact missing current_catalog.json"; exit 1; }
+          python scripts/category_market_store.py extract --catalog "$baseline_catalog" --category sports --output data/current_catalog.json
+          prior_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/sports-market-refresh.yml/runs?status=success&per_page=1")"
+          prior_id="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].id // empty')"
+          prior_time="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+          if [ -n "$prior_id" ]; then
+            gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _prior || true
+            prior_state="$(find _prior -name sports.json -print -quit)"
+            prior_manifest="$(find _prior -name hourly_refresh_manifest.json -print -quit)"
+            if [ -n "$prior_manifest" ]; then cp "$prior_manifest" data/hourly_refresh_manifest.json; fi
+            if [ -n "$prior_state" ]; then
+              if [ -n "$prior_time" ] && [ "$prior_time" \> "$baseline_time" ]; then
+                cp "$prior_state" data/current_catalog.json
+              else
+                python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$prior_state" --category sports --mode market
+              fi
+            fi
+          fi
+          echo "WEEKLY_BASELINE_RUN_ID=$baseline_id" >> "$GITHUB_ENV"
+      - name: Validate Sports pricing logic
+        run: >-
+          python -m unittest
+          tests/test_hourly_price_refresh.py
+          tests/test_game_event_history.py
+          tests/test_pricing_engine_v2.py
+          tests/test_category_market_store.py -v
+      - name: Refresh completed-game evidence
+        run: >-
+          python scripts/hourly_price_refresh_reliable.py
+          --workers 20
+          --request-timeout 10
+          --lookback-hours 96
+          --max-athletes 1800
+          --max-game-move-pct 2.5
+          --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
+      - name: Save authoritative Sports market state
+        run: cp data/current_catalog.json data/sports_event_market_state.json
+      - name: Recalculate Sports fair values
+        run: python scripts/pricing_engine_v2.py
+      - name: Restore verified game market prices
+        run: >-
+          python scripts/restore_hourly_event_market_state.py
+          --base data/current_catalog.json
+          --snapshot data/sports_event_market_state.json
+      - name: Explain latest game without repricing
+        run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
+      - name: Append durable game events
+        run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
+      - name: Append dated Sports history
+        run: python scripts/append_price_history.py --catalog data/current_catalog.json
+      - name: Save Sports category database
+        run: cp data/current_catalog.json data/market/sports.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-sports-market
+          path: |
+            data/market/sports.json
+            data/hourly_refresh_manifest.json
+          retention-days: 14
