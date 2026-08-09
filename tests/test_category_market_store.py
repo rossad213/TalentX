@@ -1,8 +1,15 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.category_market_store import extract_category, merge_category, primary_category
+from scripts.category_market_store import (
+    dedupe_tickers,
+    extract_category,
+    finalize_catalog,
+    merge_category,
+    primary_category,
+)
 
 
 class CategoryMarketStoreTests(unittest.TestCase):
@@ -11,14 +18,18 @@ class CategoryMarketStoreTests(unittest.TestCase):
             {
                 "id": "a1",
                 "name": "Athlete One",
+                "ticker": "ONE",
                 "primaryCategory": "Athlete",
+                "discipline": "Basketball",
                 "marketPrice": 100.0,
                 "fundamentalValue": 95.0,
                 "description": "fresh athlete metadata",
+                "sourceNamespace": "espn",
             },
             {
                 "id": "m1",
                 "name": "Music One",
+                "ticker": "MONE",
                 "primaryCategory": "Music",
                 "marketPrice": 200.0,
                 "fundamentalValue": 190.0,
@@ -27,6 +38,7 @@ class CategoryMarketStoreTests(unittest.TestCase):
             {
                 "id": "x1",
                 "name": "Actor One",
+                "ticker": "AONE",
                 "primaryCategory": "Actor",
                 "marketPrice": 150.0,
                 "fundamentalValue": 145.0,
@@ -87,6 +99,45 @@ class CategoryMarketStoreTests(unittest.TestCase):
         overlay = [{"id": "a1", "primaryCategory": "Athlete", "marketPrice": 101.0}]
         with self.assertRaises(ValueError):
             merge_category(self.base, overlay, "music", "replace")
+
+    def test_duplicate_tickers_are_repaired_deterministically(self):
+        records = [dict(item) for item in self.base]
+        records[1]["ticker"] = "ONE"
+        first_repairs = dedupe_tickers(records)
+        self.assertEqual(records[0]["ticker"], "ONE")
+        self.assertNotEqual(records[1]["ticker"], "ONE")
+        self.assertEqual(len({item["ticker"] for item in records}), len(records))
+        replacement = records[1]["ticker"]
+        self.assertEqual(len(first_repairs), 1)
+
+        rerun = [dict(item) for item in self.base]
+        rerun[1]["ticker"] = "ONE"
+        dedupe_tickers(rerun)
+        self.assertEqual(rerun[1]["ticker"], replacement)
+
+    def test_finalize_refreshes_csv_manifest_and_tickers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = root / "current_catalog.json"
+            csv_path = root / "current_catalog.csv"
+            manifest = root / "catalog_manifest.json"
+            records = [dict(item) for item in self.base]
+            records[1]["ticker"] = "ONE"
+            catalog.write_text(json.dumps(records), encoding="utf-8")
+            manifest.write_text(json.dumps({"currentCatalogRecords": 999}), encoding="utf-8")
+
+            count, repaired = finalize_catalog(catalog, csv_path, manifest)
+            self.assertEqual(count, 3)
+            self.assertEqual(repaired, 1)
+            finalized = json.loads(catalog.read_text(encoding="utf-8"))
+            self.assertEqual(len({item["ticker"] for item in finalized}), 3)
+            updated_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+            self.assertEqual(updated_manifest["currentCatalogRecords"], 3)
+            self.assertEqual(updated_manifest["totalRecords"], 3)
+            self.assertEqual(updated_manifest["tickerCollisionRepairs"], 1)
+            self.assertEqual(updated_manifest["categories"]["Music"], 1)
+            self.assertEqual(updated_manifest["automatedRosterVerifiedRecords"], 1)
+            self.assertTrue(csv_path.exists())
 
 
 if __name__ == "__main__":
