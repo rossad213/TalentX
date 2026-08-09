@@ -69,36 +69,37 @@ jobs:
             target_dir="$5"
             required="$6"
 
-            # Cancelled/skipped runs are non-authoritative. They commonly occur
-            # when a newer category refresh supersedes an older one. Use the
-            # newest decisive result instead: success is publishable; an actual
-            # failure/timed-out run blocks required category publication.
+            # Publishing is last-known-good by design. A failed/cancelled refresh
+            # must never take the public market down. We still surface the newest
+            # run's conclusion as a warning, but compose from the newest successful
+            # artifact until the next healthy refresh replaces it.
             meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=30")"
-            decisive="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion == "success" or .conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "action_required")][0] // {}')"
-            run_id="$(printf '%s' "$decisive" | jq -r '.id // empty')"
-            conclusion="$(printf '%s' "$decisive" | jq -r '.conclusion // empty')"
-            created_at="$(printf '%s' "$decisive" | jq -r '.created_at // empty')"
+            latest="$(printf '%s' "$meta" | jq -c '.workflow_runs[0] // {}')"
+            latest_id="$(printf '%s' "$latest" | jq -r '.id // empty')"
+            latest_conclusion="$(printf '%s' "$latest" | jq -r '.conclusion // empty')"
+            latest_time="$(printf '%s' "$latest" | jq -r '.created_at // empty')"
+
+            healthy="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion == "success")][0] // {}')"
+            run_id="$(printf '%s' "$healthy" | jq -r '.id // empty')"
+            created_at="$(printf '%s' "$healthy" | jq -r '.created_at // empty')"
 
             if [ -z "$run_id" ]; then
               if [ "$required" = "required" ]; then
-                echo "Required ${category} market state has no decisive completed workflow run."
+                echo "Required ${category} market state has never produced a successful artifact."
                 exit 1
               fi
-              echo "No decisive completed ${category} market state yet; using baseline."
+              echo "No successful optional ${category} market state yet; using baseline."
               return 0
             fi
-            if [ "$conclusion" != "success" ]; then
-              if [ "$required" = "required" ]; then
-                echo "Latest decisive ${category} market run ${run_id} concluded ${conclusion}; refusing stale fallback."
-                exit 1
-              fi
-              echo "Latest decisive optional ${category} run concluded ${conclusion}; using baseline."
-              return 0
+
+            if [ -n "$latest_id" ] && [ "$latest_id" != "$run_id" ]; then
+              echo "WARNING: latest ${category} refresh ${latest_id} concluded ${latest_conclusion}; publishing last known good run ${run_id}."
             fi
+
             rm -rf "$target_dir"; mkdir -p "$target_dir"
             if ! gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n "$artifact_name" -D "$target_dir"; then
               if [ "$required" = "required" ]; then
-                echo "Required ${category} artifact ${artifact_name} could not be downloaded from run ${run_id}."
+                echo "Required last-known-good ${category} artifact ${artifact_name} could not be downloaded from run ${run_id}."
                 exit 1
               fi
               echo "Optional ${category} artifact unavailable; using baseline."
@@ -107,7 +108,7 @@ jobs:
             state="$(find "$target_dir" -name "$state_filename" -print -quit)"
             if [ -z "$state" ]; then
               if [ "$required" = "required" ]; then
-                echo "Required ${category} artifact had no ${state_filename}."
+                echo "Required last-known-good ${category} artifact had no ${state_filename}."
                 exit 1
               fi
               echo "Optional ${category} artifact had no ${state_filename}; using baseline."
@@ -116,7 +117,7 @@ jobs:
             mode="market"
             if [ -n "$created_at" ] && [ "$created_at" \> "$baseline_time" ]; then mode="replace"; fi
             python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$state" --category "$category" --mode "$mode"
-            echo "Published ${category} from decisive run ${run_id} in ${mode} mode."
+            echo "Published ${category} from last-known-good run ${run_id} in ${mode} mode."
           }
 
           apply_state sports-market-refresh.yml talentx-sports-market sports.json sports _sports required
