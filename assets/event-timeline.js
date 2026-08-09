@@ -9,7 +9,7 @@
   let renderScheduled=false;
 
   const html=value=>String(value??'').replace(/[&<>"']/g,char=>({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
   }[char]));
   const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(Number(value||0));
   const number=value=>{const parsed=Number(value);return Number.isFinite(parsed)?parsed:null;};
