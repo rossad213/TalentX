@@ -13,6 +13,7 @@ on:
       - "scripts/append_game_event_history.py"
       - "scripts/append_price_history.py"
       - "scripts/pricing_engine_v2.py"
+      - "scripts/pricing_engine_v2_catalog.py"
       - "scripts/category_market_store.py"
       - "data/verified_non_athlete_events.json"
       - "tests/test_non_athlete_event_refresh.py"
@@ -119,7 +120,7 @@ jobs:
       - name: Save authoritative Actor market state
         run: cp data/current_catalog.json data/actor_event_market_state.json
       - name: Recalculate Actor fair values
-        run: python scripts/pricing_engine_v2.py
+        run: python scripts/pricing_engine_v2_catalog.py --catalog data/current_catalog.json
       - name: Restore verified Actor event prices
         run: >-
           python scripts/restore_hourly_event_market_state.py
