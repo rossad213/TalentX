@@ -104,6 +104,7 @@ jobs:
           python scripts/validate_current_catalog.py --minimum 10000
           node --check assets/event-timeline.js
           node --check assets/chart-visual-fixes.js
+          node --check assets/event-chart-safety.js
       - name: Upload composed market artifact
         uses: actions/upload-artifact@v4
         with:
