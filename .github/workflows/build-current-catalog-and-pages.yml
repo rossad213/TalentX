@@ -90,13 +90,11 @@ jobs:
           --allow-shortfall
       - name: Discover strictly verified musicians
         run: >-
-          python scripts/discover_strict_music.py
+          python scripts/discover_strict_music_ci.py
           --target-total 5000
           --minimum-total 1000
-          --per-occupation-limit 1200
           --page-size 200
           --minimum-sitelinks 5
-          --request-timeout 30
           --allow-shortfall
       - name: Strictly verify discovered musicians
         run: >-
