@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      # Full baseline inputs. Category-owned market/event utilities are
+      # Full baseline inputs. Category-owned market/event/history utilities are
       # explicitly excluded below so they cannot launch a 10,000-name rebuild.
       - "scripts/**"
       - "!scripts/hourly_price_refresh.py"
@@ -22,6 +22,9 @@ on:
       - "!scripts/normalize_non_athlete_event_timestamps.py"
       - "!scripts/pricing_engine_v2_catalog.py"
       - "!scripts/category_market_store.py"
+      - "!scripts/backfill_price_history.py"
+      - "!scripts/backfill_non_athlete_event_history.py"
+      - "!scripts/merge_historical_event_overlay.py"
       - "tests/**"
       - "!tests/test_hourly_price_refresh.py"
       - "!tests/test_non_athlete_event_refresh.py"
@@ -29,6 +32,7 @@ on:
       - "!tests/test_game_event_history.py"
       - "!tests/test_event_pricing_policy.py"
       - "!tests/test_category_market_store.py"
+      - "!tests/test_historical_event_overlay.py"
       - "data/**"
       - "!data/market/**"
       - "!data/verified_non_athlete_events.json"
