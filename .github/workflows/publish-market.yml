@@ -1,0 +1,137 @@
+name: Publish unified TalentX market
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/publish-market.yml"
+      - "scripts/category_market_store.py"
+      - "scripts/validate_current_catalog.py"
+      - "index.html"
+      - "app.js"
+      - "chart-history.js"
+      - "discovery-profile.js"
+      - "discovery-profile.css"
+      - "styles.css"
+      - "assets/**"
+  workflow_run:
+    workflows:
+      - "Build current catalog baseline"
+      - "Sports market refresh"
+      - "Music market refresh"
+      - "Actor market refresh"
+      - "Creator market refresh"
+    types: [completed]
+  schedule:
+    - cron: "52 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: talentx-pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Compose latest category-owned market states
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _baseline _sports _music _actors _creators
+          mkdir -p _baseline data/market
+          baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+          baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
+          baseline_time="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+          test -n "$baseline_id" || { echo "No successful full-catalog baseline exists."; exit 1; }
+          gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline
+          baseline_data="$(dirname "$(find _baseline -name current_catalog.json -print -quit)")"
+          test -n "$baseline_data" || { echo "Baseline artifact missing current_catalog.json"; exit 1; }
+          cp -R "$baseline_data"/. data/
+
+          apply_state() {
+            workflow_file="$1"
+            artifact_name="$2"
+            state_filename="$3"
+            category="$4"
+            target_dir="$5"
+            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=success&per_page=1")"
+            run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
+            created_at="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].created_at // empty')"
+            if [ -z "$run_id" ]; then
+              echo "No successful ${category} market state yet; using baseline."
+              return 0
+            fi
+            rm -rf "$target_dir"; mkdir -p "$target_dir"
+            gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n "$artifact_name" -D "$target_dir" || return 0
+            state="$(find "$target_dir" -name "$state_filename" -print -quit)"
+            if [ -z "$state" ]; then
+              echo "${category} artifact had no ${state_filename}; using baseline."
+              return 0
+            fi
+            mode="market"
+            if [ -n "$created_at" ] && [ "$created_at" \> "$baseline_time" ]; then mode="replace"; fi
+            python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$state" --category "$category" --mode "$mode"
+            echo "Published ${category} from run ${run_id} in ${mode} mode."
+          }
+
+          apply_state sports-market-refresh.yml talentx-sports-market sports.json sports _sports
+          apply_state music-market-refresh.yml talentx-music-market music.json music _music
+          apply_state actor-market-refresh.yml talentx-actor-market actors.json actors _actors
+          apply_state creator-market-refresh.yml talentx-creator-market creators.json creators _creators
+
+          python scripts/category_market_store.py csv --catalog data/current_catalog.json --output data/current_catalog.csv
+          python scripts/category_market_store.py extract --catalog data/current_catalog.json --category sports --output data/market/sports.json
+          python scripts/category_market_store.py extract --catalog data/current_catalog.json --category music --output data/market/music.json
+          python scripts/category_market_store.py extract --catalog data/current_catalog.json --category actors --output data/market/actors.json
+          python scripts/category_market_store.py extract --catalog data/current_catalog.json --category creators --output data/market/creators.json
+      - name: Validate unified market
+        run: |
+          python -m unittest tests/test_category_market_store.py -v
+          python scripts/validate_current_catalog.py --minimum 10000
+          node --check assets/event-timeline.js
+          node --check assets/chart-visual-fixes.js
+      - name: Upload composed market artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: talentx-published-market
+          path: |
+            data/current_catalog.json
+            data/current_catalog.csv
+            data/market/
+          retention-days: 10
+      - name: Prepare static Pages site
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp index.html app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
+          cp -R data _site/data
+          cp -R assets _site/assets
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: publish
+    steps:
+      - name: Deploy unified TalentX market
+        id: deployment
+        uses: actions/deploy-pages@v4
