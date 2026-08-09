@@ -17,6 +17,7 @@ on:
       - "!scripts/append_price_history.py"
       - "!scripts/merge_hourly_market_state.py"
       - "!scripts/non_athlete_event_refresh.py"
+      - "!scripts/music_release_coverage_sweep.py"
       - "!scripts/non_athlete_outcome_refresh.py"
       - "!scripts/repair_non_athlete_outcome_manifest.py"
       - "!scripts/normalize_non_athlete_event_timestamps.py"
