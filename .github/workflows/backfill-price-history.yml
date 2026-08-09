@@ -9,8 +9,10 @@ on:
       - "scripts/soccer_event_history.py"
       - "scripts/backfill_non_athlete_event_history.py"
       - "scripts/backfill_non_athlete_outcome_history.py"
+      - "scripts/creator_attention_refresh.py"
       - "scripts/merge_historical_event_overlay.py"
       - "tests/test_soccer_event_history.py"
+      - "tests/test_creator_attention_refresh.py"
   workflow_dispatch:
     inputs:
       days:
@@ -286,8 +288,88 @@ jobs:
           path: data/actors.json
           retention-days: 90
 
+  creators:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Validate Creator attention-history adapter
+        run: python -m unittest tests/test_creator_attention_refresh.py -v
+      - name: Restore latest healthy Creator state and prior verified history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _creators _prior_history; mkdir -p _creators _prior_history data
+          meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/creator-market-refresh.yml/runs?status=success&per_page=1")"
+          run_id="$(printf '%s' "$meta" | jq -r '.workflow_runs[0].id // empty')"
+          test -n "$run_id" || { echo "No successful Creator state exists."; exit 1; }
+          gh run download "$run_id" -R "$GITHUB_REPOSITORY" -n talentx-creator-market -D _creators
+          state="$(find _creators -name creators.json -print -quit)"
+          test -n "$state" || { echo "Creator artifact missing creators.json"; exit 1; }
+          cp "$state" data/creators.json
+          live_manifest="$(find _creators -name creator_attention_manifest.json -print -quit)"
+          if [ -n "$live_manifest" ]; then cp "$live_manifest" data/creator_history_attention_manifest.json; fi
+
+          prior_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/backfill-price-history.yml/runs?status=success&per_page=1")"
+          prior_id="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].id // empty')"
+          if [ -n "$prior_id" ]; then
+            gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-creator-history-backfill -D _prior_history || true
+            prior_state="$(find _prior_history -name creators.json -print -quit)"
+            prior_manifest="$(find _prior_history -name creator_history_attention_manifest.json -print -quit)"
+            if [ -n "$prior_state" ]; then
+              python scripts/merge_historical_event_overlay.py --base data/creators.json --overlay "$prior_state" --category Creator
+            fi
+            if [ -n "$prior_manifest" ]; then cp "$prior_manifest" data/creator_history_attention_manifest.json; fi
+          fi
+      - name: Snapshot Creator live market fields
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          records=json.loads(Path("data/creators.json").read_text())
+          snap={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          Path("data/creators-live-fields.json").write_text(json.dumps(snap,sort_keys=True,separators=(",",":")))
+          PY
+      - name: Backfill one year of verified Creator attention outcomes
+        env:
+          BACKFILL_DAYS: ${{ inputs.days || '365' }}
+        run: >-
+          python scripts/creator_attention_refresh.py
+          --catalog data/creators.json
+          --manifest data/creator_history_attention_manifest.json
+          --lookback-days "$BACKFILL_DAYS"
+          --request-timeout 12
+          --history-only
+      - name: Prove Creator history did not change live market fields
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=("marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend","lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation")
+          before=json.loads(Path("data/creators-live-fields.json").read_text())
+          records=json.loads(Path("data/creators.json").read_text())
+          after={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          if before != after:
+              raise SystemExit("Creator historical backfill changed live market fields")
+          print("Creator live market fields unchanged.")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-creator-history-backfill
+          path: |
+            data/creators.json
+            data/creator_history_attention_manifest.json
+          retention-days: 90
+
   complete:
     runs-on: ubuntu-latest
-    needs: [sports, music, actors]
+    needs: [sports, music, actors, creators]
     steps:
-      - run: echo "Verified 1Y Sports, Music and Actor history artifacts are ready for unified publishing."
+      - run: echo "Verified 1Y Sports, Music, Actor and Creator history artifacts are ready for unified publishing."
