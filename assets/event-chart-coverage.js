@@ -1,7 +1,7 @@
 /* TalentX verified-history coverage presentation.
  * Long chart ranges must not imply that TalentX observed prices before durable
  * event history existed. Full coverage renders normally; partial coverage masks
- * the unobserved prefix; no coverage renders an explicit empty state.
+ * the unobserved prefix; no coverage renders an explicit pending/empty state.
  */
 (function(){
   if(typeof detailedTrendSvg!=='function'||typeof chartStats!=='function') return;
@@ -32,12 +32,12 @@
     if(info.status==='none'){
       return `<div class="stock-chart-wrap event-coverage-empty" style="height:${height}px">
         <div class="event-coverage-empty-inner">
-          <strong>No verified price-changing history for ${esc(chartRange)}</strong>
-          <span>TalentX does not fill missing history with synthetic movement. This chart will build as verified events are recorded.</span>
+          <strong>No verified event movement found yet for ${esc(chartRange)}</strong>
+          <span>TalentX is still expanding verification coverage. This does not mean the price was flat; it means no supported event has been attached to this period yet.</span>
           <small>Current market price ${money(current)}</small>
         </div>
       </div>
-      <div class="stock-chart-footer event-coverage-footer"><span>Verified history not yet available for this period</span><span>Current ${money(current)}</span></div>`;
+      <div class="stock-chart-footer event-coverage-footer"><span>Verification coverage pending for this period</span><span>Current ${money(current)}</span></div>`;
     }
 
     const start=Number(info.start),now=Number(info.now),coverageStart=Number(info.coverageStart);
@@ -62,7 +62,7 @@
     if(info.status==='none'){
       return `<div class="chart-stats event-coverage-stats">
         <div class="chart-stat"><small>Current</small><strong>${money(current)}</strong></div>
-        <div class="chart-stat"><small>Coverage</small><strong>Not yet available</strong></div>
+        <div class="chart-stat"><small>Verification</small><strong>Coverage pending</strong></div>
         <div class="chart-stat"><small>${esc(chartRange)} return</small><strong>—</strong></div>
       </div>`;
     }
@@ -84,5 +84,5 @@
     </div>`;
   };
 
-  window.talentxChartCoveragePresentation='verified-range-coverage-v1';
+  window.talentxChartCoveragePresentation='verified-range-coverage-v2-pending-aware';
 })();
