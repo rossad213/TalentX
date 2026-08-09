@@ -1,17 +1,34 @@
 #!/usr/bin/env python3
 """Reliability wrapper for the TalentX hourly game refresh.
 
-This wrapper keeps the original retry behavior and adds durable game-by-game
-market events. A completed game can therefore affect both price and dated chart
-history exactly once per athlete.
+This wrapper keeps the original retry behavior, adds durable game-by-game
+market events, and normalizes inherited Sports ticker collisions before the
+hourly validator runs. A completed game can therefore affect both price and
+dated chart history exactly once per athlete without an unrelated baseline
+ticker collision breaking the refresh.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import hourly_price_refresh as refresh
+from category_market_store import dedupe_tickers, load_records, write_records
 from game_event_history import attach_price_events
 
 _original_discover = refresh.discover_recent_events
 _original_apply_game_market_moves = refresh.apply_game_market_moves
+
+
+def normalize_sports_tickers(catalog_path: Path = Path("data/current_catalog.json")) -> int:
+    """Repair duplicate Sports tickers deterministically before hourly refresh."""
+    if not catalog_path.exists():
+        return 0
+    records = load_records(catalog_path)
+    repairs = dedupe_tickers(records)
+    if repairs:
+        write_records(catalog_path, records)
+        print(f"Normalized {len(repairs):,} duplicate Sports ticker(s) before game refresh.")
+    return len(repairs)
 
 
 def discover_recent_events_reliably(
@@ -63,4 +80,5 @@ refresh.discover_recent_events = discover_recent_events_reliably
 refresh.apply_game_market_moves = apply_game_market_moves_with_history
 
 if __name__ == "__main__":
+    normalize_sports_tickers()
     raise SystemExit(refresh.main())
