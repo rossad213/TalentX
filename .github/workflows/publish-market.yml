@@ -24,6 +24,7 @@ on:
       - "Creator market refresh"
       - "Backfill verified 1Y event history"
       - "Soccer history refresh"
+      - "Tennis history refresh"
     types: [completed]
   schedule:
     - cron: "52 * * * *"
@@ -54,7 +55,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -rf _baseline _sports _music _actors _creators _history _soccer_history
+          rm -rf _baseline _sports _music _actors _creators _history _soccer_history _tennis_history
           mkdir -p _baseline data/market
           baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
           baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
@@ -198,6 +199,33 @@ jobs:
             echo "No quality-gated Soccer history artifact exists yet."
           fi
 
+          # Tennis history is also independent because Tennis is not a team-sport
+          # adapter. A successful artifact is generated from completed ATP/WTA
+          # singles scoreboards and contains history-only Tennis records.
+          tennis_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/tennis-history-refresh.yml/runs?status=completed&per_page=30" || true)"
+          tennis_id="$(printf '%s' "$tennis_meta" | jq -r '[.workflow_runs[] | select(.conclusion == "success")][0].id // empty' 2>/dev/null || true)"
+          if [ -n "$tennis_id" ]; then
+            mkdir -p _tennis_history
+            if gh run download "$tennis_id" -R "$GITHUB_REPOSITORY" -n talentx-tennis-history -D _tennis_history; then
+              tennis_state="$(find _tennis_history -name tennis.json -print -quit)"
+              tennis_manifest="$(find _tennis_history -name tennis_history_manifest.json -print -quit)"
+              if [ -n "$tennis_state" ]; then
+                python scripts/merge_historical_event_overlay.py \
+                  --base data/current_catalog.json \
+                  --overlay "$tennis_state" \
+                  --category sports
+                if [ -n "$tennis_manifest" ]; then cp "$tennis_manifest" data/tennis_history_manifest.json; fi
+                echo "Applied independently verified Tennis history run ${tennis_id}."
+              else
+                echo "WARNING: Tennis history artifact ${tennis_id} had no tennis.json."
+              fi
+            else
+              echo "WARNING: Tennis history artifact from ${tennis_id} could not be downloaded."
+            fi
+          else
+            echo "No quality-gated Tennis history artifact exists yet."
+          fi
+
           # Global identity/display constraints only make sense after all category
           # databases and optional history have been recombined.
           python scripts/category_market_store.py finalize \
@@ -226,6 +254,7 @@ jobs:
             data/current_catalog.csv
             data/market/
             data/soccer_history_manifest.json
+            data/tennis_history_manifest.json
           if-no-files-found: ignore
           retention-days: 10
       - name: Prepare static Pages site
