@@ -23,6 +23,7 @@ on:
       - "Actor market refresh"
       - "Creator market refresh"
       - "Backfill verified 1Y event history"
+      - "Soccer history refresh"
     types: [completed]
   schedule:
     - cron: "52 * * * *"
@@ -53,7 +54,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -rf _baseline _sports _music _actors _creators _history
+          rm -rf _baseline _sports _music _actors _creators _history _soccer_history
           mkdir -p _baseline data/market
           baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
           baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
@@ -127,9 +128,7 @@ jobs:
           apply_state actor-market-refresh.yml talentx-actor-market actors.json actors _actors required
           apply_state creator-market-refresh.yml talentx-creator-market creators.json creators _creators optional
 
-          # Historical backfill is an optional, history-only layer. It can never
-          # replace current category state or today's market price. A failed or
-          # expired history artifact simply leaves the live market untouched.
+          # General historical backfill remains optional and history-only.
           history_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/backfill-price-history.yml/runs?status=success&per_page=1")"
           history_id="$(printf '%s' "$history_meta" | jq -r '.workflow_runs[0].id // empty')"
           if [ -n "$history_id" ]; then
@@ -171,6 +170,34 @@ jobs:
             echo "No successful verified 1Y history run exists yet; publishing live event history only."
           fi
 
+          # Soccer history is intentionally independent from the large multi-
+          # category backfill. A successful artifact has already passed its own
+          # minimum-coverage and anchor-player quality gates. It is applied after
+          # the general history layer so the dedicated Soccer evidence wins.
+          soccer_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/soccer-history-refresh.yml/runs?status=completed&per_page=30" || true)"
+          soccer_id="$(printf '%s' "$soccer_meta" | jq -r '[.workflow_runs[] | select(.conclusion == "success")][0].id // empty' 2>/dev/null || true)"
+          if [ -n "$soccer_id" ]; then
+            mkdir -p _soccer_history
+            if gh run download "$soccer_id" -R "$GITHUB_REPOSITORY" -n talentx-soccer-history -D _soccer_history; then
+              soccer_state="$(find _soccer_history -name sports.json -print -quit)"
+              soccer_manifest="$(find _soccer_history -name soccer_history_manifest.json -print -quit)"
+              if [ -n "$soccer_state" ]; then
+                python scripts/merge_historical_event_overlay.py \
+                  --base data/current_catalog.json \
+                  --overlay "$soccer_state" \
+                  --category sports
+                if [ -n "$soccer_manifest" ]; then cp "$soccer_manifest" data/soccer_history_manifest.json; fi
+                echo "Applied independently verified Soccer history run ${soccer_id}."
+              else
+                echo "WARNING: Soccer history artifact ${soccer_id} had no sports.json."
+              fi
+            else
+              echo "WARNING: Soccer history artifact from ${soccer_id} could not be downloaded."
+            fi
+          else
+            echo "No quality-gated Soccer history artifact exists yet."
+          fi
+
           # Global identity/display constraints only make sense after all category
           # databases and optional history have been recombined.
           python scripts/category_market_store.py finalize \
@@ -198,6 +225,8 @@ jobs:
             data/current_catalog.json
             data/current_catalog.csv
             data/market/
+            data/soccer_history_manifest.json
+          if-no-files-found: ignore
           retention-days: 10
       - name: Prepare static Pages site
         run: |
