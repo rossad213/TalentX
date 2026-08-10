@@ -7,8 +7,10 @@ on:
       - ".github/workflows/soccer-history-refresh.yml"
       - "market_jobs/soccer_json_history.py"
       - "market_jobs/soccer_json_history_runner.py"
+      - "market_jobs/soccer_scoreboard_history.py"
       - "market_jobs/test_soccer_json_history.py"
       - "market_jobs/test_soccer_json_history_runner.py"
+      - "market_jobs/test_soccer_scoreboard_history.py"
       - "data/priority_soccer_names.json"
       - "scripts/merge_historical_event_overlay.py"
   schedule:
@@ -40,6 +42,7 @@ jobs:
           python -m unittest
           market_jobs/test_soccer_json_history.py
           market_jobs/test_soccer_json_history_runner.py
+          market_jobs/test_soccer_scoreboard_history.py
           -v
 
       - name: Restore latest healthy Sports state and prior Soccer history
@@ -88,13 +91,13 @@ jobs:
 
       - name: Build verified one-year Soccer event history
         run: >-
-          python market_jobs/soccer_json_history_runner.py
+          python market_jobs/soccer_scoreboard_history.py
           --catalog data/sports.json
           --days 365
           --workers 20
-          --request-timeout 12
+          --request-timeout 15
           --max-players 3000
-          --max-teams 120
+          --max-leagues 0
           --max-game-move-pct 2.5
           --minimum-total-covered 20
           --minimum-anchor-covered 5
