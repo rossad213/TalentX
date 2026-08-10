@@ -9,6 +9,7 @@ on:
       - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/game_event_history.py"
       - "scripts/tennis_event_refresh.py"
+      - "scripts/golf_event_refresh.py"
       - "scripts/athlete_career_event_refresh.py"
       - "scripts/restore_hourly_event_market_state.py"
       - "scripts/explain_event_pricing_only.py"
@@ -21,6 +22,7 @@ on:
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_game_event_history.py"
       - "tests/test_tennis_event_refresh.py"
+      - "tests/test_golf_event_refresh.py"
       - "tests/test_athlete_career_event_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
@@ -91,6 +93,7 @@ jobs:
           tests/test_hourly_price_refresh.py
           tests/test_game_event_history.py
           tests/test_tennis_event_refresh.py
+          tests/test_golf_event_refresh.py
           tests/test_athlete_career_event_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
@@ -108,6 +111,13 @@ jobs:
           python scripts/tennis_event_refresh.py
           --catalog data/current_catalog.json
           --lookback-hours 120
+          --request-timeout 15
+          --max-game-move-pct 2.5
+      - name: Refresh verified PGA and LPGA tournament evidence
+        run: >-
+          python scripts/golf_event_refresh.py
+          --catalog data/current_catalog.json
+          --lookback-hours 240
           --request-timeout 15
           --max-game-move-pct 2.5
       - name: Save authoritative Sports game-market state
