@@ -9,13 +9,38 @@ from typing import Any
 
 import event_pricing_policy as policy
 
+SPECIALIZED_EVENT_SPORTS = {"tennis", "golf"}
+
 
 def signed_direction(value: float) -> str:
     return "increased" if value > 0 else "decreased" if value < 0 else "held steady"
 
 
+def latest_specialized_event(record: dict[str, Any]) -> dict[str, Any] | None:
+    event_id = str(record.get("lastPriceEventId") or "").strip()
+    if not event_id:
+        return None
+    events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
+    for event in reversed(events):
+        if not isinstance(event, dict):
+            continue
+        key = str(event.get("eventKey") or event.get("eventId") or "").strip()
+        if key != event_id:
+            continue
+        if str(event.get("sport") or "").lower() in SPECIALIZED_EVENT_SPORTS:
+            return event
+        return None
+    return None
+
+
 def explain_only(record: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     result = dict(record)
+
+    # Tennis and Golf already create profession-specific verified explanations.
+    # Do not replace them with the generic team-game policy wording.
+    if latest_specialized_event(result) is not None:
+        return result, False
+
     calculated = policy.explainable_event_move(result)
     if calculated is None:
         return result, False
