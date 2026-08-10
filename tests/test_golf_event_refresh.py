@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
 
+from scripts.explain_event_pricing_only import explain_only
 from scripts.golf_event_refresh import (
     apply_live_tournaments,
     flatten_scoreboard,
@@ -121,6 +121,23 @@ class GolfEventRefreshTests(unittest.TestCase):
         self.assertEqual(touched2, 0)
         self.assertEqual(added2, 0)
         self.assertEqual(second[0]["marketPrice"], first[0]["marketPrice"])
+
+    def test_golf_explanation_is_not_replaced_by_generic_game_copy(self):
+        records = [{
+            "id": "golf-scottie",
+            "name": "Scottie Scheffler",
+            "primaryCategory": "Athlete",
+            "discipline": "Golf",
+            "marketPrice": 200.0,
+            "rosterPriority": 1,
+            "priceEvents": [],
+        }]
+        tournaments = flatten_scoreboard(self.sample_payload(), "pga", "https://example.test")
+        first, _, _ = apply_live_tournaments(records, tournaments, max_move_pct=2.5)
+        before = first[0]["priceExplanation"]
+        after, changed = explain_only(first[0])
+        self.assertFalse(changed)
+        self.assertEqual(after["priceExplanation"], before)
 
 
 if __name__ == "__main__":
