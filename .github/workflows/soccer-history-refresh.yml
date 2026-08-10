@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: talentx-soccer-history
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   refresh:
