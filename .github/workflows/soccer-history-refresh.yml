@@ -91,7 +91,7 @@ jobs:
           --max-teams 120
           --max-game-move-pct 2.5
           --minimum-total-covered 20
-          --minimum-anchor-covered 3
+          --minimum-anchor-covered 5
 
       - name: Prove historical work did not change today's market price
         run: |
