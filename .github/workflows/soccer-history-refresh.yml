@@ -93,6 +93,38 @@ jobs:
           --minimum-total-covered 20
           --minimum-anchor-covered 5
 
+      - name: Prove the exact blank-chart examples now have game history
+        run: |
+          python - <<'PY'
+          import json, unicodedata, re
+          from pathlib import Path
+          expected=[
+              "Harry Kane","Luis Díaz","Lionel Messi","Mohamed Salah",
+              "Cristiano Ronaldo","Josh Magennis","Lucas Akins"
+          ]
+          def norm(value):
+              text=unicodedata.normalize("NFKD",str(value or "")).encode("ascii","ignore").decode("ascii").lower()
+              return re.sub(r"[^a-z0-9]+","",text)
+          records=json.loads(Path("data/sports.json").read_text())
+          by_name={norm(r.get("name")):r for r in records if isinstance(r,dict)}
+          missing=[]
+          for name in expected:
+              record=by_name.get(norm(name))
+              events=[] if record is None else [
+                  e for e in record.get("priceEvents",[])
+                  if isinstance(e,dict)
+                  and e.get("verified") is not False
+                  and str(e.get("eventType") or "game")=="game"
+                  and abs(float(e.get("movePct") or 0))>=0.001
+              ]
+              print(f"{name}: {len(events)} verified priced game events")
+              if not events:
+                  missing.append(name)
+          if missing:
+              raise SystemExit("Blank Soccer chart regression still present for: "+", ".join(missing))
+          print("All seven screenshot regression profiles now have verified priced game history.")
+          PY
+
       - name: Prove historical work did not change today's market price
         run: |
           python - <<'PY'
