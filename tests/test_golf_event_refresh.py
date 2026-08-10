@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from pathlib import Path
 
-from scripts.explain_event_pricing_only import explain_only
-from scripts.golf_event_refresh import (
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+from explain_event_pricing_only import explain_only
+from golf_event_refresh import (
     apply_live_tournaments,
     flatten_scoreboard,
     golf_tournament_move,
