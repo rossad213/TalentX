@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Run Soccer history with a Soccer-aware ESPN JSON player parser.
+"""Run Soccer history with Soccer-aware ESPN JSON parsing.
 
-The shared TalentX ESPN parser is intentionally optimized for sports whose summary
-payloads expose ``boxscore.players``. Soccer frequently places player participation
-under ``rosters`` / ``lineups`` instead. This runner patches only the Soccer history
-job so verified starters and substitutes are not lost before price-event creation.
+The shared TalentX ESPN parser is optimized for sports whose summary payloads
+expose ``boxscore.players``. Soccer frequently places participation under
+``rosters`` / ``lineups`` and also uses full-time status labels that differ from
+other ESPN sports. This runner patches only the standalone Soccer history job so
+verified finished matches, starters and used substitutes are not discarded.
 """
 from __future__ import annotations
 
@@ -31,6 +32,26 @@ STAT_ALIASES = {
 
 def norm(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def soccer_completed_event(state: str) -> bool:
+    """Accept ESPN Soccer's finished-match status vocabulary.
+
+    Soccer feeds commonly use values such as STATUS_FULL_TIME / FULL_TIME in
+    places where MLB/NBA use post/final. Treat only explicit final/full-time
+    variants as complete; scheduled, postponed and abandoned matches remain out.
+    """
+    normalized = norm(state)
+    if not normalized:
+        return False
+    if normalized in {
+        "post", "final", "completed", "complete", "off", "closed", "official",
+        "fulltime", "fulltimeresult", "statusfinal", "statusfulltime",
+        "statusfulltimeresult", "afterextratime", "statusafterextratime",
+        "afterpenalties", "statusafterpenalties",
+    }:
+        return True
+    return normalized.startswith("statusfinal") or normalized.startswith("statusfulltime")
 
 
 def numeric(value: Any) -> float | None:
@@ -68,8 +89,6 @@ def add_stat(output: dict[str, float], name: Any, value: Any) -> None:
 
 def stats_from_entry(entry: dict[str, Any]) -> dict[str, float]:
     output: dict[str, float] = {}
-
-    # Some Soccer payloads put common fields directly on the lineup entry.
     for key, value in entry.items():
         if normalized_stat_name(key):
             add_stat(output, key, value)
@@ -115,8 +134,6 @@ def entry_participated(entry: dict[str, Any], stats: dict[str, float], in_lineup
         return True
     if any(abs(stats.get(key, 0)) > 0 for key in ("goals", "assists", "shots", "shotsOnTarget", "saves", "yellowCards", "redCards")):
         return True
-    # A few ESPN lineup payloads omit minutes but mark starter/substitute status
-    # using a textual type/status field.
     status = " ".join(str(entry.get(key) or "") for key in ("status", "type", "role", "lineupType")).lower()
     if in_lineup and any(token in status for token in ("starter", "starting", "subbed in", "substitute used")):
         return True
@@ -200,8 +217,9 @@ def fetch_match_stats(info: dict[str, Any], timeout: float) -> tuple[dict[str, d
     return {}, f"no Soccer player JSON for {info['league']}/{info['eventId']} ({'/'.join(errors) or 'empty payloads'})"
 
 
-# Patch only this standalone history process. Live Sports game pricing keeps using
-# its existing parser until the Soccer-specific behavior has proven healthy.
+# Patch only this standalone history process. Live Sports game pricing keeps its
+# existing parser until this Soccer-specific behavior proves healthy.
+base.completed_event = soccer_completed_event
 base.fetch_match_stats = fetch_match_stats
 
 
