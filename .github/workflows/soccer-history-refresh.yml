@@ -1,0 +1,139 @@
+name: Soccer history refresh
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/soccer-history-refresh.yml"
+      - "market_jobs/soccer_json_history.py"
+      - "market_jobs/test_soccer_json_history.py"
+      - "data/priority_soccer_names.json"
+      - "scripts/merge_historical_event_overlay.py"
+  schedule:
+    - cron: "17 10 * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: talentx-soccer-history
+  cancel-in-progress: true
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+
+      - name: Validate Soccer JSON history logic
+        run: python -m unittest market_jobs/test_soccer_json_history.py -v
+
+      - name: Restore latest healthy Sports state and prior Soccer history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _sports _prior_soccer
+          mkdir -p _sports _prior_soccer data
+
+          sports_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/sports-market-refresh.yml/runs?status=completed&per_page=30")"
+          sports_id="$(printf '%s' "$sports_meta" | jq -r '[.workflow_runs[] | select(.conclusion == "success")][0].id // empty')"
+          test -n "$sports_id" || { echo "No successful Sports market artifact exists."; exit 1; }
+          gh run download "$sports_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _sports
+          sports_state="$(find _sports -name sports.json -print -quit)"
+          test -n "$sports_state" || { echo "Sports artifact missing sports.json"; exit 1; }
+          cp "$sports_state" data/sports.json
+
+          soccer_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/soccer-history-refresh.yml/runs?status=completed&per_page=30" || true)"
+          prior_id="$(printf '%s' "$soccer_meta" | jq -r '[.workflow_runs[] | select(.conclusion == "success")][0].id // empty' 2>/dev/null || true)"
+          if [ -n "$prior_id" ]; then
+            gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-soccer-history -D _prior_soccer || true
+            prior_state="$(find _prior_soccer -name sports.json -print -quit)"
+            if [ -n "$prior_state" ]; then
+              python scripts/merge_historical_event_overlay.py \
+                --base data/sports.json \
+                --overlay "$prior_state" \
+                --category sports
+            fi
+          fi
+
+      - name: Snapshot live Sports market fields
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=(
+              "marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend",
+              "lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation",
+              "lastGameMovePct","lastGamePerformanceDeltaPct","lastGameStats"
+          )
+          records=json.loads(Path("data/sports.json").read_text())
+          snap={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          Path("data/soccer-live-fields.json").write_text(json.dumps(snap,sort_keys=True,separators=(",",":")))
+          PY
+
+      - name: Build verified one-year Soccer event history
+        run: >-
+          python market_jobs/soccer_json_history.py
+          --catalog data/sports.json
+          --days 365
+          --workers 20
+          --request-timeout 12
+          --max-players 3000
+          --max-teams 120
+          --max-game-move-pct 2.5
+          --minimum-total-covered 20
+          --minimum-anchor-covered 3
+
+      - name: Prove historical work did not change today's market price
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          fields=(
+              "marketPrice","previousMarketPrice","dailyChange","hourlyChangePct","trend",
+              "lastPriceEventAt","lastPriceEvent","lastPriceEventId","priceExplanation",
+              "lastGameMovePct","lastGamePerformanceDeltaPct","lastGameStats"
+          )
+          before=json.loads(Path("data/soccer-live-fields.json").read_text())
+          records=json.loads(Path("data/sports.json").read_text())
+          after={str(r.get("id")): {k:r.get(k) for k in fields} for r in records if isinstance(r,dict) and r.get("id")}
+          if before != after:
+              raise SystemExit("Soccer history refresh changed live market fields")
+          print("Live Sports market fields unchanged.")
+          PY
+
+      - name: Write Soccer coverage manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          records=json.loads(Path("data/sports.json").read_text())
+          soccer=[r for r in records if isinstance(r,dict) and r.get("discipline")=="Soccer"]
+          def games(r):
+              return [e for e in r.get("priceEvents",[]) if isinstance(e,dict) and e.get("verified") is not False and str(e.get("eventType") or "game")=="game" and abs(float(e.get("movePct") or 0))>=0.001]
+          covered=[r for r in soccer if games(r)]
+          top=sorted(
+              ({"name":r.get("name"),"events":len(games(r)),"price":r.get("marketPrice")} for r in covered),
+              key=lambda x:x["events"], reverse=True
+          )[:30]
+          manifest={"soccerRecords":len(soccer),"coveredRecords":len(covered),"coveragePct":round((len(covered)/len(soccer)*100) if soccer else 0,2),"examples":top}
+          Path("data/soccer_history_manifest.json").write_text(json.dumps(manifest,indent=2))
+          print(json.dumps(manifest,indent=2))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: talentx-soccer-history
+          path: |
+            data/sports.json
+            data/soccer_history_manifest.json
+          retention-days: 90
