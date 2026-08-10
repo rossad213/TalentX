@@ -7,10 +7,23 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "market_jobs"))
 
-from soccer_json_history_runner import extract_soccer_lineup_stats
+from soccer_json_history_runner import extract_soccer_lineup_stats, soccer_completed_event
 
 
 class SoccerLineupJsonTests(unittest.TestCase):
+    def test_soccer_full_time_statuses_are_completed(self):
+        for value in (
+            "post", "final", "STATUS_FINAL", "STATUS_FULL_TIME", "FULL_TIME",
+            "Full Time", "after extra time", "STATUS_AFTER_PENALTIES",
+        ):
+            with self.subTest(value=value):
+                self.assertTrue(soccer_completed_event(value))
+
+    def test_nonfinal_soccer_statuses_are_not_completed(self):
+        for value in ("pre", "scheduled", "in", "halftime", "postponed", "abandoned", "cancelled"):
+            with self.subTest(value=value):
+                self.assertFalse(soccer_completed_event(value))
+
     def test_starter_with_roster_stats_is_counted(self):
         payload = {
             "rosters": [{
