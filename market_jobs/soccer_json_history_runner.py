@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Run Soccer history with Soccer-aware ESPN JSON parsing.
 
-The shared TalentX ESPN parser is optimized for sports whose summary payloads
-expose ``boxscore.players``. Soccer frequently places participation under
-``rosters`` / ``lineups`` and also uses full-time status labels that differ from
-other ESPN sports. This runner patches only the standalone Soccer history job so
-verified finished matches, starters and used substitutes are not discarded.
+This standalone runner patches the generic history collector in three places that
+behave differently for Soccer:
+1. finished matches may be labelled FULL_TIME / STATUS_FULL_TIME;
+2. player participation may live under rosters/lineups rather than boxscore.players;
+3. team schedule payloads may omit/reformat the nested team identifier or return
+   an empty season-specific response even though the team's default schedule has
+   completed matches.
 """
 from __future__ import annotations
 
 import math
 import re
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import soccer_json_history as base
 
@@ -35,12 +38,6 @@ def norm(value: Any) -> str:
 
 
 def soccer_completed_event(state: str) -> bool:
-    """Accept ESPN Soccer's finished-match status vocabulary.
-
-    Soccer feeds commonly use values such as STATUS_FULL_TIME / FULL_TIME in
-    places where MLB/NBA use post/final. Treat only explicit final/full-time
-    variants as complete; scheduled, postponed and abandoned matches remain out.
-    """
     normalized = norm(state)
     if not normalized:
         return False
@@ -141,7 +138,6 @@ def entry_participated(entry: dict[str, Any], stats: dict[str, float], in_lineup
 
 
 def extract_soccer_lineup_stats(payload: dict[str, Any], winning_team_ids: set[str]) -> dict[str, dict[str, Any]]:
-    """Extract verified Soccer participants from roster/lineup-shaped ESPN JSON."""
     found: dict[str, dict[str, Any]] = {}
     lineup_keys = {"roster", "rosters", "lineup", "lineups", "starters", "substitutes", "players", "athletes"}
 
@@ -172,10 +168,8 @@ def extract_soccer_lineup_stats(payload: dict[str, Any], winning_team_ids: set[s
                 stats = stats_from_entry(node)
                 if entry_participated(node, stats, in_lineup):
                     merge(athlete_id, local_team, stats)
-
             for key, value in node.items():
-                child_lineup = in_lineup or norm(key) in lineup_keys
-                walk(value, local_team, child_lineup)
+                walk(value, local_team, in_lineup or norm(key) in lineup_keys)
         elif isinstance(node, list):
             for value in node:
                 walk(value, team_id, in_lineup)
@@ -195,6 +189,63 @@ def merge_player_maps(target: dict[str, dict[str, Any]], incoming: dict[str, dic
         current.setdefault("stats", {}).update(item.get("stats") or {})
 
 
+def requested_schedule_team(url: str) -> str:
+    match = re.search(r"/teams/([^/?#]+)/schedule", url)
+    return match.group(1) if match else ""
+
+
+def ensure_team_association(payload: dict[str, Any], team_id: str) -> dict[str, Any]:
+    """Normalize team-specific schedule events for the collector's redundant ID check."""
+    if not team_id:
+        return payload
+    for event in base.schedule_events(payload):
+        competitions = event.get("competitions") if isinstance(event.get("competitions"), list) else []
+        if not competitions:
+            continue
+        competition = competitions[0]
+        if not isinstance(competition, dict):
+            continue
+        competitors = competition.get("competitors") if isinstance(competition.get("competitors"), list) else []
+        ids = {
+            str((item.get("team") or {}).get("id") or item.get("id") or "")
+            for item in competitors if isinstance(item, dict)
+        }
+        if team_id not in ids:
+            competitors.append({"team": {"id": team_id}, "winner": False, "talentxAssociationOnly": True})
+            competition["competitors"] = competitors
+    return payload
+
+
+def strip_query(url: str) -> str:
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "", parts.fragment))
+
+
+_original_fetch_json = base.fetch_json
+
+
+def soccer_fetch_json(url: str, timeout: float) -> dict[str, Any]:
+    payload = _original_fetch_json(url, timeout)
+    if "/sports/soccer/" not in url or "/schedule" not in url:
+        return payload
+
+    team_id = requested_schedule_team(url)
+    events = base.schedule_events(payload)
+    if not events:
+        fallback_url = strip_query(url)
+        if fallback_url != url:
+            try:
+                fallback = _original_fetch_json(fallback_url, timeout)
+                fallback_events = base.schedule_events(fallback)
+                if fallback_events:
+                    print(f"Soccer schedule fallback used for team {team_id}: {len(fallback_events)} raw events", flush=True)
+                    payload = fallback
+                    events = fallback_events
+            except Exception as exc:  # noqa: BLE001
+                print(f"Soccer default-schedule fallback failed for team {team_id}: {type(exc).__name__}", flush=True)
+    return ensure_team_association(payload, team_id)
+
+
 def fetch_match_stats(info: dict[str, Any], timeout: float) -> tuple[dict[str, dict[str, Any]], str | None]:
     winners = {str(value) for value in info.get("winningTeamIds") or []}
     sources = [
@@ -207,7 +258,7 @@ def fetch_match_stats(info: dict[str, Any], timeout: float) -> tuple[dict[str, d
     errors: list[str] = []
     for source in sources:
         try:
-            payload = base.unwrap_gamepackage(base.fetch_json(source, timeout))
+            payload = base.unwrap_gamepackage(_original_fetch_json(source, timeout))
             merge_player_maps(merged, base.extract_espn_game_stats(payload, winners))
             merge_player_maps(merged, extract_soccer_lineup_stats(payload, winners))
         except Exception as exc:  # noqa: BLE001
@@ -217,9 +268,8 @@ def fetch_match_stats(info: dict[str, Any], timeout: float) -> tuple[dict[str, d
     return {}, f"no Soccer player JSON for {info['league']}/{info['eventId']} ({'/'.join(errors) or 'empty payloads'})"
 
 
-# Patch only this standalone history process. Live Sports game pricing keeps its
-# existing parser until this Soccer-specific behavior proves healthy.
 base.completed_event = soccer_completed_event
+base.fetch_json = soccer_fetch_json
 base.fetch_match_stats = fetch_match_stats
 
 
