@@ -41,6 +41,8 @@ jobs:
 
       - name: Build compact catalog and on-demand profile shards
         run: |
+          python -m py_compile scripts/build_client_catalog.py
+          node --check assets/catalog-profile-loader.js
           python scripts/build_client_catalog.py \
             --catalog data/current_catalog.json \
             --index data/catalog_index.json \
