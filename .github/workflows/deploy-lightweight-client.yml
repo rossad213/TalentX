@@ -1,0 +1,76 @@
+name: Deploy lightweight TalentX client
+
+on:
+  workflow_run:
+    workflows: ["Publish unified TalentX market"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: talentx-lightweight-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Download the exact market that was just published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          rm -rf _published
+          mkdir -p _published
+          gh run download "$SOURCE_RUN" -R "$GITHUB_REPOSITORY" -n talentx-published-market -D _published
+          published_data="$(dirname "$(find _published -name current_catalog.json -print -quit)")"
+          test -n "$published_data" || { echo "Published market artifact is missing current_catalog.json"; exit 1; }
+          cp -R "$published_data"/. data/
+
+      - name: Build compact catalog and on-demand profile shards
+        run: |
+          python scripts/build_client_catalog.py \
+            --catalog data/current_catalog.json \
+            --index data/catalog_index.json \
+            --shards data/profile_shards \
+            --manifest data/catalog_manifest.json
+          test -s data/catalog_index.json
+          test -s data/profile_shards/000.json
+
+      - name: Prepare lightweight static Pages site
+        run: |
+          rm -rf _site
+          mkdir -p _site
+          cp index.html site.webmanifest app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
+          cp -R data _site/data
+          cp -R assets _site/assets
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy lightweight TalentX client
+        id: deployment
+        uses: actions/deploy-pages@v4
