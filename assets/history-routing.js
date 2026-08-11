@@ -77,7 +77,7 @@
     history.replaceState(state,'',window.location.href);
   }
 
-  function commitUrl(mode='push'){
+  function commitUrl(mode='push',currentScrollSaved=false){
     if(applyingLocation) return;
     const target=buildUrl();
     const current=`${window.location.pathname}${window.location.search}`;
@@ -86,7 +86,7 @@
       return;
     }
     if(mode==='push'){
-      saveCurrentScroll();
+      if(!currentScrollSaved) saveCurrentScroll();
       history.pushState({talentx:true,talentxDepth:currentDepth()+1,scrollY:0},'',target);
     }else{
       history.replaceState({...(history.state||{}),talentx:true,talentxDepth:currentDepth(),scrollY:window.scrollY||0},'',target);
@@ -161,6 +161,8 @@
     if(button) button.onclick=()=>window.history.back();
   }
 
+  if('scrollRestoration' in history) history.scrollRestoration='manual';
+
   // Read the URL immediately so the first async app render lands on the requested view.
   const initialState=readLocation();
   applyState(initialState);
@@ -180,8 +182,10 @@
     const base=window[name];
     if(typeof base!=='function') return;
     window[name]=function(){
+      const saveBefore=mode==='push';
+      if(saveBefore) saveCurrentScroll();
       const result=base.apply(this,arguments);
-      commitUrl(mode);
+      commitUrl(mode,saveBefore);
       return result;
     };
   }
@@ -190,8 +194,10 @@
     const base=window[name];
     if(typeof base!=='function') return;
     window[name]=async function(){
+      const saveBefore=mode==='push';
+      if(saveBefore) saveCurrentScroll();
       const result=await base.apply(this,arguments);
-      commitUrl(mode);
+      commitUrl(mode,saveBefore);
       return result;
     };
   }
@@ -215,7 +221,8 @@
   if(search){
     search.addEventListener('input',()=>{
       const startedOutsideMarket=route!=='market';
-      setTimeout(()=>commitUrl(startedOutsideMarket?'push':'replace'),0);
+      if(startedOutsideMarket) saveCurrentScroll();
+      setTimeout(()=>commitUrl(startedOutsideMarket?'push':'replace',startedOutsideMarket),0);
     },true);
   }
 
