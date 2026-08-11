@@ -62,17 +62,25 @@
     window.structuredClone = value => JSON.parse(JSON.stringify(value));
   }
   const nativeFetch = window.fetch.bind(window);
+  const forceFullCatalog = new URL(window.location.href).searchParams.get('fullCatalog') === '1';
   window.fetch = (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (url.startsWith('./data/') || url.includes('/TalentX/data/') || url.includes('/data/')) {
-      return nativeFetch(input, {...init, cache: 'no-store'});
+    const dataRequest = url.startsWith('./data/') || url.includes('/TalentX/data/') || url.includes('/data/');
+    const currentCatalogRequest = /(?:^|\/)data\/current_catalog\.json(?:$|[?#])/.test(url);
+    if (!forceFullCatalog && currentCatalogRequest) {
+      return nativeFetch('./data/catalog_index.json', {...init, cache: 'no-store'})
+        .then(response => response.ok ? response : nativeFetch(input, {...init, cache: 'no-store'}))
+        .catch(() => nativeFetch(input, {...init, cache: 'no-store'}));
     }
+    if (dataRequest) return nativeFetch(input, {...init, cache: 'no-store'});
     return nativeFetch(input, init);
   };
+  window.__talentxForceFullCatalog = forceFullCatalog;
 })();
 </script>
 <script src="./assets/pricing-model-migration-5.2.js?v=20260806-1"></script>
-<script src="./app.js?v=20260811-2"></script>
+<script src="./app.js?v=20260811-3"></script>
+<script src="./assets/catalog-profile-loader.js?v=20260811-1"></script>
 <script src="./chart-history.js?v=20260807-2"></script>
 <script src="./assets/event-chart-history.js?v=20260807-1"></script>
 <script src="./discovery-profile.js"></script>
