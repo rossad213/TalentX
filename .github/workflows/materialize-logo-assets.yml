@@ -1,0 +1,55 @@
+name: Materialize TalentX logo assets
+
+on:
+  push:
+    paths:
+      - '.github/workflows/materialize-logo-assets.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Convert embedded branding to normal PNG files
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          import re
+
+          js = Path('assets/back-navigation.js').read_text(encoding='utf-8')
+          assets = {
+              'assets/talentx-logo-64.png': r"const LOGO_64='data:image/png;base64,([^']+)'",
+              'assets/talentx-favicon-32.png': r"const FAVICON_32='data:image/png;base64,([^']+)'",
+          }
+          for path, pattern in assets.items():
+              match = re.search(pattern, js)
+              if not match:
+                  raise SystemExit(f'Could not find embedded image for {path}')
+              Path(path).write_bytes(base64.b64decode(match.group(1)))
+
+          svg = Path('assets/talentx-logo.svg').read_text(encoding='utf-8')
+          match = re.search(r'data:image/png;base64,([^\"]+)', svg)
+          if match:
+              Path('assets/talentx-logo-128.png').write_bytes(base64.b64decode(match.group(1)))
+          PY
+
+      - name: Commit PNG assets
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/talentx-logo-64.png assets/talentx-favicon-32.png assets/talentx-logo-128.png
+          if git diff --cached --quiet; then
+            echo "Logo assets already materialized."
+          else
+            git commit -m "Materialize TalentX PNG logo assets"
+            git push
+          fi
