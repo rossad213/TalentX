@@ -24,7 +24,7 @@
   <link rel="stylesheet" href="./assets/sortable-market-table.css">
   <link rel="stylesheet" href="./assets/event-timeline.css?v=20260808-1">
   <link rel="stylesheet" href="./assets/event-chart-coverage.css?v=20260809-1">
-  <link rel="stylesheet" href="./assets/mobile-shell.css?v=20260811-4">
+  <link rel="stylesheet" href="./assets/mobile-shell.css?v=20260811-5">
   <style>
     .notice{display:none!important}
     .price-why-btn{border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:#eef7ff;border-radius:999px;padding:5px 11px;font:inherit;font-size:.78rem;font-weight:750;cursor:pointer;margin-left:8px;vertical-align:middle}.price-change-row{display:flex;align-items:center;justify-content:flex-end;gap:2px;flex-wrap:wrap}.why-overlay{position:fixed;inset:0;background:rgba(0,0,0,.58);z-index:9998;display:flex;align-items:center;justify-content:center;padding:20px}.why-sheet{width:min(430px,100%);background:#0c1823;border:1px solid rgba(255,255,255,.14);border-radius:20px;padding:22px;box-shadow:0 24px 80px rgba(0,0,0,.5);color:#eef7ff}.why-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}.why-head h2{font-size:1.15rem;margin:0}.why-close{border:0;background:transparent;color:#aab8c5;font-size:1.5rem;cursor:pointer}.why-title{font-size:1.08rem;font-weight:800;margin-bottom:10px}.why-points{margin:0;padding-left:21px;color:#c4d0da;line-height:1.6}.why-result{margin-top:16px;padding-top:14px;border-top:1px solid rgba(255,255,255,.1);font-weight:800}.why-up{color:#58ef78}.why-down{color:#ff7289}.why-updated{display:block;color:#8796a4;font-size:.78rem;font-weight:500;margin-top:7px}.why-details{margin-top:13px;border:0;background:transparent;color:#8abfff;font-weight:750;padding:0;cursor:pointer}.why-detail-box{display:none;margin-top:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,.05);color:#b9c6d1;font-size:.84rem;line-height:1.55}.why-detail-box.open{display:block}@media(max-width:700px){.why-overlay{align-items:flex-end;padding:0}.why-sheet{border-radius:22px 22px 0 0;padding:22px 20px calc(22px + env(safe-area-inset-bottom));max-height:78vh;overflow:auto}.profile-price .price-change-row{justify-content:flex-start}}
@@ -55,6 +55,19 @@
     <div id="app" class="content"><div class="loading">Loading TalentX…</div></div>
   </main>
 </div>
+<nav class="mobile-bottom-nav" aria-label="TalentX mobile navigation">
+  <button type="button" data-route="dashboard" onclick="go('dashboard')"><span class="mobile-nav-icon">⌂</span><span>Home</span></button>
+  <button type="button" data-route="market" onclick="go('market')"><span class="mobile-nav-icon">⌁</span><span>Market</span></button>
+  <button type="button" data-route="portfolio" onclick="go('portfolio')"><span class="mobile-nav-icon">▣</span><span>Portfolio</span></button>
+  <button type="button" data-route="watchlist" onclick="go('watchlist')"><span class="mobile-nav-icon">☆</span><span>Watchlist</span></button>
+  <details class="mobile-more">
+    <summary><span class="mobile-nav-icon">•••</span><span>More</span></summary>
+    <div class="mobile-more-menu">
+      <button type="button" data-route="leaderboard" onclick="this.closest('details').removeAttribute('open');go('leaderboard')">♕ <span>Leaderboard</span></button>
+      <button type="button" data-route="rules" onclick="this.closest('details').removeAttribute('open');go('rules')">◎ <span>Data &amp; Rules</span></button>
+    </div>
+  </details>
+</nav>
 <div id="toast" class="toast"></div>
 <script>
 (() => {
