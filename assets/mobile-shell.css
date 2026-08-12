@@ -39,13 +39,47 @@
   .pills::-webkit-scrollbar{display:none}
   .pill{flex:0 0 auto;min-height:42px;padding-left:14px;padding-right:14px}
   .select{max-width:100%;min-height:44px;font-size:14px}
+  .controls .spacer{display:none}
 
-  /* Preserve the proven table behavior for now. */
-  .table-card{overflow:hidden}
-  .table-wrap{display:block!important;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .market-table{min-width:900px}
-  .pagination{gap:8px;padding:12px}
-  .pagination button{min-height:42px}
+  /* Mobile market cards: reuse the existing table rows, no duplicate rendering. */
+  .table-card{overflow:visible;background:transparent;border:0;box-shadow:none}
+  .table-wrap{display:block!important;overflow:visible}
+  .market-table{display:block;width:100%;min-width:0;border:0;background:transparent}
+  .market-table thead{display:none}
+  .market-table tbody{display:grid;gap:11px;width:100%}
+  .market-table tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px 12px;width:100%;padding:15px;border:1px solid rgba(132,164,194,.17);border-radius:16px;background:#0a1724;box-shadow:0 8px 24px rgba(0,0,0,.16);cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .market-table tr:active{transform:scale(.995);background:#0d1b29}
+  .market-table td{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;padding:0!important;border:0!important;text-align:right;font-size:12px}
+  .market-table td::before{color:#7f91a3;font-size:9px;font-weight:850;letter-spacing:.045em;text-transform:uppercase;text-align:left;white-space:nowrap}
+
+  .market-table td:nth-child(1){grid-column:1/-1;display:block;text-align:left;padding-bottom:11px!important;border-bottom:1px solid rgba(132,164,194,.13)!important}
+  .market-table td:nth-child(1)::before{display:none}
+  .market-table .name-cell{display:flex;align-items:center;gap:11px;min-width:0}
+  .market-table .small-avatar{flex:0 0 auto;width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center}
+  .market-table .name-cell>div:last-child{min-width:0}
+  .market-table .name-cell b{display:block;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .market-table .name-cell small{display:block;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#8fa0b0}
+
+  .market-table td:nth-child(2)::before{content:'Category'}
+  .market-table td:nth-child(3)::before{content:'Field'}
+  .market-table td:nth-child(4)::before{content:'League / medium'}
+  .market-table td:nth-child(5)::before{content:'Career stage'}
+  .market-table td:nth-child(6)::before{content:'Market'}
+  .market-table td:nth-child(7)::before{content:'Price'}
+  .market-table td:nth-child(8)::before{content:'Move'}
+  .market-table td:nth-child(9)::before{content:'Score'}
+  .market-table td:nth-child(10)::before{content:'Confidence'}
+
+  .market-table td:nth-child(3),.market-table td:nth-child(4),.market-table td:nth-child(5),.market-table td:nth-child(6){grid-column:1/-1}
+  .market-table td:nth-child(7),.market-table td:nth-child(8){padding-top:4px!important;font-size:15px;font-weight:850}
+  .market-table td:nth-child(7)::before,.market-table td:nth-child(8)::before{font-size:9px}
+  .market-table .stage-badge,.market-table .segment-badge{max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .market-table td[colspan]{grid-column:1/-1!important;display:block!important;text-align:center!important;padding:18px!important}
+  .market-table td[colspan]::before{display:none}
+
+  .pagination{display:flex;flex-direction:column;align-items:stretch;gap:10px;padding:13px 2px 2px}
+  .pagination button{min-height:44px;padding:9px 13px}
+  .pagination-controls{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px}
 
   .profile-card{padding:17px}
   .profile-head{flex-direction:column;gap:14px}
@@ -87,4 +121,7 @@
   .mobile-bottom-nav{min-height:84px;padding-left:5px;padding-right:5px}
   .mobile-bottom-nav>button,.mobile-bottom-nav>details>summary{font-size:10px;min-height:70px}
   .mobile-bottom-nav .mobile-nav-icon{font-size:26px}
+  .market-table tr{grid-template-columns:1fr}
+  .market-table td:nth-child(n){grid-column:1/-1}
+  .market-table td:nth-child(7),.market-table td:nth-child(8){font-size:14px}
 }
