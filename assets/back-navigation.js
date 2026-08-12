@@ -108,3 +108,17 @@
 
   updateBackButton();
 })();
+
+/* PWA rollback cleanup. Keep the stable lightweight web app, remove workers/caches. */
+(function(){
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.getRegistrations()
+      .then(registrations=>Promise.all(registrations.map(registration=>registration.unregister())))
+      .catch(()=>{});
+  }
+  if('caches' in window){
+    caches.keys()
+      .then(keys=>Promise.all(keys.filter(key=>key.startsWith('talentx-shell-')).map(key=>caches.delete(key))))
+      .catch(()=>{});
+  }
+})();
