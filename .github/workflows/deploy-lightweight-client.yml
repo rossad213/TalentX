@@ -43,6 +43,8 @@ jobs:
         run: |
           python -m py_compile scripts/build_client_catalog.py
           node --check assets/catalog-profile-loader.js
+          node --check assets/back-navigation.js
+          node --check sw.js
           python scripts/build_client_catalog.py \
             --catalog data/current_catalog.json \
             --index data/catalog_index.json \
@@ -55,7 +57,7 @@ jobs:
         run: |
           rm -rf _site
           mkdir -p _site
-          cp index.html site.webmanifest app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
+          cp index.html site.webmanifest sw.js app.js chart-history.js discovery-profile.js styles.css discovery-profile.css .nojekyll _site/
           cp -R data _site/data
           cp -R assets _site/assets
 
