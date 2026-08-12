@@ -13,6 +13,8 @@ import argparse
 import csv
 import hashlib
 import json
+import re
+import unicodedata
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,6 +160,108 @@ def _ticker_key(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+def _identity_name(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _verified_current_athlete(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("primaryCategory") or "") == "Athlete"
+        and str(record.get("marketSegment") or "") == "Current"
+        and str(record.get("sourceNamespace") or "").lower() in {"espn", "nhl"}
+    )
+
+
+def _athlete_identity_score(record: dict[str, Any]) -> tuple[float, float, float]:
+    return (
+        float(record.get("dataConfidence") or 0),
+        float(record.get("pricingConfidence") or 0),
+        float(record.get("careerScore") or 0),
+    )
+
+
+def resolve_cross_category_identities(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Merge conservative cross-category duplicates into a verified athlete.
+
+    Exact-name matches alone are not enough to prove identity. Automatic merging
+    is therefore limited to groups containing a source-verified current athlete
+    (ESPN/NHL) plus one or more non-athlete records with the same normalized name.
+    The athlete remains the primary TalentX listing; the removed records become
+    secondary career activity on that listing so their context remains searchable.
+    """
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        key = _identity_name(record.get("name"))
+        if key:
+            groups.setdefault(key, []).append(record)
+
+    suppressed_ids: set[str] = set()
+    repairs: list[dict[str, Any]] = []
+
+    for key, group in groups.items():
+        categories = {str(record.get("primaryCategory") or "") for record in group}
+        if len(categories) < 2:
+            continue
+        verified_athletes = [record for record in group if _verified_current_athlete(record)]
+        if not verified_athletes:
+            continue
+
+        winner = max(verified_athletes, key=_athlete_identity_score)
+        secondary = [
+            record for record in group
+            if record is not winner and str(record.get("primaryCategory") or "") != "Athlete"
+        ]
+        if not secondary:
+            continue
+
+        activities = list(winner.get("secondaryCareerActivities") or [])
+        existing_activity_ids = {str(item.get("sourceRecordId") or item.get("id") or "") for item in activities if isinstance(item, dict)}
+        secondary_categories = set(str(item) for item in (winner.get("secondaryCategories") or []) if item)
+        search_terms = [str(winner.get("searchText") or "")]
+
+        for record in secondary:
+            record_id = str(record.get("id") or "")
+            activity_key = str(record.get("sourceRecordId") or record_id)
+            activity = {
+                "id": record_id,
+                "sourceRecordId": str(record.get("sourceRecordId") or ""),
+                "category": str(record.get("primaryCategory") or ""),
+                "discipline": str(record.get("discipline") or ""),
+                "leagueOrMedium": str(record.get("leagueOrMedium") or ""),
+                "teamOrPlatform": str(record.get("teamOrPlatform") or ""),
+                "role": str(record.get("role") or ""),
+                "sourceName": str(record.get("sourceName") or ""),
+                "sourceUrl": str(record.get("sourceUrl") or ""),
+            }
+            if activity_key not in existing_activity_ids:
+                activities.append(activity)
+                existing_activity_ids.add(activity_key)
+            secondary_categories.add(activity["category"])
+            search_terms.extend([
+                str(record.get("name") or ""), activity["category"], activity["discipline"],
+                activity["leagueOrMedium"], activity["teamOrPlatform"], activity["role"],
+            ])
+            if record_id:
+                suppressed_ids.add(record_id)
+            repairs.append({
+                "identityKey": key,
+                "name": str(winner.get("name") or ""),
+                "primaryId": str(winner.get("id") or ""),
+                "primaryCategory": "Athlete",
+                "suppressedId": record_id,
+                "suppressedCategory": activity["category"],
+            })
+
+        winner["secondaryCareerActivities"] = activities
+        winner["secondaryCategories"] = sorted(category for category in secondary_categories if category)
+        winner["identityResolutionStatus"] = "Verified athlete is primary; secondary cross-category listings merged"
+        winner["searchText"] = " ".join(term for term in search_terms if term).lower()
+
+    resolved = [record for record in records if str(record.get("id") or "") not in suppressed_ids]
+    return resolved, repairs
+
+
 def _replacement_ticker(record: dict[str, Any], original: str, used: set[str]) -> str:
     stem = "".join(character for character in original.upper() if character.isalnum()) or "TX"
     category_code = TICKER_CATEGORY_CODES.get(str(record.get("primaryCategory") or ""), "X")
@@ -201,7 +305,12 @@ def dedupe_tickers(records: list[dict[str, Any]]) -> list[dict[str, str]]:
     return repairs
 
 
-def refresh_manifest(records: list[dict[str, Any]], path: Path, ticker_repairs: int = 0) -> dict[str, Any]:
+def refresh_manifest(
+    records: list[dict[str, Any]],
+    path: Path,
+    ticker_repairs: int = 0,
+    identity_repairs: int = 0,
+) -> dict[str, Any]:
     manifest: dict[str, Any] = {}
     if path.exists():
         try:
@@ -232,6 +341,7 @@ def refresh_manifest(records: list[dict[str, Any]], path: Path, ticker_repairs: 
         "statusDataMode": "Unified from latest healthy category market states",
         "unifiedMarketFinalizedAt": now.isoformat().replace("+00:00", "Z"),
         "tickerCollisionRepairs": int(ticker_repairs),
+        "crossCategoryIdentityRepairs": int(identity_repairs),
     })
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -240,10 +350,16 @@ def refresh_manifest(records: list[dict[str, Any]], path: Path, ticker_repairs: 
 
 def finalize_catalog(catalog: Path, csv_path: Path, manifest_path: Path) -> tuple[int, int]:
     records = load_records(catalog)
+    records, identity_repairs = resolve_cross_category_identities(records)
     repairs = dedupe_tickers(records)
     write_records(catalog, records)
     write_csv(records, csv_path)
-    refresh_manifest(records, manifest_path, ticker_repairs=len(repairs))
+    refresh_manifest(
+        records,
+        manifest_path,
+        ticker_repairs=len(repairs),
+        identity_repairs=len(identity_repairs),
+    )
     return len(records), len(repairs)
 
 
