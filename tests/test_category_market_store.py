@@ -9,6 +9,7 @@ from scripts.category_market_store import (
     finalize_catalog,
     merge_category,
     primary_category,
+    resolve_cross_category_identities,
 )
 
 
@@ -25,6 +26,7 @@ class CategoryMarketStoreTests(unittest.TestCase):
                 "fundamentalValue": 95.0,
                 "description": "fresh athlete metadata",
                 "sourceNamespace": "espn",
+                "marketSegment": "Current",
             },
             {
                 "id": "m1",
@@ -115,6 +117,58 @@ class CategoryMarketStoreTests(unittest.TestCase):
         dedupe_tickers(rerun)
         self.assertEqual(rerun[1]["ticker"], replacement)
 
+    def test_verified_athlete_wins_cross_category_identity(self):
+        records = [
+            {
+                "id": "nba-lebron",
+                "name": "LeBron James",
+                "ticker": "LEBJ",
+                "primaryCategory": "Athlete",
+                "discipline": "Basketball",
+                "leagueOrMedium": "NBA",
+                "teamOrPlatform": "Los Angeles Lakers",
+                "role": "Forward",
+                "marketSegment": "Current",
+                "sourceNamespace": "espn",
+                "dataConfidence": 0.95,
+                "pricingConfidence": 0.90,
+                "careerScore": 93.0,
+                "searchText": "lebron james athlete basketball nba los angeles lakers forward",
+            },
+            {
+                "id": "actor-lebron",
+                "name": "LeBron James",
+                "ticker": "LEBA",
+                "primaryCategory": "Actor",
+                "discipline": "Television",
+                "leagueOrMedium": "Film & Television",
+                "teamOrPlatform": "Screen",
+                "role": "Actor",
+                "marketSegment": "Current",
+                "sourceName": "Curated screen roster",
+                "sourceUrl": "https://example.test/lebron-screen",
+            },
+        ]
+
+        resolved, repairs = resolve_cross_category_identities(records)
+        self.assertEqual(len(resolved), 1)
+        self.assertEqual(len(repairs), 1)
+        winner = resolved[0]
+        self.assertEqual(winner["id"], "nba-lebron")
+        self.assertEqual(winner["primaryCategory"], "Athlete")
+        self.assertEqual(winner["secondaryCategories"], ["Actor"])
+        self.assertEqual(winner["secondaryCareerActivities"][0]["discipline"], "Television")
+        self.assertIn("film & television", winner["searchText"])
+
+    def test_same_name_without_verified_athlete_is_not_auto_merged(self):
+        records = [
+            {"id": "music-sam", "name": "Sam Lee", "primaryCategory": "Music"},
+            {"id": "actor-sam", "name": "Sam Lee", "primaryCategory": "Actor"},
+        ]
+        resolved, repairs = resolve_cross_category_identities(records)
+        self.assertEqual(len(resolved), 2)
+        self.assertEqual(repairs, [])
+
     def test_finalize_refreshes_csv_manifest_and_tickers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -135,6 +189,7 @@ class CategoryMarketStoreTests(unittest.TestCase):
             self.assertEqual(updated_manifest["currentCatalogRecords"], 3)
             self.assertEqual(updated_manifest["totalRecords"], 3)
             self.assertEqual(updated_manifest["tickerCollisionRepairs"], 1)
+            self.assertEqual(updated_manifest["crossCategoryIdentityRepairs"], 0)
             self.assertEqual(updated_manifest["categories"]["Music"], 1)
             self.assertEqual(updated_manifest["automatedRosterVerifiedRecords"], 1)
             self.assertTrue(csv_path.exists())
