@@ -1,33 +1,37 @@
 /* TalentX search + discovery layer. Uses the existing in-memory compact catalog. */
 .global-search{position:relative}
-.talentx-search-panel{position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:120;display:none;overflow:hidden;border:1px solid rgba(132,164,194,.18);border-radius:16px;background:#0a1724;box-shadow:0 18px 50px rgba(0,0,0,.46)}
+.talentx-search-panel{position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:120;display:none;overflow:hidden;border:1px solid rgba(132,164,194,.18);border-radius:16px;background:#0a1724;box-shadow:0 18px 50px rgba(0,0,0,.46);max-height:430px}
 .talentx-search-panel.open{display:block}
+/* styles.css positions every .global-search span absolutely for the search icon. Reset all spans inside this panel. */
+.global-search .talentx-search-panel span{position:static;left:auto;top:auto;font-size:inherit;color:inherit}
 .search-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 13px 8px}
 .search-panel-head strong{font-size:11px;letter-spacing:.055em;text-transform:uppercase;color:#91a1b1}
 .search-panel-clear{border:0;background:transparent;color:#8abfff;font:inherit;font-size:11px;font-weight:800;cursor:pointer}
-.search-suggestions{display:grid;padding:0 7px 7px}
-.search-suggestion{display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:58px;padding:8px;border:0;border-radius:12px;background:transparent;color:var(--text);text-align:left;font:inherit;cursor:pointer}
+.search-suggestions{display:grid;grid-auto-rows:minmax(58px,auto);gap:2px;padding:0 7px 7px;overflow:auto;max-height:365px}
+.search-suggestion{position:relative;display:grid;grid-template-columns:42px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;min-height:58px;padding:8px;border:0;border-radius:12px;background:transparent;color:var(--text);text-align:left;font:inherit;cursor:pointer}
 .search-suggestion:hover,.search-suggestion:focus-visible{background:rgba(255,255,255,.055);outline:none}
 .search-suggestion:active{background:rgba(88,239,120,.08)}
-.search-suggestion-avatar{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;background:rgba(88,239,120,.1);font-size:12px;font-weight:900;color:var(--green)}
-.search-suggestion-copy{min-width:0}
-.search-suggestion-copy strong,.search-suggestion-copy span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.search-suggestion-avatar{width:40px;height:40px;border-radius:12px;display:flex!important;align-items:center;justify-content:center;background:rgba(88,239,120,.1);font-size:12px!important;font-weight:900;color:var(--green)!important}
+.search-suggestion-copy{display:block!important;min-width:0}
+.search-suggestion-copy strong,.search-suggestion-copy>span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .search-suggestion-copy strong{font-size:13px}
-.search-suggestion-copy span{margin-top:3px;font-size:10px;color:#8fa0b0}
-.search-suggestion-price{text-align:right}
-.search-suggestion-price strong,.search-suggestion-price span{display:block}
+.search-suggestion-copy>span{margin-top:3px;font-size:10px!important;color:#8fa0b0!important}
+.search-suggestion-copy .ticker{display:inline-block!important;position:static!important;margin-left:5px;font-size:9px!important}
+.search-suggestion-price{display:block!important;text-align:right;min-width:72px}
+.search-suggestion-price strong,.search-suggestion-price>span{display:block}
 .search-suggestion-price strong{font-size:12px}
-.search-suggestion-price span{margin-top:3px;font-size:10px;font-weight:800}
+.search-suggestion-price>span{margin-top:3px;font-size:10px!important;font-weight:800}
 .search-recents{display:flex;flex-wrap:wrap;gap:7px;padding:0 12px 12px}
 .search-recent{min-height:34px;border:1px solid rgba(132,164,194,.16);border-radius:999px;background:rgba(255,255,255,.035);color:#c3cfda;padding:7px 11px;font:inherit;font-size:11px;font-weight:750;cursor:pointer}
 .search-empty{padding:14px;color:#91a1b1;font-size:12px;line-height:1.45}
 
 @media(max-width:820px){
   .talentx-search-panel{position:fixed;left:10px;right:10px;top:68px;max-height:min(62vh,520px);overflow:auto;border-radius:18px}
+  .search-suggestions{max-height:none}
   .search-suggestion{grid-template-columns:46px minmax(0,1fr) auto;min-height:64px;padding:9px}
   .search-suggestion-avatar{width:44px;height:44px;border-radius:13px}
   .search-suggestion-copy strong{font-size:14px}
-  .search-suggestion-copy span{font-size:11px}
+  .search-suggestion-copy>span{font-size:11px!important}
   .search-suggestion-price strong{font-size:13px}
   .search-recents{padding-bottom:14px}
 }
