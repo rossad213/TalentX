@@ -1,10 +1,12 @@
+import sys
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 
-from scripts.repair_non_athlete_award_timeline import (
-    extract_statement_events,
-    repair_record,
-)
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from repair_non_athlete_award_timeline import extract_statement_events, repair_record
 
 
 class AwardTimelineRepairTests(unittest.TestCase):
