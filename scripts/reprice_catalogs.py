@@ -2,9 +2,9 @@
 """Apply the same audited pricing model to every TalentX catalog file.
 
 Established-athlete fundamentals use the last successful verified catalog as a
-continuity anchor.  Short fresh samples may move current performance, but they
-must not erase years of career evidence in a single baseline refresh.  Event
-pricing remains separate and can still react immediately to dated events.
+strong continuity anchor. Short fresh samples may move current performance, but
+they must not erase years of career evidence in a single baseline refresh.
+Event pricing remains separate and can still react immediately to dated events.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ DATA = ROOT / "data"
 OVERRIDES = DATA / "pricing_overrides.json"
 CURRENT_SEED = DATA / "current_seed.json"
 PRIOR_CURRENT = DATA / "prior_current_catalog.json"
+ESTABLISHED_PRIOR_WEIGHT = 0.85
 
 
 def read_array(path: Path) -> list[dict[str, Any]]:
@@ -54,10 +55,9 @@ def write_current_csv(records: list[dict[str, Any]]) -> None:
 
 def _number(value: Any) -> float | None:
     try:
-        parsed = float(value)
+        return float(value)
     except (TypeError, ValueError):
         return None
-    return parsed
 
 
 def _identity_key(record: dict[str, Any]) -> tuple[str, ...]:
@@ -76,12 +76,12 @@ def _identity_key(record: dict[str, Any]) -> tuple[str, ...]:
 def stabilize_athlete_fundamentals(
     records: list[dict[str, Any]], prior_records: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], int]:
-    """Blend established-athlete fundamentals with the last good baseline.
+    """Strongly anchor established-athlete durable metrics to the last good build.
 
-    The baseline price itself is never copied.  Only durable input metrics are
-    stabilized before the pricing model runs.  That keeps normal repricing and
-    dated event impacts intact while preventing tiny/new-season stat samples or
-    partial source responses from replacing a player's established career signal.
+    The current build still contributes 15% of performance, consistency and
+    audience inputs. Achievements are cumulative and cannot fall below 98% of
+    their previously verified value in a routine refresh. Rookie IPOs are not
+    anchored. Fallback-retained rows use the prior verified inputs entirely.
     """
     if not prior_records:
         return records, 0
@@ -92,8 +92,8 @@ def stabilize_athlete_fundamentals(
         if record.get("primaryCategory") == "Athlete"
         and isinstance(record.get("activeMetrics"), dict)
     }
-    stabilized = 0
     output: list[dict[str, Any]] = []
+    stabilized = 0
 
     for source_record in records:
         record = dict(source_record)
@@ -111,8 +111,6 @@ def stabilize_athlete_fundamentals(
             output.append(record)
             continue
 
-        # Rookie IPOs and true first-year players should be allowed to establish
-        # a new market baseline rather than inherit an older career anchor.
         status = str(record.get("pricingDataStatus") or "")
         experience = _number(record.get("experienceYears"))
         professional_games = _number(record.get("professionalGames"))
@@ -120,11 +118,8 @@ def stabilize_athlete_fundamentals(
             output.append(record)
             continue
 
-        # A fallback-retained row has no new roster verification, so its prior
-        # verified fundamentals are the correct baseline.  Fresh established
-        # rows receive a 45% continuity anchor; the majority remains fresh data.
-        prior_weight = 1.0 if record.get("fallbackRetained") else 0.45
-        current_weight = 1.0 - prior_weight
+        prior_weight = 1.0 if record.get("fallbackRetained") else ESTABLISHED_PRIOR_WEIGHT
+        fresh_weight = 1.0 - prior_weight
         blended = dict(current_metrics)
 
         for field in ("performance", "achievements", "consistency", "audience"):
@@ -132,27 +127,31 @@ def stabilize_athlete_fundamentals(
             prior_value = _number(prior_metrics.get(field))
             if current_value is None or prior_value is None:
                 continue
-            value = current_value * current_weight + prior_value * prior_weight
-            # Achievements are cumulative career evidence.  A routine refresh
-            # may add achievements, but a partial source response must not erase
-            # them.  Large downward corrections should be handled explicitly.
+            value = current_value * fresh_weight + prior_value * prior_weight
             if field == "achievements" and not record.get("fallbackRetained"):
-                value = max(value, prior_value * 0.95)
+                value = max(value, prior_value * 0.98)
             blended[field] = round(max(0.0, min(100.0, value)), 1)
 
-        if record.get("fallbackRetained"):
-            # Potential and availability also stay on the prior evidence for a
-            # retained row; no live source was available to justify changing them.
-            for field in ("potential", "availability"):
-                if _number(prior_metrics.get(field)) is not None:
-                    blended[field] = prior_metrics[field]
+        # Potential is deliberately slower-moving for established players and
+        # availability is not changed by this continuity layer unless the row
+        # itself was restored from fallback data.
+        current_potential = _number(current_metrics.get("potential"))
+        prior_potential = _number(prior_metrics.get("potential"))
+        if current_potential is not None and prior_potential is not None:
+            potential_prior_weight = 1.0 if record.get("fallbackRetained") else 0.70
+            blended["potential"] = round(
+                max(0.0, min(100.0, current_potential * (1.0 - potential_prior_weight) + prior_potential * potential_prior_weight)),
+                1,
+            )
+        if record.get("fallbackRetained") and _number(prior_metrics.get("availability")) is not None:
+            blended["availability"] = prior_metrics["availability"]
 
         record["activeMetrics"] = blended
         record["fundamentalContinuity"] = {
             "source": "last_successful_verified_baseline",
             "priorWeight": prior_weight,
-            "freshWeight": current_weight,
-            "rule": "durable career fundamentals stabilized; dated event pricing remains independent",
+            "freshWeight": fresh_weight,
+            "rule": "established athlete fundamentals are continuity anchored; dated event pricing remains independent",
         }
         stabilized += 1
         output.append(record)
@@ -201,7 +200,7 @@ def main() -> int:
         "fundamentalContinuity": {
             "enabled": bool(prior_current),
             "priorBaselineFile": "data/prior_current_catalog.json" if prior_current else None,
-            "establishedAthletePriorWeight": 0.45,
+            "establishedAthletePriorWeight": ESTABLISHED_PRIOR_WEIGHT,
             "fallbackRetainedPriorWeight": 1.0,
             "currentCatalogRecordsStabilized": stabilized_counts.get("current_catalog.json", 0),
             "calibrationRecordsStabilized": calibration_stabilized,
