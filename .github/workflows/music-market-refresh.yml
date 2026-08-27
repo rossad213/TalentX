@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/music-market-refresh.yml"
       - "scripts/non_athlete_event_refresh.py"
+      - "scripts/repair_non_athlete_award_timeline.py"
       - "scripts/music_release_coverage_sweep.py"
       - "scripts/non_athlete_outcome_refresh.py"
       - "scripts/repair_non_athlete_outcome_manifest.py"
@@ -17,6 +18,7 @@ on:
       - "scripts/category_market_store.py"
       - "data/verified_non_athlete_events.json"
       - "tests/test_non_athlete_event_refresh.py"
+      - "tests/test_repair_non_athlete_award_timeline.py"
       - "tests/test_non_athlete_outcome_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
@@ -86,6 +88,7 @@ jobs:
         run: >-
           python -m unittest
           tests/test_non_athlete_event_refresh.py
+          tests/test_repair_non_athlete_award_timeline.py
           tests/test_non_athlete_outcome_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
@@ -103,6 +106,12 @@ jobs:
           --max-music-confirmations 0
           --max-events 1200
           --max-events-per-record 12
+          --allow-source-errors
+      - name: Repair Music award timelines to real event dates
+        run: >-
+          python scripts/repair_non_athlete_award_timeline.py
+          --catalog data/current_catalog.json
+          --request-timeout 18
           --allow-source-errors
       - name: Sweep unchecked Music releases for two-source verification
         run: >-
