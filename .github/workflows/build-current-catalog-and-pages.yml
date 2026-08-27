@@ -55,6 +55,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -141,8 +142,40 @@ jobs:
           --minimum-sitelinks 2
           --request-timeout 45
           --allow-shortfall
-      - name: Build 10,000-name current roster expansion
-        run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18
+      - name: Restore last successful verified athlete baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _prior_baseline
+          mkdir -p _prior_baseline
+          prior_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+          prior_id="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].id // empty')"
+          if [ -n "$prior_id" ]; then
+            echo "Restoring verified athlete fallback from successful baseline run $prior_id"
+            gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _prior_baseline || true
+            prior_catalog="$(find _prior_baseline -name current_catalog.json -print -quit)"
+            if [ -n "$prior_catalog" ]; then
+              cp "$prior_catalog" data/prior_current_catalog.json
+              echo "Prior verified baseline is available for outage recovery."
+            else
+              echo "Prior baseline artifact did not contain current_catalog.json; live build must meet target on its own."
+            fi
+          else
+            echo "No prior successful baseline found; live build must meet target on its own."
+          fi
+      - name: Build current roster expansion from live sources
+        run: python scripts/build_current_catalog.py --target-additions 10000 --workers 18 --allow-shortfall
+      - name: Recover missing rosters from prior verified baseline
+        run: >-
+          python scripts/top_up_prior_verified_athletes.py
+          --catalog data/current_catalog.json
+          --fallback data/prior_current_catalog.json
+          --seed data/current_seed.json
+          --target-additional-athletes 10000
+          --csv data/current_catalog.csv
+          --manifest data/catalog_manifest.json
+          --source-manifest data/current_source_manifest.json
       - name: Add priority soccer players from verified rosters
         run: python scripts/add_priority_soccer.py
       - name: Enrich source-specific career statistics and awards
