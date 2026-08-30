@@ -22,6 +22,14 @@ class PricingEngineV2Tests(unittest.TestCase):
               "demandPremiumPct":0,"lastGameMovePct":0,"marketPrice":150,"fundamentalValue":145,
               "trend":[140,150],"careerStatus":"Active"}
         base.update(updates);return base
+    def rookie_record(self, league='NFL', score=94, influence=100, **updates):
+        base=self.record(
+            id=f'rookie-{league.lower()}',leagueOrMedium=league,careerStage='Rookie',professionalGames=0,
+            pricingConfidence=.78,careerScore=55,marketPrice=45,fundamentalValue=44,
+            activeMetrics={"performance":45,"achievements":18,"consistency":38,"potential":94,"availability":82,"audience":70},
+            rookiePricing={"draftSport":league,"rookieScore":score,"draftInfluencePct":influence,
+                           "overallPick":1,"professionalEvidencePct":100-influence})
+        base.update(updates);return base
     def test_adds_v2_fields(self):
         r=apply_v2(self.record())
         for key in ('talentScore','marketScore','confidenceScore','situationScore','expectedValueScore','fairValue'):
@@ -33,6 +41,22 @@ class PricingEngineV2Tests(unittest.TestCase):
             activeMetrics={"performance":88,"achievements":25,"consistency":55,"potential":98,"availability":90,"audience":82}))
         self.assertLess(rookie['confidenceScore'],veteran['confidenceScore'])
         self.assertLess(rookie['fairValue'],veteran['fairValue'])
+    def test_top_nfl_rookie_keeps_meaningful_ipo_anchor(self):
+        rookie=apply_v2(self.rookie_record('NFL',score=94,influence=100))
+        self.assertGreater(rookie['fairValue'],110)
+        self.assertAlmostEqual(rookie['fairValue'],rookie['pricingV2']['rookieIpoAnchor'],places=2)
+        self.assertGreater(rookie['fairValue'],rookie['pricingV2']['genericFairValue'])
+    def test_top_nba_rookie_has_higher_ceiling_than_nfl(self):
+        nfl=apply_v2(self.rookie_record('NFL',score=94,influence=100))
+        nba=apply_v2(self.rookie_record('NBA',score=94,influence=100))
+        self.assertGreater(nba['fairValue'],nfl['fairValue'])
+        self.assertGreater(nba['fairValue'],125)
+    def test_rookie_anchor_fades_into_professional_model(self):
+        opening=apply_v2(self.rookie_record('NFL',score=94,influence=100))
+        transition=apply_v2(self.rookie_record('NFL',score=94,influence=50,professionalGames=10))
+        self.assertLess(transition['fairValue'],opening['fairValue'])
+        expected=(transition['pricingV2']['rookieIpoAnchor']+transition['pricingV2']['genericFairValue'])/2
+        self.assertAlmostEqual(transition['fairValue'],expected,places=2)
     def test_single_game_cannot_create_twenty_percent_base_reprice(self):
         neutral=apply_v2(self.record(lastGameMovePct=0))
         great=apply_v2(self.record(lastGameMovePct=2.5))
