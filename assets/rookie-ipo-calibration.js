@@ -1,4 +1,4 @@
-/* Keep the visible TalentX Rookie IPO calculator on the same scale as pricing engine v2. */
+/* Keep the visible TalentX Rookie IPO calculator and profile display on the same scale as pricing engine v2. */
 (() => {
   const ceilings = {NFL:135, NBA:155, WNBA:95, NHL:120, MLB:95};
 
@@ -27,5 +27,12 @@
     const contributions={base};
     weighted.forEach(([key,value])=>contributions[key]=variable*(value/totalWeighted));
     return {sport:values.sport,position,pick,round,factors,score,price,low:Math.max(1,price*(1-uncertainty)),high:price*(1+uncertainty),contributions};
+  };
+
+  rookieProfilePricing = function(r){
+    const p=r.rookiePricing||{};
+    const rows={draftCapital:p.draftCapitalScore,preProPerformance:p.preProPerformanceScore,opportunity:p.opportunityScore,positionValue:p.positionValueScore,development:p.developmentScore,availability:p.availabilityScore,audience:p.audienceScore};
+    const opening=p.calibratedIpoPrice ?? p.ipoPrice ?? r.fundamentalValue;
+    return `<div class="source-box"><small>Rookie IPO</small><strong>${p.draftSport||r.leagueOrMedium} · Pick ${p.overallPick||'—'} · ${p.position||r.role}</strong><small>Calibrated opening price ${money(opening)}. Draft capital is strongest at listing and fades as verified professional performance data accumulates.</small></div>${metricGrid(Object.fromEntries(Object.entries(rows).filter(([,v])=>v!==undefined)))}`;
   };
 })();
