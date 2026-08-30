@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""TalentX pricing engine v2: talent, market, confidence, and situation.
+"""TalentX pricing engine v2: talent, market, confidence, situation, and rookie IPO continuity.
 
 This module runs after the existing evidence-enrichment model. It preserves the
 v1 fields for rollback/comparison, adds v2 scores, and reprices deterministically.
+Drafted rookies retain a league-calibrated IPO anchor that fades only as verified
+professional evidence accumulates instead of being erased by a generic confidence
+discount immediately after the draft.
 """
 from __future__ import annotations
 
@@ -13,7 +16,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-MODEL_VERSION = "5.2-curated-evidence-calibration"
+MODEL_VERSION = "5.3-rookie-ipo-calibration"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -24,6 +27,19 @@ CATEGORY_METRICS = {
 
 CURATED_NON_ATHLETE_CATEGORIES = {"Music", "Actor"}
 GENERIC_DISCOVERY_CONFIDENCE_CAP = 76.0
+
+# Rookie IPOs need to live on the same economic scale as established TalentX
+# listings. These are ceilings, not guaranteed prices: the saved rookie score
+# determines where a prospect lands below the ceiling. NBA receives the highest
+# ceiling because top picks can become high-usage professionals immediately;
+# MLB is discounted for the longer typical development runway.
+ROOKIE_IPO_CEILINGS = {
+    "NFL": 135.0,
+    "NBA": 155.0,
+    "WNBA": 95.0,
+    "NHL": 120.0,
+    "MLB": 95.0,
+}
 
 
 def num(value: Any, default: float = 0.0) -> float:
@@ -48,13 +64,7 @@ def is_curated_non_athlete(record: dict[str, Any]) -> bool:
 
 
 def curated_confidence_floor(record: dict[str, Any]) -> float:
-    """Return the reviewed-roster evidence floor for Music and Actor records.
-
-    Curated records already carry an editorial rank and category-specific metric
-    review. Missing work-period fields must not make that review count as zero
-    evidence. The floor is intentionally moderate and rank-sensitive; it does not
-    assign a price or guarantee that a higher-ranked record always wins.
-    """
+    """Return the reviewed-roster evidence floor for Music and Actor records."""
     explicit = num(record.get("curatedEvidenceFloor"))
     if explicit > 0:
         return clamp(explicit, 0, 90)
@@ -127,12 +137,7 @@ def market_score(record: dict[str, Any], talent: float) -> float:
 
 
 def situation_score(record: dict[str, Any]) -> float:
-    """Measure current opportunity/environment without changing underlying talent.
-
-    Verified event processors may set ``situationAdjustmentPct`` after a transfer,
-    role change, promotion, demotion, contract change, or similar event. In the
-    absence of a verified event, the score remains close to neutral.
-    """
+    """Measure current opportunity/environment without changing underlying talent."""
     score = 50.0
     adjustment = clamp(record.get("situationAdjustmentPct", 0), -20, 20)
     score += adjustment * 1.5
@@ -164,13 +169,47 @@ def fair_value(talent: float, market: float, confidence: float, situation: float
     return round(blended, 2), round(max(4.0, min(350.0, value)), 2)
 
 
+def rookie_ipo_value(record: dict[str, Any]) -> tuple[float | None, float]:
+    """Return a calibrated rookie IPO anchor and its remaining draft influence.
+
+    v1 already stores the explainable rookie score and the percentage of the
+    valuation that should still be driven by draft/pre-pro evidence. v2 should
+    not discard that information simply because professional sample confidence
+    is intentionally low for a rookie.
+    """
+    pricing = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else None
+    if not pricing:
+        return None, 0.0
+    league = str(pricing.get("draftSport") or record.get("leagueOrMedium") or "")
+    ceiling = ROOKIE_IPO_CEILINGS.get(league)
+    score = num(pricing.get("rookieScore"), -1)
+    if ceiling is None or score < 0:
+        return None, 0.0
+    influence = clamp(pricing.get("draftInfluencePct", 0), 0, 100) / 100.0
+    # Same non-linear shape as the broader TalentX fundamental curve, with a
+    # league-specific rookie ceiling. A 90-score prospect reaches 81% of ceiling.
+    anchor = 4.0 + ceiling * (clamp(score) / 100.0) ** 2
+    return round(anchor, 2), influence
+
+
 def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     result = dict(record)
     talent = talent_score(result)
     confidence = evidence_confidence(result)
     market = market_score(result, talent)
     situation = situation_score(result)
-    expected, fair = fair_value(talent, market, confidence, situation)
+    expected, generic_fair = fair_value(talent, market, confidence, situation)
+
+    rookie_anchor, rookie_influence = rookie_ipo_value(result)
+    fair = generic_fair
+    if rookie_anchor is not None and rookie_influence > 0:
+        # At IPO the draft/pre-pro anchor is fully authoritative. As verified
+        # professional evidence accumulates, the generic v2 career value takes
+        # over smoothly according to the already-saved transition percentage.
+        fair = round(
+            rookie_anchor * rookie_influence + generic_fair * (1.0 - rookie_influence),
+            2,
+        )
 
     result.setdefault("pricingV1", {
         "marketPrice": result.get("marketPrice"),
@@ -194,8 +233,18 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         "confidenceScore": confidence,
         "situationScore": situation,
         "expectedValueScore": expected,
+        "genericFairValue": generic_fair,
+        "rookieIpoAnchor": rookie_anchor,
+        "rookieInfluence": round(rookie_influence, 4),
         "fairValue": fair,
     }
+    if isinstance(result.get("rookiePricing"), dict) and rookie_anchor is not None:
+        result["rookiePricing"] = {
+            **result["rookiePricing"],
+            "calibratedIpoPrice": rookie_anchor,
+            "v2GenericFairValue": generic_fair,
+            "v2BlendedFairValue": fair,
+        }
     trend = [num(x) for x in result.get("trend", []) if num(x) > 0]
     if trend:
         scale = fair / trend[-1] if trend[-1] else 1
@@ -233,8 +282,13 @@ def main() -> int:
         if count: totals[filename] = count
     manifest_path = args.data_dir / "catalog_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
-    manifest.update({"pricingModelVersion": MODEL_VERSION, "pricingEngine": "v2", "pricingV2CatalogsProcessed": totals,
-                     "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence. Curated Music and Actor reviews receive a moderate evidence floor; generic Wikidata-only discoveries are capped until profession-specific evidence is present."})
+    manifest.update({
+        "pricingModelVersion": MODEL_VERSION,
+        "pricingEngine": "v2",
+        "pricingV2CatalogsProcessed": totals,
+        "rookieIpoCeilings": ROOKIE_IPO_CEILINGS,
+        "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence. Drafted rookies retain a league-calibrated IPO anchor that fades only as verified professional evidence accumulates. Curated Music and Actor reviews receive a moderate evidence floor; generic Wikidata-only discoveries are capped until profession-specific evidence is present.",
+    })
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print("Applied pricing engine v2:", totals)
     return 0
