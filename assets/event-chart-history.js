@@ -1,6 +1,6 @@
-/* TalentX short-range event chart v2.
+/* TalentX short-range event chart v3.
  * 1D/5D charts are step charts built only from verified dated price-changing events.
- * No random, reconstructed, or generic hourly snapshot movement is introduced.
+ * No random, reconstructed, generic hourly snapshot, or unexplained catalog repricing movement is introduced.
  */
 (function(){
   if(typeof chartSeries!=='function') return;
@@ -83,7 +83,10 @@
         if(point.time<=time) value=point.value;
         else break;
       }
-      if(index===config.points-1) value=current;
+      // Deliberately do not force the final point to localPrice(record).
+      // A short-range event chart may move only when a verified dated event
+      // supplies that price. Catalog/baseline repricing must not appear as an
+      // unexplained intraday move.
       return {time,value:Number(value.toFixed(2))};
     });
   }
@@ -92,5 +95,5 @@
     if(range==='1D'||range==='5D') return eventStepSeries(record,range);
     return originalChartSeries(record,range);
   };
-  window.talentxShortRangeChartMode='verified-price-changing-events-v2';
+  window.talentxShortRangeChartMode='verified-price-changing-events-v3';
 })();
