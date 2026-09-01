@@ -50,17 +50,12 @@
     for(let index=events.length-1;index>=0;index--){
       const item=events[index];
       const move=asMove(item.event,item.before,item.after);
-      if(!Number.isFinite(move)||Math.abs(move)>.15*100) continue;
+      if(!Number.isFinite(move)||Math.abs(move)>15) continue;
       const denominator=1+(move/100);
       if(!Number.isFinite(denominator)||denominator<=0) continue;
       const before=after/denominator;
       if(!Number.isFinite(before)||before<=0) continue;
-      rebuilt.push({
-        time:item.time,
-        before,
-        after,
-        event:{...item.event,movePct:move,chartPriceRebased:true}
-      });
+      rebuilt.push({time:item.time,before,after,event:{...item.event,movePct:move,chartPriceRebased:true}});
       after=before;
     }
     rebuilt.reverse();
@@ -76,25 +71,17 @@
       const before=asPrice(event.priceBefore);
       const after=asPrice(event.priceAfter??event.price??event.marketPrice);
       const move=asMove(event,before,after);
-      if(!Number.isFinite(time)||!Number.isFinite(move)) continue;
-      // Verified event policies are bounded. An implausibly large event move is
-      // malformed evidence and is ignored rather than displayed.
-      if(Math.abs(move)>15) continue;
+      if(!Number.isFinite(time)||!Number.isFinite(move)||Math.abs(move)>15) continue;
       events.push({time,before,after,event:{...event,movePct:move}});
     }
     events.sort((a,b)=>a.time-b.time);
     if(!events.length) return [];
 
-    // Prefer the stored price chain when it is internally continuous and still
-    // on the current valuation scale.
     let chain=[];
     for(const item of events){
       if(!Number.isFinite(item.before)||!Number.isFinite(item.after)) continue;
       if(pctGap(item.before,item.after)>.15) continue;
-      if(!chain.length){
-        chain=[item];
-        continue;
-      }
+      if(!chain.length){chain=[item];continue;}
       const prior=chain[chain.length-1];
       if(pctGap(prior.after,item.before)>.08) chain=[item];
       else chain.push(item);
@@ -102,11 +89,6 @@
 
     const current=Math.max(1,Number(record?.marketPrice)||Number(localPrice(record))||1);
     if(chain.length&&pctGap(chain[chain.length-1].after,current)<=.25) return chain;
-
-    // A pricing-model migration can invalidate absolute historical dollars while
-    // leaving the verified event and its percentage move perfectly valid. In
-    // that case reconstruct the event chain backward from today's market price.
-    // This preserves real event direction/magnitude without inventing movement.
     return rebaseEvents(events,record);
   }
 
@@ -123,17 +105,11 @@
     const now=Date.now();
     const start=rangeStart(range,now);
     const points=eventPoints(record).filter(point=>point.time<=now);
-    if(!points.length){
-      return {status:'none',range,start,now,coverageStart:null,points:[]};
-    }
+    if(!points.length) return {status:'none',range,start,now,coverageStart:null,points:[]};
     const beforeStart=points.filter(point=>point.time<=start);
-    if(beforeStart.length){
-      return {status:'complete',range,start,now,coverageStart:start,points};
-    }
+    if(beforeStart.length) return {status:'complete',range,start,now,coverageStart:start,points};
     const first=points.find(point=>point.time>start&&point.time<=now);
-    if(!first){
-      return {status:'none',range,start,now,coverageStart:null,points:[]};
-    }
+    if(!first) return {status:'none',range,start,now,coverageStart:null,points:[]};
     return {status:'partial',range,start,now,coverageStart:first.time,points};
   }
 
@@ -167,15 +143,8 @@
         if(point.time<=time) value=point.value;
         else break;
       }
-      if(index===count-1) value=current;
       const verified=coverageInfo.status==='complete'||(coverageInfo.coverageStart!==null&&time>=coverageInfo.coverageStart);
-      return {
-        time,
-        value:Number(value.toFixed(2)),
-        verified,
-        coverageStatus:coverageInfo.status,
-        coverageStart:coverageInfo.coverageStart
-      };
+      return {time,value:Number(value.toFixed(2)),verified,coverageStatus:coverageInfo.status,coverageStart:coverageInfo.coverageStart};
     });
   }
 
@@ -189,5 +158,5 @@
 
   window.talentxEventCoverage=coverage;
   window.talentxDurablePriceEvents=durableEvents;
-  window.talentxEventChartSafety='durable-price-events-coverage-aware-v4-all-categories';
+  window.talentxEventChartSafety='durable-price-events-coverage-aware-v5-no-catalog-snap';
 })();
