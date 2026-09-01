@@ -1,0 +1,1 @@
+Homepage logo scale increased; rounded favicon asset follows in binary commit.
