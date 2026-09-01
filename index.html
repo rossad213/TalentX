@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#061019">
-  <meta name="description" content="TalentX current-first virtual talent market prototype with explainable pricing and virtual trading.">
+  <meta name="description" content="TalentX is the market for talent: an explainable virtual market for athletes, musicians, actors, and creators.">
   <meta name="application-name" content="TalentX">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -18,13 +18,14 @@
   <link rel="shortcut icon" type="image/png" href="./assets/talentx-favicon-32.png?v=20260811-1">
   <link rel="apple-touch-icon" href="./assets/favicon-512.png?v=20260811-2">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./assets/public-home.css?v=20260901-1">
   <link rel="stylesheet" href="./discovery-profile.css">
   <link rel="stylesheet" href="./assets/trading-experience.css">
   <link rel="stylesheet" href="./assets/portfolio-leaderboards.css?v=20260811-2">
   <link rel="stylesheet" href="./assets/sortable-market-table.css">
   <link rel="stylesheet" href="./assets/event-timeline.css?v=20260808-1">
   <link rel="stylesheet" href="./assets/event-chart-coverage.css?v=20260809-1">
-  <link rel="stylesheet" href="./assets/mobile-shell.css?v=20260831-1">
+  <link rel="stylesheet" href="./assets/mobile-shell.css?v=20260831-2">
   <link rel="stylesheet" href="./assets/mobile-portfolio-watchlist.css?v=20260811-1">
   <link rel="stylesheet" href="./assets/mobile-dashboard.css?v=20260812-1">
   <link rel="stylesheet" href="./assets/search-discovery.css?v=20260812-2">
@@ -36,12 +37,12 @@
 <body>
 <div class="app-shell">
   <aside class="sidebar">
-    <div class="brand" onclick="go('dashboard')" role="button" tabindex="0" aria-label="Go to TalentX dashboard">
+    <div class="brand" onclick="go('dashboard')" role="button" tabindex="0" aria-label="Go to TalentX home">
       <img class="brand-logo" src="./assets/talentx-logo-64.png?v=20260811-1" alt="TalentX logo">
       <div class="brand-copy"><strong>TalentX</strong><small>THE MARKET FOR TALENT</small></div>
     </div>
     <nav class="nav">
-      <button data-route="dashboard" onclick="go('dashboard')">⌂ <span>Dashboard</span></button>
+      <button data-route="dashboard" onclick="go('dashboard')">⌂ <span>Home</span></button>
       <button data-route="market" onclick="go('market')">⌁ <span>Market</span></button>
       <button data-route="portfolio" onclick="go('portfolio')">▣ <span>Portfolio</span></button>
       <button data-route="leaderboard" onclick="go('leaderboard')">♕ <span>Leaderboard</span></button>
@@ -96,6 +97,7 @@
 </script>
 <script src="./assets/pricing-model-migration-5.2.js?v=20260806-1"></script>
 <script src="./app.js?v=20260811-3"></script>
+<script src="./assets/public-home.js?v=20260901-1"></script>
 <script src="./assets/rookie-ipo-calibration.js?v=20260831-1"></script>
 <script src="./assets/catalog-profile-loader.js?v=20260811-1"></script>
 <script src="./chart-history.js?v=20260807-2"></script>
@@ -110,7 +112,7 @@
 <script src="./assets/event-chart-safety.js?v=20260831-1"></script>
 <script src="./assets/event-chart-coverage.js?v=20260809-3"></script>
 <script src="./assets/back-navigation.js?v=20260811-4"></script>
-<script src="./assets/history-routing.js?v=20260810-2"></script>
+<script src="./assets/history-routing.js?v=20260901-1"></script>
 <script src="./assets/search-discovery.js?v=20260812-2"></script>
 <script src="./assets/client-stability.js?v=20260831-1"></script>
 </body>
