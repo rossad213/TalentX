@@ -8,16 +8,18 @@
 
   function migrateLocalPriceState(){
     try{
-      if(typeof state!=='object'||!state) return;
-      if(String(state.catalogPricingRevision||'')===CATALOG_PRICING_REVISION) return;
+      if(typeof state!=='object'||!state) return false;
+      if(String(state.catalogPricingRevision||'')===CATALOG_PRICING_REVISION) return false;
 
       // Only browser-local price overrides are invalidated. Preserve cash,
       // holdings, watchlist, transactions, and every other virtual-account field.
       state.prices={};
       state.catalogPricingRevision=CATALOG_PRICING_REVISION;
       localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+      return true;
     }catch(error){
       console.warn('TalentX client pricing-state migration skipped',error);
+      return false;
     }
   }
 
@@ -39,8 +41,11 @@
     };
   }
 
-  migrateLocalPriceState();
+  const migrated=migrateLocalPriceState();
   syncMobileNav();
+  if(migrated&&typeof render==='function'){
+    try{render();}catch{}
+  }
   document.addEventListener('DOMContentLoaded',syncMobileNav,{once:true});
 
   window.talentxCatalogPricingRevision=CATALOG_PRICING_REVISION;
