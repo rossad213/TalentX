@@ -1,79 +1,13 @@
 /* TalentX email verification controls for Account Settings. */
 (() => {
+  const style=document.createElement('style');
+  style.textContent=`.account-verification-card{display:flex;align-items:flex-start;gap:14px;padding:16px;border:1px solid rgba(143,174,200,.14);border-radius:14px;background:#091722}.account-verification-card.verified{border-color:rgba(88,239,120,.24);background:rgba(88,239,120,.055)}.account-verification-card.pending{border-color:rgba(255,196,77,.24);background:rgba(255,196,77,.045)}.account-verification-icon{display:flex;align-items:center;justify-content:center;flex:0 0 34px;width:34px;height:34px;border-radius:11px;font-size:16px;font-weight:950}.account-verification-card.verified .account-verification-icon{background:rgba(88,239,120,.14);color:#58ef78}.account-verification-card.pending .account-verification-icon{background:rgba(255,196,77,.13);color:#ffc44d}.account-verification-copy{display:grid;gap:3px;min-width:0}.account-verification-copy strong{font-size:13px}.account-verification-copy span{color:#a9bac8;font-size:11px;overflow:hidden;text-overflow:ellipsis}.account-verification-copy small{margin-top:5px;color:#7f93a4;font-size:10px;line-height:1.5}.account-verification-actions{margin-top:12px}`;
+  document.head.appendChild(style);
   const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   const fmt=value=>{if(!value)return '';const d=new Date(value);return Number.isNaN(d.getTime())?'':d.toLocaleString(undefined,{year:'numeric',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});};
   function notify(message){if(typeof toast==='function')toast(message);else console.log(message);}
-
-  async function getUser(){
-    const client=window.talentxSupabase;
-    if(!client) return null;
-    const {data,error}=await client.auth.getUser();
-    if(error){console.warn('TalentX verification user lookup failed',error);return null;}
-    return data?.user||null;
-  }
-
-  async function resend(button,email){
-    if(!email) return;
-    button.disabled=true;
-    const original=button.textContent;
-    button.textContent='Sending…';
-    try{
-      if(window.talentxAuthAdapter?.resendConfirmation){
-        await window.talentxAuthAdapter.resendConfirmation(email);
-      }else{
-        const {error}=await window.talentxSupabase.auth.resend({type:'signup',email,options:{emailRedirectTo:'https://rossad213.github.io/TalentX/'}});
-        if(error) throw error;
-      }
-      notify('Verification email sent. Use the newest email from TalentX.');
-      button.textContent='Verification email sent';
-      setTimeout(()=>{if(document.body.contains(button)){button.disabled=false;button.textContent=original;}},3500);
-    }catch(error){
-      console.warn('TalentX verification resend failed',error);
-      notify(error?.message||'Could not resend the verification email.');
-      button.disabled=false;
-      button.textContent=original;
-    }
-  }
-
-  async function enhance(overlay){
-    if(!overlay||overlay.dataset.verificationEnhanced==='1') return;
-    const body=overlay.querySelector('.account-settings-body');
-    const profileSection=body?.querySelector('.account-section');
-    if(!body||!profileSection) return;
-    overlay.dataset.verificationEnhanced='1';
-    const user=await getUser();
-    if(!user) return;
-    const verifiedAt=user.email_confirmed_at||user.confirmed_at||null;
-    const verified=Boolean(verifiedAt);
-    const section=document.createElement('section');
-    section.className='account-section account-verification-section';
-    section.innerHTML=`
-      <div class="account-section-title"><div><h3>Email verification</h3><p>Verification helps protect your TalentX account and confirms that you control this email address.</p></div></div>
-      <div class="account-verification-card ${verified?'verified':'pending'}">
-        <div class="account-verification-icon">${verified?'✓':'!'}</div>
-        <div class="account-verification-copy">
-          <strong>${verified?'Email verified':'Verification required'}</strong>
-          <span>${esc(user.email||'')}</span>
-          <small>${verified?(verifiedAt?`Verified ${esc(fmt(verifiedAt))}`:'Your email address is verified.'):'Check your inbox for the TalentX verification email. If the link expired or you cannot find it, send a new one below.'}</small>
-        </div>
-      </div>
-      ${verified?'':`<div class="account-actions-row account-verification-actions"><button class="account-action-btn" id="accountResendVerification" type="button">Resend verification email</button></div>`}`;
-    profileSection.insertAdjacentElement('afterend',section);
-    const resendButton=section.querySelector('#accountResendVerification');
-    if(resendButton) resendButton.addEventListener('click',()=>resend(resendButton,user.email));
-  }
-
-  const observer=new MutationObserver(records=>{
-    for(const record of records){
-      for(const node of record.addedNodes){
-        if(!(node instanceof Element)) continue;
-        if(node.id==='talentxAccountOverlay') enhance(node);
-        else node.querySelector?.('#talentxAccountOverlay')&&enhance(node.querySelector('#talentxAccountOverlay'));
-      }
-    }
-  });
-  observer.observe(document.documentElement,{childList:true,subtree:true});
-
-  const existing=document.getElementById('talentxAccountOverlay');
-  if(existing) enhance(existing);
+  async function getUser(){const client=window.talentxSupabase;if(!client)return null;const {data,error}=await client.auth.getUser();if(error){console.warn('TalentX verification user lookup failed',error);return null;}return data?.user||null;}
+  async function resend(button,email){if(!email)return;button.disabled=true;const original=button.textContent;button.textContent='Sending…';try{if(window.talentxAuthAdapter?.resendConfirmation){await window.talentxAuthAdapter.resendConfirmation(email);}else{const {error}=await window.talentxSupabase.auth.resend({type:'signup',email,options:{emailRedirectTo:'https://rossad213.github.io/TalentX/'}});if(error)throw error;}notify('Verification email sent. Use the newest email from TalentX.');button.textContent='Verification email sent';setTimeout(()=>{if(document.body.contains(button)){button.disabled=false;button.textContent=original;}},3500);}catch(error){console.warn('TalentX verification resend failed',error);notify(error?.message||'Could not resend the verification email.');button.disabled=false;button.textContent=original;}}
+  async function enhance(overlay){if(!overlay||overlay.dataset.verificationEnhanced==='1')return;const body=overlay.querySelector('.account-settings-body');const profileSection=body?.querySelector('.account-section');if(!body||!profileSection)return;overlay.dataset.verificationEnhanced='1';const user=await getUser();if(!user)return;const verifiedAt=user.email_confirmed_at||user.confirmed_at||null;const verified=Boolean(verifiedAt);const section=document.createElement('section');section.className='account-section account-verification-section';section.innerHTML=`<div class="account-section-title"><div><h3>Email verification</h3><p>Verification helps protect your TalentX account and confirms that you control this email address.</p></div></div><div class="account-verification-card ${verified?'verified':'pending'}"><div class="account-verification-icon">${verified?'✓':'!'}</div><div class="account-verification-copy"><strong>${verified?'Email verified':'Verification required'}</strong><span>${esc(user.email||'')}</span><small>${verified?(verifiedAt?`Verified ${esc(fmt(verifiedAt))}`:'Your email address is verified.'):'Check your inbox for the TalentX verification email. If the link expired or you cannot find it, send a new one below.'}</small></div></div>${verified?'':`<div class="account-actions-row account-verification-actions"><button class="account-action-btn" id="accountResendVerification" type="button">Resend verification email</button></div>`}`;profileSection.insertAdjacentElement('afterend',section);const resendButton=section.querySelector('#accountResendVerification');if(resendButton)resendButton.addEventListener('click',()=>resend(resendButton,user.email));}
+  const observer=new MutationObserver(records=>{for(const record of records){for(const node of record.addedNodes){if(!(node instanceof Element))continue;if(node.id==='talentxAccountOverlay')enhance(node);else{const overlay=node.querySelector?.('#talentxAccountOverlay');if(overlay)enhance(overlay);}}}});observer.observe(document.documentElement,{childList:true,subtree:true});const existing=document.getElementById('talentxAccountOverlay');if(existing)enhance(existing);
 })();
