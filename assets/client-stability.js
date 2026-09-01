@@ -1,7 +1,4 @@
-/* TalentX client stability guard.
- * Keeps browser-local virtual trading state separate from authoritative catalog repricing
- * and keeps the mobile navigation active state synchronized with the current route.
- */
+/* TalentX client stability + account bootstrap. */
 (() => {
   const CATALOG_PRICING_REVISION='20260831-1';
   const STORAGE_KEY='talentx_v2_state';
@@ -10,9 +7,6 @@
     try{
       if(typeof state!=='object'||!state) return false;
       if(String(state.catalogPricingRevision||'')===CATALOG_PRICING_REVISION) return false;
-
-      // Only browser-local price overrides are invalidated. Preserve cash,
-      // holdings, watchlist, transactions, and every other virtual-account field.
       state.prices={};
       state.catalogPricingRevision=CATALOG_PRICING_REVISION;
       localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
@@ -33,6 +27,36 @@
     }catch{}
   }
 
+  function loadScript(src){
+    return new Promise((resolve,reject)=>{
+      const existing=[...document.scripts].find(script=>script.src&&script.src.includes(src.split('?')[0]));
+      if(existing){
+        if(existing.dataset.talentxLoaded==='1') return resolve();
+        existing.addEventListener('load',resolve,{once:true});
+        existing.addEventListener('error',reject,{once:true});
+        return;
+      }
+      const script=document.createElement('script');
+      script.src=src;
+      script.async=true;
+      script.crossOrigin='anonymous';
+      script.onload=()=>{script.dataset.talentxLoaded='1';resolve();};
+      script.onerror=reject;
+      document.head.appendChild(script);
+    });
+  }
+
+  async function bootstrapAccounts(){
+    try{
+      if(!window.supabase?.createClient){
+        await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
+      }
+      await loadScript('./assets/supabase-auth-sync.js?v=20260901-1');
+    }catch(error){
+      console.warn('TalentX account services could not load; guest mode remains available.',error);
+    }
+  }
+
   const priorSetActiveNav=typeof setActiveNav==='function'?setActiveNav:null;
   if(priorSetActiveNav){
     setActiveNav=function(){
@@ -47,6 +71,6 @@
     try{render();}catch{}
   }
   document.addEventListener('DOMContentLoaded',syncMobileNav,{once:true});
-
   window.talentxCatalogPricingRevision=CATALOG_PRICING_REVISION;
+  bootstrapAccounts();
 })();
