@@ -1,0 +1,14 @@
+/* Homepage hero typography tuning. Keeps the headline prominent without overpowering the market preview. */
+.public-hero h1{
+  font-size:clamp(44px,4.6vw,68px);
+  line-height:.98;
+  max-width:720px;
+}
+
+@media(max-width:980px){
+  .public-hero h1{font-size:clamp(44px,6vw,62px);max-width:680px}
+}
+
+@media(max-width:700px){
+  .public-hero h1{font-size:42px;line-height:1.02;max-width:100%}
+}
