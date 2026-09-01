@@ -67,6 +67,7 @@
       await loadScript('./assets/account-verification-controls.js?v=20260901-1');
       loadStylesheet('./assets/notification-center.css?v=20260901-1');
       await loadScript('./assets/notification-center.js?v=20260901-1');
+      await loadScript('./assets/logo-welcome-routing.js?v=20260901-1');
     }catch(error){
       console.warn('TalentX account services could not load; guest mode remains available.',error);
     }
