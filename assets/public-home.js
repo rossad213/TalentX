@@ -46,7 +46,7 @@
     const stats=publicStats();
     return `<div class="public-page">
       <header class="public-nav">
-        <button class="public-brand" type="button" onclick="go('dashboard')"><img src="./assets/talentx-logo-64.png?v=20260811-1" alt="TalentX"><span><strong>TalentX</strong><small>THE MARKET FOR TALENT</small></span></button>
+        <button class="public-brand" type="button" onclick="go('dashboard')"><img src="./assets/talentx-logo-64.png?v=20260901-4" alt="TalentX"><span><strong>TalentX</strong><small>THE MARKET FOR TALENT</small></span></button>
         <nav class="public-links" aria-label="Homepage"><a href="#features">Features</a><a href="#how">How it works</a><a href="#data">Data & trust</a></nav>
         <div class="public-actions"><button class="public-btn ghost" type="button" onclick="go('login')">Log in</button><button class="public-btn primary" type="button" onclick="go('signup')">Sign up</button></div>
       </header>
@@ -93,7 +93,7 @@
 
         <section class="public-cta"><div><h2>Your talent market starts here.</h2><p>Create an account when cloud sync launches, or explore the live market now as a guest.</p></div><div class="public-actions"><button class="public-btn" type="button" onclick="go('market')">Browse market</button><button class="public-btn primary" type="button" onclick="go('signup')">Create account</button></div></section>
       </main>
-      <footer class="public-footer"><span class="public-footer-brand"><img src="./assets/talentx-logo-64.png?v=20260811-1" alt="">TalentX</span><span>Virtual market prototype · No real money</span><div class="public-footer-links"><button type="button" onclick="go('rules')">Data & Rules</button><button type="button" onclick="go('login')">Log in</button></div></footer>
+      <footer class="public-footer"><span class="public-footer-brand"><img src="./assets/talentx-logo-64.png?v=20260901-4" alt="">TalentX</span><span>Virtual market prototype · No real money</span><div class="public-footer-links"><button type="button" onclick="go('rules')">Data & Rules</button><button type="button" onclick="go('login')">Log in</button></div></footer>
     </div>`;
   };
 
@@ -101,7 +101,7 @@
     const signup=mode==='signup';
     return `<div class="public-page auth-shell">
       <aside class="auth-brand-panel">
-        <button class="auth-back-brand" type="button" onclick="go('dashboard')"><img src="./assets/talentx-logo-64.png?v=20260811-1" alt="TalentX"><strong>TalentX</strong></button>
+        <button class="auth-back-brand" type="button" onclick="go('dashboard')"><img src="./assets/talentx-logo-64.png?v=20260901-4" alt="TalentX"><strong>TalentX</strong></button>
         <div class="auth-brand-copy"><span>${signup?'Join TalentX':'Welcome back'}</span><h1>${signup?'Build your market identity.':'Your market, wherever you are.'}</h1><p>${signup?'Accounts will sync your virtual portfolio, watchlist, transactions, preferences, and leaderboard identity across devices.':'Sign in will restore your synced TalentX portfolio, watchlist, virtual balance, and market activity once the account backend is connected.'}</p><div class="auth-points"><div>Keep guest browsing available</div><div>Sync portfolio and watchlist securely</div><div>Power future alerts and leaderboard identity</div></div></div>
         <span class="auth-brand-foot">TalentX · The Market for Talent</span>
       </aside>
