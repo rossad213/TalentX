@@ -2,6 +2,7 @@
 (() => {
   const PROJECT_URL='https://selifenorvjodihiaexw.supabase.co';
   const PUBLISHABLE_KEY='sb_publishable_kHtyJKFgJHZy4kRaL5XJ6Q_gqEphAtY';
+  const APP_REDIRECT='https://rossad213.github.io/TalentX/';
   if(!window.supabase?.createClient){
     console.warn('TalentX Supabase client library is unavailable.');
     return;
@@ -154,12 +155,23 @@
     async signup({email,password,name}){
       const {data,error}=await client.auth.signUp({
         email,password,
-        options:{data:{display_name:name||''}}
+        options:{
+          data:{display_name:name||''},
+          emailRedirectTo:APP_REDIRECT
+        }
       });
       if(error) throw error;
       window.__talentxAuthUser=data.user||null;
       if(data.session&&data.user) await loadCloudState(data.user.id,{allowGuestImport:true});
       return data;
+    },
+    async resendConfirmation(email){
+      const {error}=await client.auth.resend({
+        type:'signup',
+        email,
+        options:{emailRedirectTo:APP_REDIRECT}
+      });
+      if(error) throw error;
     },
     async logout(){
       const {error}=await client.auth.signOut();
@@ -167,12 +179,31 @@
       window.__talentxAuthUser=null;
     },
     async resetPassword(email){
-      const redirectTo=`${window.location.origin}${window.location.pathname}?view=login`;
+      const redirectTo=`${APP_REDIRECT}?view=login`;
       const {error}=await client.auth.resetPasswordForEmail(email,{redirectTo});
       if(error) throw error;
     },
     async syncNow(){
       if(window.__talentxAuthUser?.id) await uploadLocalState(window.__talentxAuthUser.id);
+    }
+  };
+
+  window.resendTalentxConfirmation=async function(){
+    const email=document.getElementById('authEmail')?.value?.trim();
+    if(!email||!/^\S+@\S+\.\S+$/.test(email)){
+      notify('Enter the email you used to create your account first.');
+      return;
+    }
+    const button=document.getElementById('authResendConfirmation');
+    if(button){button.disabled=true;button.textContent='Sending…';}
+    try{
+      await window.talentxAuthAdapter.resendConfirmation(email);
+      notify('Fresh confirmation email sent. Use the newest email link.');
+    }catch(err){
+      console.warn('TalentX confirmation resend error',err);
+      notify(err?.message||'Could not resend the confirmation email.');
+    }finally{
+      if(button){button.disabled=false;button.textContent='Resend confirmation email';}
     }
   };
 
