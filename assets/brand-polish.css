@@ -1,0 +1,4 @@
+/* TalentX brand sizing refinements. */
+.public-brand img{width:56px!important;height:56px!important;border-radius:15px!important}
+.public-brand{gap:14px!important}
+@media(max-width:700px){.public-brand img{width:48px!important;height:48px!important;border-radius:13px!important}}
