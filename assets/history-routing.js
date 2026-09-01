@@ -1,6 +1,6 @@
 /* TalentX URL routing and browser history integration. */
 (function(){
-  const ROUTES=new Set(['dashboard','market','profile','portfolio','leaderboard','watchlist','rules']);
+  const ROUTES=new Set(['dashboard','market','profile','portfolio','leaderboard','watchlist','rules','login','signup']);
   const DEFAULT_FILTERS={segment:'Current',category:'All',discipline:'All',league:'All',status:'All',stage:'All',sort:'score-desc',query:'',page:1};
   let applyingLocation=false;
   let initialHydrationDone=false;
@@ -136,7 +136,7 @@
       const focus=filters.discipline!=='All'?filters.discipline:(filters.category!=='All'?(filters.category==='Music'?'Music':`${filters.category}s`):'Market');
       title=`${focus} — TalentX`;
     }else if(route!=='dashboard'){
-      const labels={portfolio:'Portfolio',leaderboard:'Leaderboard',watchlist:'Watchlist',rules:'Data & Rules'};
+      const labels={portfolio:'Portfolio',leaderboard:'Leaderboard',watchlist:'Watchlist',rules:'Data & Rules',login:'Log in',signup:'Sign up'};
       title=`${labels[route]||'TalentX'} — TalentX`;
     }
     document.title=title;
