@@ -1,14 +1,12 @@
 /* TalentX verified-event chart presentation fixes.
- * - Any range with verified event history uses step pricing: no event = flat.
- * - Y-axis ticks are rounded to human-friendly price increments.
- * - Date-only market events stay on their intended calendar date.
+ * - Chart pricing is supplied by the dedicated event-chart safety layer.
+ * - This file only controls presentation: staircase rendering, clean axes, and date labels.
+ * - It must never create or force a price movement on its own.
  */
 (function(){
   if(typeof chartSeries!=='function'||typeof detailedTrendSvg!=='function') return;
 
-  const priorChartSeries=chartSeries;
   const priorProfile=typeof profile==='function'?profile:null;
-  const DAY=24*60*60*1000;
 
   function dateOnlyUtc(value){
     return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/i.test(value.trim());
@@ -24,11 +22,6 @@
   function asPrice(value){
     const parsed=Number(value);
     return Number.isFinite(parsed)&&parsed>0?parsed:NaN;
-  }
-  function rangeStart(range,now){
-    const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
-    if(range==='YTD') return new Date(new Date(now).getFullYear(),0,1).getTime();
-    return now-(config.duration||DAY);
   }
   function eventIdentity(event){
     return String(event?.eventKey||event?.eventId||'');
@@ -71,43 +64,6 @@
     }
     return deduped;
   }
-
-  function eventStepSeries(record,range,points){
-    const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
-    const count=Math.max(2,Number(config.points)||48);
-    const current=Math.max(1,Number(localPrice(record))||1);
-    const now=Date.now();
-    const start=rangeStart(range,now);
-    const ordered=points.filter(point=>point.time<=now).sort((a,b)=>a.time-b.time);
-    if(!ordered.length) return Array.from({length:count},(_,index)=>({
-      time:start+((now-start)*(index/(count-1))),value:Number(current.toFixed(2))
-    }));
-
-    let opening=current;
-    const beforeStart=ordered.filter(point=>point.time<=start);
-    if(beforeStart.length) opening=beforeStart[beforeStart.length-1].value;
-    else {
-      const firstAfter=ordered.find(point=>point.time>start);
-      if(firstAfter) opening=firstAfter.value;
-    }
-    const inRange=ordered.filter(point=>point.time>start&&point.time<=now);
-    return Array.from({length:count},(_,index)=>{
-      const time=start+((now-start)*(index/(count-1)));
-      let value=opening;
-      for(const point of inRange){
-        if(point.time<=time) value=point.value;
-        else break;
-      }
-      if(index===count-1) value=current;
-      return {time,value:Number(value.toFixed(2))};
-    });
-  }
-
-  chartSeries=function(record,range=chartRange){
-    const points=verifiedEventPoints(record);
-    if(points.length) return eventStepSeries(record,range,points);
-    return priorChartSeries(record,range);
-  };
 
   function minTickFor(price){
     if(price>=100) return .05;
@@ -237,5 +193,5 @@
     };
   }
 
-  window.talentxVerifiedEventCharts='all-ranges-step-v3';
+  window.talentxVerifiedEventCharts='presentation-only-v4';
 })();
