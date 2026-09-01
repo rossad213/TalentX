@@ -48,10 +48,11 @@
 
   async function bootstrapAccounts(){
     try{
+      await loadScript('./assets/auth-confirmation-recovery.js?v=20260901-1');
       if(!window.supabase?.createClient){
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
       }
-      await loadScript('./assets/supabase-auth-sync.js?v=20260901-1');
+      await loadScript('./assets/supabase-auth-sync.js?v=20260901-2');
     }catch(error){
       console.warn('TalentX account services could not load; guest mode remains available.',error);
     }
