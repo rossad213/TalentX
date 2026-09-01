@@ -131,13 +131,12 @@
     if(mode==='signup'&&password!==confirm){toast('Passwords do not match.');return;}
     const adapter=window.talentxAuthAdapter;
     if(adapter&&typeof adapter[mode]==='function'){
-      adapter[mode]({email,name:document.getElementById('authName')?.value?.trim()||''});
+      adapter[mode]({email,password,name:document.getElementById('authName')?.value?.trim()||''});
       return;
     }
     toast('Account backend is not connected yet — no credentials were sent.');
   };
 
-  const priorDashboard=typeof dashboard==='function'?dashboard:null;
   dashboard=function(){return publicHome();};
 
   const baseRender=typeof render==='function'?render:null;
