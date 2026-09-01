@@ -61,6 +61,7 @@
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
       }
       await loadScript('./assets/supabase-auth-sync.js?v=20260901-2');
+      await loadScript('./assets/password-requirements.js?v=20260901-1');
       loadStylesheet('./assets/account-ui.css?v=20260901-3');
       await loadScript('./assets/account-ui.js?v=20260901-2');
     }catch(error){
