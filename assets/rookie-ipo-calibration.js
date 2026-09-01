@@ -1,6 +1,26 @@
-/* Keep the visible TalentX Rookie IPO calculator and profile display on the same scale as pricing engine v2. */
+/* TalentX Rookie IPO policy.
+ * This file is the client-side source of truth for rookie IPO ceilings and opening-price display.
+ * It mutates the shared ROOKIE_SPORTS configuration so the calculator and profile use the same policy.
+ */
 (() => {
-  const ceilings = {NFL:135, NBA:155, WNBA:95, NHL:120, MLB:95};
+  const policy=Object.freeze({
+    NFL:Object.freeze({basePrice:4,ipoCeiling:135}),
+    NBA:Object.freeze({basePrice:4,ipoCeiling:155}),
+    WNBA:Object.freeze({basePrice:4,ipoCeiling:95}),
+    NHL:Object.freeze({basePrice:4,ipoCeiling:120}),
+    MLB:Object.freeze({basePrice:4,ipoCeiling:95})
+  });
+
+  Object.entries(policy).forEach(([sport,values])=>{
+    const cfg=ROOKIE_SPORTS[sport];
+    if(!cfg) return;
+    cfg.basePrice=values.basePrice;
+    cfg.ipoCeiling=values.ipoCeiling;
+    // pricePerPoint belonged to the old compressed linear IPO model.
+    // Remove it after the calibrated nonlinear policy is installed so there is
+    // no second client-side dollar scale to accidentally reuse.
+    delete cfg.pricePerPoint;
+  });
 
   calculateRookieIpo = function(values){
     const cfg=ROOKIE_SPORTS[values.sport]||ROOKIE_SPORTS.NFL;
@@ -17,8 +37,8 @@
     };
     const weighted=Object.entries(ROOKIE_WEIGHTS).map(([key,w])=>[key,factors[key]*w]);
     const score=weighted.reduce((sum,[,value])=>sum+value,0);
-    const base=4;
-    const ceiling=ceilings[values.sport]||105;
+    const base=Number(cfg.basePrice)||4;
+    const ceiling=Number(cfg.ipoCeiling)||105;
     const price=base+ceiling*Math.pow(score/100,2);
     const uncertainty=.07+(100-factors.opportunity)/100*.035+(100-factors.availability)/100*.025;
     const round=Math.ceil(pick/cfg.picksPerRound);
@@ -35,4 +55,6 @@
     const opening=p.calibratedIpoPrice ?? p.ipoPrice ?? r.fundamentalValue;
     return `<div class="source-box"><small>Rookie IPO</small><strong>${p.draftSport||r.leagueOrMedium} · Pick ${p.overallPick||'—'} · ${p.position||r.role}</strong><small>Calibrated opening price ${money(opening)}. Draft capital is strongest at listing and fades as verified professional performance data accumulates.</small></div>${metricGrid(Object.fromEntries(Object.entries(rows).filter(([,v])=>v!==undefined)))}`;
   };
+
+  window.TALENTX_ROOKIE_IPO_POLICY=policy;
 })();
