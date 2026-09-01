@@ -1,0 +1,14 @@
+/* TalentX auth-page brand scale override. */
+.auth-back-brand{gap:16px}
+.auth-back-brand img{width:76px!important;height:76px!important;border-radius:20px!important;box-shadow:0 14px 34px rgba(0,0,0,.28)}
+.auth-back-brand strong{font-size:24px!important;letter-spacing:-.03em}
+
+@media(max-width:980px){
+  .auth-back-brand img{width:64px!important;height:64px!important;border-radius:17px!important}
+  .auth-back-brand strong{font-size:21px!important}
+}
+
+@media(max-width:700px){
+  .auth-back-brand img{width:58px!important;height:58px!important;border-radius:16px!important}
+  .auth-back-brand strong{font-size:20px!important}
+}
