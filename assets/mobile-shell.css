@@ -134,7 +134,7 @@
   .mobile-bottom-nav>button,.mobile-bottom-nav>details>summary{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-width:0;min-height:68px;border:0;border-radius:14px;background:transparent;color:#91a1b1;font:inherit;font-size:11px;font-weight:800;line-height:1;padding:7px 3px;list-style:none;cursor:pointer;-webkit-tap-highlight-color:transparent}
   .mobile-bottom-nav>details>summary::-webkit-details-marker{display:none}
   .mobile-bottom-nav .mobile-nav-icon{font-size:25px;line-height:1;height:26px;display:flex;align-items:center;justify-content:center}
-  .mobile-bottom-nav>button.active{color:var(--green);background:rgba(88,239,120,.08)}
+  .mobile-bottom-nav>button.active,.mobile-bottom-nav>details.active>summary{color:var(--green);background:rgba(88,239,120,.08)}
   .mobile-bottom-nav>button:active,.mobile-bottom-nav>details>summary:active{background:rgba(255,255,255,.07);color:var(--green)}
   .mobile-more{position:relative;min-width:0}
   .mobile-more-menu{position:absolute;right:0;bottom:78px;width:min(245px,78vw);padding:9px;border:1px solid rgba(132,164,194,.18);border-radius:16px;background:#0a1724;box-shadow:0 18px 45px rgba(0,0,0,.48)}
