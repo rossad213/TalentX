@@ -56,6 +56,11 @@
 
   async function bootstrapAccounts(){
     try{
+      loadStylesheet('./assets/mobile-auth-fixes.css?v=20260902-1');
+      await loadScript('./assets/mobile-auth-fixes.js?v=20260902-1');
+      if(typeof route!=='undefined'&&(route==='login'||route==='signup')&&typeof render==='function'){
+        try{render();}catch{}
+      }
       await loadScript('./assets/auth-confirmation-recovery.js?v=20260901-1');
       if(!window.supabase?.createClient){
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
