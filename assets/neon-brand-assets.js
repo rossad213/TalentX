@@ -1,7 +1,7 @@
 /* TalentX neon brand asset switch. */
 (() => {
-  const LOGO='./assets/talentx-neon-logo-64.png?v=20260901-1';
-  const FAVICON='./assets/talentx-neon-favicon-32.png?v=20260901-1';
+  const LOGO='./assets/talentx-neon-brand-v2.png?v=20260902-2';
+  const FAVICON='./assets/talentx-neon-brand-v2.png?v=20260902-2';
 
   function applyFavicons(){
     document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(link=>{
@@ -13,7 +13,7 @@
   function applyLogos(root=document){
     root.querySelectorAll?.('img').forEach(img=>{
       const src=img.getAttribute('src')||'';
-      if(src.includes('talentx-logo-64.png')||img.classList.contains('brand-logo')||img.classList.contains('user-avatar-logo')){
+      if(src.includes('talentx-logo-64.png')||src.includes('talentx-neon-logo-64.png')||img.classList.contains('brand-logo')||img.classList.contains('user-avatar-logo')||img.closest?.('.public-brand,.public-footer-brand,.auth-back-brand')){
         img.setAttribute('src',LOGO);
       }
     });
