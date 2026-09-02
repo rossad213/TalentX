@@ -1,6 +1,22 @@
 name: Deploy lightweight TalentX client
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'app.js'
+      - 'styles.css'
+      - 'discovery-profile.js'
+      - 'discovery-profile.css'
+      - 'chart-history.js'
+      - 'site.webmanifest'
+      - 'sw.js'
+      - 'assets/**'
+      - 'data/current_catalog.json'
+      - 'data/current_seed.json'
+      - 'scripts/build_client_catalog.py'
+      - '.github/workflows/deploy-lightweight-client.yml'
   workflow_run:
     workflows: ["Publish unified TalentX market"]
     types: [completed]
@@ -17,7 +33,7 @@ concurrency:
 
 jobs:
   build:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -27,6 +43,7 @@ jobs:
           python-version: "3.13"
 
       - name: Download the exact market that was just published
+        if: github.event_name == 'workflow_run'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN: ${{ github.event.workflow_run.id }}
@@ -38,6 +55,9 @@ jobs:
           published_data="$(dirname "$(find _published -name current_catalog.json -print -quit)")"
           test -n "$published_data" || { echo "Published market artifact is missing current_catalog.json"; exit 1; }
           cp -R "$published_data"/. data/
+
+      - name: Verify current market exists
+        run: test -s data/current_catalog.json
 
       - name: Build compact catalog and on-demand profile shards
         run: |
@@ -68,7 +88,7 @@ jobs:
           path: _site
 
   deploy:
-    if: github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
