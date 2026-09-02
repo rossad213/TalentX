@@ -1,7 +1,7 @@
 /* TalentX neon brand asset switch. */
 (() => {
-  const LOGO='./assets/talentx-logo-64.png?v=20260902-3';
-  const FAVICON='./assets/talentx-favicon-32.png?v=20260902-3';
+  const LOGO='./assets/talentx-logo-64.png?v=20260902-4';
+  const FAVICON='./assets/talentx-favicon-32.png?v=20260902-4';
 
   function applyFavicons(){
     document.querySelectorAll('link[rel="icon"],link[rel="shortcut icon"]').forEach(link=>{
