@@ -56,6 +56,21 @@ jobs:
           test -n "$published_data" || { echo "Published market artifact is missing current_catalog.json"; exit 1; }
           cp -R "$published_data"/. data/
 
+      - name: Download the latest published market for client-only pushes
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf _published
+          mkdir -p _published
+          published_run="$(gh run list -R "$GITHUB_REPOSITORY" --workflow publish-market.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')"
+          test -n "$published_run" || { echo "No successful published market run is available"; exit 1; }
+          gh run download "$published_run" -R "$GITHUB_REPOSITORY" -n talentx-published-market -D _published
+          published_data="$(dirname "$(find _published -name current_catalog.json -print -quit)")"
+          test -n "$published_data" || { echo "Published market artifact is missing current_catalog.json"; exit 1; }
+          cp -R "$published_data"/. data/
+
       - name: Verify current market exists
         run: test -s data/current_catalog.json
 
