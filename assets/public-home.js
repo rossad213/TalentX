@@ -2,6 +2,22 @@
  * Account forms intentionally expose integration hooks without storing credentials.
  */
 (() => {
+  let authReturnState=null;
+  const authRoutes=new Set(['login','signup']);
+
+  function captureAuthReturnState(){
+    return {
+      route:typeof route==='string'&&!authRoutes.has(route)?route:'dashboard',
+      selectedId:typeof selectedId!=='undefined'?selectedId:null,
+      profileTab:typeof profileTab!=='undefined'?profileTab:'overview',
+      tradeMode:typeof tradeMode!=='undefined'?tradeMode:null,
+      retirementSelection:typeof retirementSelection!=='undefined'?retirementSelection:null,
+      chartRange:typeof chartRange!=='undefined'?chartRange:null,
+      filters:typeof filters==='object'&&filters?{...filters}:null,
+      scrollY:window.scrollY||0
+    };
+  }
+
   function initials(record){
     return String(record?.avatar||record?.name||'TX').split(/\s+/).map(part=>part[0]).join('').slice(0,2).toUpperCase();
   }
@@ -105,7 +121,7 @@
         <div class="auth-brand-copy"><span>${signup?'Join TalentX':'Welcome back'}</span><h1>${signup?'Build your market identity.':'Your market, wherever you are.'}</h1><p>${signup?'Accounts will sync your virtual portfolio, watchlist, transactions, preferences, and leaderboard identity across devices.':'Sign in will restore your synced TalentX portfolio, watchlist, virtual balance, and market activity once the account backend is connected.'}</p><div class="auth-points"><div>Keep guest browsing available</div><div>Sync portfolio and watchlist securely</div><div>Power future alerts and leaderboard identity</div></div></div>
         <span class="auth-brand-foot">TalentX · The Market for Talent</span>
       </aside>
-      <main class="auth-form-panel"><section class="auth-card">
+      <main class="auth-form-panel"><button class="auth-mobile-back" type="button" onclick="talentxAuthBack()" aria-label="Go back to the previous page">← Back</button><section class="auth-card">
         <h2>${signup?'Create your account':'Log in to TalentX'}</h2><p>${signup?'Set up the account that will hold your synced TalentX experience.':'Access your synced TalentX experience.'}</p>
         ${signup?'<div class="auth-field"><label for="authName">Display name</label><input id="authName" name="name" autocomplete="name" placeholder="Your name"></div>':''}
         <div class="auth-field"><label for="authEmail">Email</label><input id="authEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com"></div>
@@ -135,6 +151,36 @@
       return;
     }
     toast('Account backend is not connected yet — no credentials were sent.');
+  };
+
+  const authAwareGo=typeof go==='function'?go:null;
+  if(authAwareGo){
+    go=function(next){
+      const nextRoute=String(next||'');
+      if(authRoutes.has(nextRoute)&&!authRoutes.has(route)){
+        authReturnState=captureAuthReturnState();
+      }
+      return authAwareGo.apply(this,arguments);
+    };
+  }
+
+  window.talentxAuthBack=function(){
+    const previous=authReturnState;
+    authReturnState=null;
+    if(!previous||authRoutes.has(previous.route)){
+      if(typeof go==='function') go('dashboard');
+      return;
+    }
+    route=previous.route||'dashboard';
+    selectedId=previous.selectedId??null;
+    profileTab=previous.profileTab||'overview';
+    if(typeof tradeMode!=='undefined'&&previous.tradeMode!==null) tradeMode=previous.tradeMode;
+    if(typeof retirementSelection!=='undefined'&&previous.retirementSelection!==null) retirementSelection=previous.retirementSelection;
+    if(typeof chartRange!=='undefined'&&previous.chartRange!==null) chartRange=previous.chartRange;
+    if(previous.filters&&typeof filters==='object'&&filters) Object.assign(filters,previous.filters);
+    setActiveNav();
+    render();
+    requestAnimationFrame(()=>window.scrollTo({top:Number(previous.scrollY||0),left:0,behavior:'auto'}));
   };
 
   dashboard=function(){return publicHome();};
