@@ -121,7 +121,7 @@
         <div class="auth-brand-copy"><span>${signup?'Join TalentX':'Welcome back'}</span><h1>${signup?'Build your market identity.':'Your market, wherever you are.'}</h1><p>${signup?'Accounts will sync your virtual portfolio, watchlist, transactions, preferences, and leaderboard identity across devices.':'Sign in will restore your synced TalentX portfolio, watchlist, virtual balance, and market activity once the account backend is connected.'}</p><div class="auth-points"><div>Keep guest browsing available</div><div>Sync portfolio and watchlist securely</div><div>Power future alerts and leaderboard identity</div></div></div>
         <span class="auth-brand-foot">TalentX · The Market for Talent</span>
       </aside>
-      <main class="auth-form-panel"><button class="auth-mobile-back" type="button" onclick="talentxAuthBack()" aria-label="Go back to the previous page">← Back</button><section class="auth-card">
+      <main class="auth-form-panel"><div class="auth-form-stack"><button class="auth-mobile-back" type="button" onclick="talentxAuthBack()" aria-label="Go back to the previous page">← Back</button><section class="auth-card">
         <h2>${signup?'Create your account':'Log in to TalentX'}</h2><p>${signup?'Set up the account that will hold your synced TalentX experience.':'Access your synced TalentX experience.'}</p>
         ${signup?'<div class="auth-field"><label for="authName">Display name</label><input id="authName" name="name" autocomplete="name" placeholder="Your name"></div>':''}
         <div class="auth-field"><label for="authEmail">Email</label><input id="authEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com"></div>
@@ -131,7 +131,7 @@
         <div class="auth-divider">or</div><button class="auth-secondary" type="button" onclick="go('market')">Continue as guest</button>
         <div class="auth-switch">${signup?'Already have an account?':'New to TalentX?'} <button type="button" onclick="go('${signup?'login':'signup'}')">${signup?'Log in':'Create account'}</button></div>
         <div class="auth-note"><strong>Account infrastructure is being prepared.</strong> This form is wired for the future auth adapter, but credentials are not currently submitted or stored.</div>
-      </section></main>
+      </section></div></main>
     </div>`;
   };
 
