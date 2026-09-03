@@ -7,9 +7,9 @@
 
 .public-brand{gap:14px}
 .public-brand img{
-  width:56px;
-  height:56px;
-  border-radius:15px;
+  width:62px;
+  height:62px;
+  border-radius:17px;
 }
 
 @media(max-width:980px){
