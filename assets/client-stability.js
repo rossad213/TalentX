@@ -67,7 +67,7 @@
       }
       await loadScript('./assets/supabase-auth-sync.js?v=20260901-2');
       await loadScript('./assets/password-requirements.js?v=20260901-1');
-      await loadScript('./assets/neon-brand-assets.js?v=20260902-4');
+      await loadScript('./assets/neon-brand-assets.js?v=20260903-1');
       loadStylesheet('./assets/account-ui.css?v=20260901-3');
       await loadScript('./assets/account-ui.js?v=20260901-2');
       await loadScript('./assets/account-verification-controls.js?v=20260901-1');
