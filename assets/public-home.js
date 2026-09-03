@@ -31,8 +31,8 @@
     const records=Array.isArray(currentRecords)?currentRecords:[];
     const athletes=records.filter(r=>r.primaryCategory==='Athlete').length;
     const categories=new Set(records.map(r=>r.primaryCategory).filter(Boolean)).size;
-    const verified=records.filter(r=>Number(r.pricingConfidence||0)>=.8).length;
-    return {records:records.length,athletes,categories,verified};
+    const curated=records.filter(r=>String(r.sourceName||'')==='TalentX current-first seed').length;
+    return {records:records.length,athletes,categories,curated};
   }
   function marketPreview(){
     const records=Array.isArray(currentRecords)?currentRecords:[];
@@ -72,13 +72,13 @@
           <div>
             <span class="public-eyebrow"><i></i> Live virtual talent market</span>
             <h1>Track talent like a <span>market.</span></h1>
-            <p class="public-hero-copy">TalentX turns verified performance, career evidence, audience signals, and real-world events into an explainable virtual market for athletes, musicians, actors, and creators.</p>
+            <p class="public-hero-copy">TalentX turns structured career information, audience signals, and supported real-world events into an explainable virtual market for athletes, musicians, actors, and creators.</p>
             <div class="public-hero-actions"><button class="public-btn primary" type="button" onclick="go('signup')">Create free account</button><button class="public-btn" type="button" onclick="go('market')">Explore the market as guest →</button></div>
             <div class="public-microcopy"><span>Virtual money only</span><span>Explainable price moves</span><span>No account required to browse</span></div>
           </div>
           <div class="market-demo" aria-label="TalentX market preview">
-            <div class="market-demo-head"><strong>Market preview</strong><span class="live-chip"><i></i> Current-first catalog</span></div>
-            <div class="market-demo-stats"><div class="market-demo-stat"><small>Current listings</small><strong>${statNumber(stats.records)}</strong></div><div class="market-demo-stat"><small>High-confidence</small><strong>${statNumber(stats.verified)}</strong></div><div class="market-demo-stat"><small>Categories</small><strong>${stats.categories||4}</strong></div></div>
+            <div class="market-demo-head"><strong>Market preview</strong><span class="live-chip"><i></i> Curated beta catalog</span></div>
+            <div class="market-demo-stats"><div class="market-demo-stat"><small>Current listings</small><strong>${statNumber(stats.records)}</strong></div><div class="market-demo-stat"><small>Curated profiles</small><strong>${statNumber(stats.curated)}</strong></div><div class="market-demo-stat"><small>Categories</small><strong>${stats.categories||4}</strong></div></div>
             <div class="market-demo-list">${marketPreview()}</div>
           </div>
         </section>
@@ -86,7 +86,7 @@
         <div class="public-band"><div class="public-stats"><div class="public-stat"><strong>${statNumber(stats.records)}</strong><small>Current talent profiles</small></div><div class="public-stat"><strong>${statNumber(stats.athletes)}</strong><small>Current athletes</small></div><div class="public-stat"><strong>4</strong><small>Talent markets</small></div><div class="public-stat"><strong>24/7</strong><small>Market access</small></div></div></div>
 
         <section class="public-section" id="features">
-          <div class="public-section-head"><span class="public-kicker">Built for discovery</span><h2>One market. Every kind of talent.</h2><p>Browse thousands of current profiles, understand why prices move, build a virtual portfolio, and follow the people you think are gaining momentum.</p></div>
+          <div class="public-section-head"><span class="public-kicker">Built for discovery</span><h2>One market. Every kind of talent.</h2><p>Browse the current curated catalog, understand why prices move, build a virtual portfolio, and follow the people you think are gaining momentum.</p></div>
           <div class="public-feature-grid">
             <article class="public-feature"><span class="public-feature-icon">⌁</span><h3>Live talent market</h3><p>Search and compare current athletes, musicians, actors, and creators with a consistent virtual pricing framework.</p></article>
             <article class="public-feature"><span class="public-feature-icon">↗</span><h3>Explainable price moves</h3><p>Price history is tied to supported events and evidence instead of unexplained random chart movement.</p></article>
@@ -103,7 +103,7 @@
         </section>
 
         <section class="public-section" id="data">
-          <div class="public-section-head"><span class="public-kicker">Data & trust</span><h2>A market should explain itself.</h2><p>TalentX is designed to keep authoritative catalog pricing separate from browser-local trading and to preserve dated evidence behind meaningful price moves.</p></div>
+          <div class="public-section-head"><span class="public-kicker">Data & trust</span><h2>A market should explain itself.</h2><p>TalentX keeps its shared simulated catalog pricing separate from browser-local trading and is designed to preserve dated evidence behind meaningful price moves.</p></div>
           <div class="public-trust"><article class="public-trust-card"><h3>Evidence-first pricing</h3><p>Career fundamentals and verified events are distinct. Routine catalog refreshes should not manufacture fake short-term moves.</p><div class="public-trust-list"><span>Pricing confidence displayed</span><span>Event-driven chart history</span><span>Current and historical segments separated</span></div></article><article class="public-trust-card"><h3>Account-ready privacy model</h3><p>The account layer is being prepared so portfolio data can sync without turning the public market into a login wall.</p><div class="public-trust-list"><span>Guest browsing remains available</span><span>Passwords will never be stored in browser state</span><span>Virtual balances stay clearly separated from real money</span></div></article></div>
         </section>
 

@@ -1,7 +1,9 @@
 {
   "buildDate": "2026-07-31",
+  "lastAuditedAt": "2026-09-03",
+  "version": "3.1-curated-beta",
   "totalRecords": 5151,
-  "currentSeedRecords": 200,
+  "currentCatalogRecords": 200,
   "legacyRecords": 2636,
   "underReviewRecords": 2315,
   "categories": {
@@ -9,6 +11,12 @@
     "Music": 1029,
     "Actor": 2016,
     "Creator": 513
+  },
+  "currentCategories": {
+    "Athlete": 110,
+    "Music": 40,
+    "Actor": 30,
+    "Creator": 20
   },
   "currentDisciplines": {
     "Basketball": 12,
@@ -26,28 +34,34 @@
     "Cricket": 6,
     "Rugby": 4
   },
-  "notes": [
-    "Current seed records are real people selected for product prototyping, but are not connected to live roster or career-status feeds.",
-    "Historical records are not presented as current. They are routed to Legacy or Under Review.",
-    "All prices, scores, changes, volume and chart history are simulated.",
-    "Rookie opening prices now use draft capital, position value, pre-professional performance, opportunity, development, availability, and audience inputs. No Current record is automatically labeled a rookie without verified stage data."
-  ],
-  "version": "3.0-current-10000-workflow",
-  "features": [
-    "career-stage filtering",
-    "draft-weight decay rules",
-    "rookie IPO pricing calculator",
-    "rookie pricing database schema",
-    "automated current-roster catalog build",
-    "daily roster refresh",
-    "GitHub Actions Pages deployment",
-    "10,000-name current-athlete expansion"
-  ],
-  "currentCatalogRecords": 200,
-  "newCurrentTarget": 10000,
+  "curatedCurrentRecords": 200,
   "automatedRosterVerifiedRecords": 0,
+  "currentDataConfidence": {
+    "minimum": 0.7,
+    "maximum": 0.7,
+    "recordsAtValue": 200
+  },
+  "qa": {
+    "jsonRecords": 200,
+    "csvRecords": 200,
+    "uniqueNames": 200,
+    "uniqueIds": 200,
+    "uniqueTickers": 200,
+    "missingRequiredIdentityOrMarketFields": 0,
+    "invalidMarketPrices": 0,
+    "status": "passed structural catalog audit"
+  },
+  "notes": [
+    "Current records are curated prototype profiles and are not connected to live career-status feeds.",
+    "Historical/reference records are routed to Legacy or Under Review.",
+    "All prices, scores, changes, volume, portfolios, trades, and chart history are simulated."
+  ],
   "currentCatalogFile": "data/current_catalog.json",
   "currentCatalogCsv": "data/current_catalog.csv",
   "marketDataMode": "Simulated",
-  "statusDataMode": "Fallback seed until GitHub Actions build runs"
+  "statusDataMode": "Curated prototype labels; not automated or guaranteed current",
+  "experimentalPipeline": {
+    "targetRecords": 10000,
+    "publicationStatus": "not the catalog currently served by the Vercel beta"
+  }
 }

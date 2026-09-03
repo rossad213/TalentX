@@ -1,72 +1,39 @@
-# TalentX Non-Athlete Catalog Expansion v1
+# TalentX Non-Athlete Catalog Status
 
-## What changed
+## Current deployed counts
 
-TalentX now maintains 100 curated current listings in each non-athlete category:
+The 200-profile Current beta catalog includes:
 
-- Music: 100
-- Actors: 100
-- Creators: 100
+- Music: 40
+- Actors: 30
+- Creators: 20
+- Athletes: 110
 
-The athlete seed remains intact. The full generated current catalog is expected
-to contain approximately 10,410 records after the 10,000-name live roster build.
+These are curated prototype records. They are not proof of current professional status, verified performance, or a source-reported score.
 
-## Why a curated roster is used
+## Expansion work
 
-Team sports offer roster endpoints that can supply thousands of current names.
-Music, acting, and creator careers do not have one equivalent public roster API.
-The temporary solution is an explicit, reviewable roster stored in:
+`data/non_athlete_roster.json` and the associated scripts are experimental inputs for building larger Music, Actor, and Creator catalogs. Generated candidates must not be described as live or verified merely because a build completed.
 
-`data/non_athlete_roster.json`
+Before publication, every expanded profile needs:
 
-The roster is broad-market and internationally diversified. Candidate selection
-was informed by Spotify's 2025 music lists, IMDb's 2025 popular-star list, and
-Forbes' 2025 creator coverage. Inclusion is not proof of a verified score.
+- stable identity resolution;
+- an approved source record and URL;
+- a verification timestamp;
+- category and role review;
+- a current-status determination;
+- data-confidence scoring; and
+- licensing and redistribution review.
 
 ## Pricing behavior
 
-Each record includes an explicit `benchmarkRank`. The pricing model now reads
-that field instead of silently depending on JSON array order. This protects
-relative valuations when the seed is regenerated or sorted.
+Benchmark ranks and generated market fields are temporary prototype inputs. They must not be represented as real rankings, valuations, earnings, popularity measures, or financial instruments.
 
-All non-athlete records remain labeled:
+## Safe release process
 
-`Curated benchmark prior — profession evidence required`
-
-The benchmark rank is temporary. It must be replaced by category evidence feeds
-for streaming/catalog data, project and box-office data, or creator reach and
-engagement data.
-
-## Build order
-
-The Pages workflow now runs:
-
-1. `scripts/build_non_athlete_catalog.py`
-2. `scripts/build_current_catalog.py`
-3. athlete evidence enrichment
-4. universal repricing
-5. pricing and catalog validation
-6. Pages deployment
-
-## Adding or moving a name
-
-Edit only `data/non_athlete_roster.json`.
-
-- Add the profile metadata.
-- Assign a unique benchmark rank in that category.
-- Keep ranks consecutive from 1 through the category total.
-- Run `python scripts/build_non_athlete_catalog.py`.
-- Run the normal repricing and validation scripts.
-
-The builder creates stable IDs and tickers, updates the taxonomy, rebuilds the
-seed, and writes `data/non_athlete_manifest.json`.
-
-## Validation safeguards
-
-The validation suite now checks:
-
-- at least 100 Music, Actor, and Creator records;
-- unique benchmark ranks;
-- benchmark fundamentals remain ordered by rank;
-- explicit cross-category regression comparisons;
-- all existing pricing-model checks and evidence caps.
+1. Build a candidate catalog.
+2. Validate required fields and uniqueness.
+3. Review source coverage and identity matches.
+4. Audit category, role, team/platform, and current status.
+5. Review licensing and publicity-rights risks.
+6. Publish only through a deliberate release step.

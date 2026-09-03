@@ -1,16 +1,24 @@
-TALENTX V3 PACKAGE VERIFICATION
+TALENTX CURATED BETA CATALOG AUDIT
 
-Completed checks before packaging:
-- Python scripts compile successfully.
-- app.js passes Node syntax checking.
-- JSON data files parse successfully.
-- GitHub Actions workflow parses as valid YAML.
-- ESPN roster parser and simulated market-field builder pass a local fixture smoke test.
-- The static site and fallback current catalog load through a local HTTP server.
-- The ZIP includes hidden .github, .nojekyll, and .gitignore entries.
+Audited: 2026-09-03
+
+Current deployed catalog:
+- JSON records: 200
+- CSV records: 200
+- Athletes: 110
+- Music: 40
+- Actors: 30
+- Creators: 20
+- Unique names: 200
+- Unique IDs: 200
+- Unique tickers: 200
+- Missing required identity or market fields: 0
+- Invalid market prices: 0
+- Automated roster-verified records: 0
 
 IMPORTANT:
-- The downloadable package contains the 200-person fallback catalog for offline preview.
-- The 10,000 additional current-athlete records are generated on a network-enabled GitHub Actions runner from point-in-time roster endpoints.
-- The workflow refuses to deploy if it cannot produce at least 10,000 automated roster-sourced profiles.
-- All TalentX prices, scores, charts, movement, volume, portfolios, and trades are simulated.
+- The deployed Vercel beta uses the committed 200-profile curated catalog.
+- The 10,000-record workflow is experimental and uploads candidate output as a temporary artifact.
+- Generated workflow output does not automatically replace the Vercel catalog.
+- Names, teams, roles, and statuses are not guaranteed current.
+- All TalentX market values and trading activity are simulated.

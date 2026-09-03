@@ -1,72 +1,52 @@
 # TalentX Current Catalog Pipeline
 
-## Objective
+## Current production state
 
-Build a point-in-time Current market containing the existing curated seed plus 10,000 additional active athletes, without filling the catalog with historical names or silently accepting an incomplete build.
+The deployed Vercel beta reads the committed 200-profile catalog in `data/current_catalog.json`. Those profiles are curated prototype records, not automated roster-verified records.
 
-## Inclusion rule
+## Experimental objective
 
-A new athlete enters this automated batch only when:
+The separate workflow `.github/workflows/build-current-catalog-and-pages.yml` experiments with building a larger point-in-time catalog from roster and professional-source endpoints. Its target is 10,000 source-backed Current records, but that target is a pipeline acceptance condition—not the live catalog size.
 
-1. The athlete appears in a current team-roster response during the build.
-2. The source does not explicitly mark the athlete inactive.
+## Inclusion rule for automated records
+
+An automated record should enter a generated batch only when:
+
+1. The person appears in an approved current source response.
+2. The source does not explicitly mark the person inactive.
 3. A usable source identity and person name are present.
-4. The athlete is not a duplicate within the same sport.
-5. The generated catalog passes minimum-count, source-metadata, unique-ID, unique-ticker, and schema checks.
+4. The record is not a duplicate.
+5. Required source metadata and schema checks pass.
 
-This is point-in-time automated verification, not a promise that the person remains active indefinitely. Every generated record includes `lastVerifiedAt`, `sourceUrl`, `sourceRecordId`, and `dataConfidence`.
+Each automated record must include `lastVerifiedAt`, `sourceUrl`, `sourceRecordId`, `sourceNamespace`, and `dataConfidence`. Point-in-time verification is not a promise that the person's status remains current indefinitely.
 
-## Current source families
+## Current source families under test
 
-- ESPN current team-roster endpoints for the NFL, NBA, WNBA, MLB, and configured soccer leagues.
-- NHL current roster endpoints from `api-web.nhle.com`.
+- ESPN team-roster endpoints for supported leagues
+- NHL roster endpoints from `api-web.nhle.com`
+- Curated and public professional-source experiments for non-athlete categories
 
-The source manifest records which leagues returned data and which endpoints failed. A failed source does not cause historical names to be substituted. The build continues through other current sources, but deployment fails if the requested minimum cannot be met.
+Source licensing, reliability, identity matching, and commercial permissions must be resolved before production use.
 
-## Catalog output
+## Workflow behavior
 
-- `data/current_catalog.json`: application data used by TalentX.
-- `data/current_catalog.csv`: reviewable export containing identity, category, team, role, status, source, confidence, and simulated market fields.
-- `data/current_source_manifest.json`: source-by-source build results and errors.
-- `data/catalog_manifest.json`: total counts and category/league summaries.
+The experimental workflow runs weekly, can be started manually, and may run after relevant pipeline inputs change. It:
+
+- builds and enriches a candidate catalog;
+- validates count, uniqueness, required fields, and source metadata;
+- fails when its acceptance thresholds are not met; and
+- uploads successful output as a temporary GitHub Actions artifact.
+
+The workflow does **not** automatically replace the catalog served by the Vercel beta.
 
 ## Market fields
 
-The roster source establishes identity and point-in-time active status only. TalentX generates deterministic simulated values for:
+Identity/status sources do not supply TalentX prices. Market price, Career Score, fundamental value, movement, volume, and charts remain simulated and must never be described as source-reported facts.
 
-- Market price
-- Career Score
-- Fundamental value
-- Daily change
-- Demand premium
-- Momentum
-- Trading volume
-- Chart history
-- Active and legacy model factors
+## Publication rule
 
-These fields must never be described as source-reported facts.
-
-## Refresh behavior
-
-The GitHub workflow runs:
-
-- On a push to `main`
-- Manually through `workflow_dispatch`
-- Daily on a scheduled cron
-
-The generated catalog is deployed as a GitHub Pages artifact. It is not committed back into the repository, so the workflow does not require repository write permission.
-
-## Failure behavior
-
-The workflow refuses to deploy when:
-
-- Fewer than 10,000 automated roster-sourced records are produced.
-- IDs or tickers are duplicated.
-- Required profile fields are missing.
-- Current catalog records are not marked Active and Current.
-- Automated records lack source URLs, source IDs, or verification timestamps.
-- CSV, JSON, and manifest counts disagree.
+A generated catalog should be published only after its source coverage, licensing, identity matches, category assignments, status freshness, and application performance have been reviewed. Publication should be a deliberate release step.
 
 ## Next production step
 
-At larger scale, source records should be stored in PostgreSQL with separate identity, status-history, source-observation, pricing-event, and market-snapshot tables. A search service should return paginated results instead of shipping a full catalog to every browser.
+Move canonical records into PostgreSQL with separate identity, source-observation, status-history, pricing-event, and market-snapshot tables. Serve search and profiles through paginated APIs instead of shipping a very large JSON file to every visitor.
