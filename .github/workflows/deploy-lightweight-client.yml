@@ -28,7 +28,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: talentx-lightweight-pages
+  group: talentx-lightweight-pages-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
