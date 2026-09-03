@@ -1,50 +1,94 @@
-# TalentX beta
+# TalentX v3 — 10,000-Name Current-Roster Expansion
 
-TalentX is a virtual market for following athletes, musicians, actors, and creators. All prices, scores, movements, charts, portfolios, and trades are simulated; no real money changes hands.
+TalentX is a virtual market for following the career trajectories of athletes, music artists, actors, and creators.
 
-## Current live catalog
+This version adds a GitHub Actions data pipeline that builds **10,000 additional current-athlete profiles** from point-in-time team-roster endpoints before the site is deployed. It keeps the existing Current, Legacy, Under Review, retirement, and Rookie IPO systems.
 
-The deployed beta currently uses `data/current_catalog.json`, which contains **200 curated Current profiles**:
+## What the automated build does
 
-- 110 athletes
-- 40 music profiles
-- 30 actors
-- 20 creators
+- Reads the existing 200-person curated seed.
+- Collects current athletes from team-roster endpoints for the NFL, NBA, WNBA, MLB, NHL, major soccer leagues, lower soccer divisions, and women's soccer leagues.
+- Deduplicates people by source identity and normalized name/sport.
+- Attaches sport, league, team, position, country when available, source URL, source record ID, last-verified timestamp, and confidence.
+- Stops after **10,000 genuinely new roster-sourced names** have been collected.
+- Fails instead of deploying a catalog that is below the requested minimum.
+- Generates `data/current_catalog.json` and `data/current_catalog.csv`.
+- Saves the generated JSON/CSV as a downloadable workflow artifact for 14 days.
+- Deploys the generated site through GitHub Pages.
+- Refreshes the roster snapshot daily.
 
-The repository also contains 4,951 Legacy or Under Review reference profiles, for 5,151 records across all catalog files. Those historical/reference records are not presented as verified current listings.
+## Important distinction
 
-## Catalog confidence and limitations
+**Active status data** comes from point-in-time roster feeds during the GitHub Actions build. It can become outdated after the recorded timestamp and must be refreshed.
 
-The 200 Current profiles are curated prototype records. They have complete required identity and market fields, but they are **not connected to automated live career-status feeds**:
+**TalentX market data remains simulated.** Prices, Career Scores, daily changes, demand premiums, momentum, charts, volume, portfolios, and trades are not real financial or career valuations.
 
-- Curated Current profiles: 200
-- Automated roster-verified Current profiles: 0
-- Data-confidence value: 0.70 for every Current profile
-- Missing required identity/market fields: 0
-- Duplicate names, IDs, or tickers: 0
-- JSON and CSV Current record counts: 200 each
+## Publish this version
 
-Names, teams, roles, and career statuses can become outdated. Production use requires approved sources, timestamps, source IDs, correction workflows, and recurring verification.
+This package uses a custom GitHub Pages workflow. The repository's Pages source must be set to **GitHub Actions**, not `Deploy from a branch`.
 
-## Experimental expansion pipeline
+1. Upload everything in this folder to the root of the TalentX repository, including the hidden `.github` folder.
+2. In macOS Finder, press **Command + Shift + .** to show `.github` and `.nojekyll` before dragging files into GitHub.
+3. In GitHub, open **Settings → Pages**.
+4. Under **Build and deployment → Source**, choose **GitHub Actions**.
+5. Open **Actions → Build current catalog and deploy TalentX**.
+6. Run the workflow, or wait for the push-triggered run.
+7. The workflow will only deploy after the 10,000-name catalog passes validation.
 
-The workflow in `.github/workflows/build-current-catalog-and-pages.yml` is an experimental catalog builder. It targets a larger source-backed catalog, runs weekly or manually, validates its output, and uploads a temporary workflow artifact. Its generated records are not the catalog currently served by the Vercel beta unless they are separately reviewed and published.
+Detailed steps are in `GITHUB_UPDATE_INSTRUCTIONS.txt`.
 
-## Application data flow
+## Local preview
 
-- `data/current_catalog.json`: 200-profile Current beta catalog used by the application
-- `data/current_catalog.csv`: reviewable export matching the Current JSON catalog
-- `data/catalog_manifest.json`: authoritative counts and QA status for the deployed catalog files
-- `data/current_source_manifest.json`: source and verification status for the Current catalog
-- `data/legacy_catalog_v2.json`: Legacy and Under Review reference profiles
-- `data/taxonomy.json`: categories, disciplines, filters, and career-status vocabulary
+The downloaded package includes the 200-person fallback catalog so it can be previewed without network access:
+
+```bash
+python3 -m http.server
+```
+
+Open `http://localhost:8000`.
+
+The full 10,000-name expansion is generated on a network-enabled GitHub Actions runner.
+
+## Repository layout
+
+```text
+TalentX/
+├── .github/
+│   └── workflows/
+│       └── build-current-catalog-and-pages.yml
+├── .nojekyll
+├── index.html
+├── requirements.txt
+├── styles.css
+├── app.js
+├── data/
+│   ├── current_seed.json
+│   ├── current_catalog.json       # fallback locally; generated during deployment
+│   ├── current_catalog.csv        # fallback locally; generated during deployment
+│   ├── current_source_manifest.json
+│   ├── legacy_catalog_v2.json
+│   ├── taxonomy.json
+│   └── catalog_manifest.json
+├── scripts/
+│   ├── build_current_catalog.py
+│   ├── validate_current_catalog.py
+│   ├── migrate_catalog.py
+│   └── validate_catalog.py
+├── docs/
+│   ├── CURRENT_CATALOG_PIPELINE.md
+│   ├── RETIREMENT_AND_STATUS_POLICY.md
+│   ├── ROOKIE_IPO_POLICY.md
+│   └── SCALING_ARCHITECTURE.md
+└── database/
+    └── schema.sql
+```
 
 ## Career lifecycle rules
 
-Retirement does not send a person's simulated price to zero. A verified retirement should move the profile from the Active Career Model to the Legacy Career Model.
+Retirement does not send a person's price to zero. TalentX changes an athlete from the Active Career Model to the Legacy Career Model after the retirement is verified.
 
 Rookies can use the separate Rookie IPO model, with draft capital fading as professional evidence accumulates.
 
-## Production direction
+## Scaling
 
-Before materially expanding the catalog, TalentX should move canonical identity, status history, source observations, pricing events, accounts, portfolios, and trades to a database-backed service with server-side search and pagination. See `docs/SCALING_ARCHITECTURE.md`.
+A 10,000-person generated JSON catalog is acceptable for this prototype. A catalog approaching hundreds of thousands or one million people should move to a real backend, server-side search, cursor pagination, source-history tables, and incremental ingestion rather than making every visitor download the entire database.

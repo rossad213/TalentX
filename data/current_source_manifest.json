@@ -1,19 +1,7 @@
 {
   "generatedAt": null,
-  "lastAuditedAt": "2026-09-03",
+  "targetAdditions": 10000,
   "totalRecords": 200,
-  "curatedRecords": 200,
-  "automatedRosterVerifiedRecords": 0,
-  "mode": "Committed curated beta catalog",
-  "sources": [
-    {
-      "name": "TalentX current-first seed",
-      "recordCount": 200,
-      "automated": false
-    }
-  ],
-  "limitations": [
-    "No Current profile has a live source URL, source record ID, or verification timestamp.",
-    "Names, teams, roles, and career statuses require recurring authoritative verification before production use."
-  ]
+  "mode": "Fallback preview. The GitHub Actions workflow builds the live current catalog from roster endpoints before deployment.",
+  "sources": []
 }

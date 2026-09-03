@@ -20,9 +20,5 @@
   },
   "market_fields": "Simulated and deterministic for prototype use",
   "source_fields": "Derived from the source snapshots named on each record; not guaranteed current",
-  "qa_status": "Passed catalog count, category count, unique name, unique ID, unique ticker, required identity field, and CSV row checks",
-  "scope": "Historical/reference source snapshot; not the deployed Current catalog",
-  "live_current_catalog_file": "data/current_catalog.json",
-  "live_current_catalog_records": 200,
-  "live_current_catalog_status": "Curated prototype; 0 automated roster-verified records"
+  "qa_status": "Passed catalog count, category count, unique name, unique ID, unique ticker, required identity field, and CSV row checks"
 }

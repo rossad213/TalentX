@@ -1,14 +1,8 @@
 # Sources, Attribution, and Limitations
 
-## Current deployed beta catalog
-
-The deployed Current catalog contains 200 manually curated prototype profiles: 110 athletes, 40 music profiles, 30 actors, and 20 creators. These records are not connected to automated live career-status feeds. Their names, teams, roles, and statuses require source review before production or commercial use.
-
-The source references below primarily describe the larger Legacy and Under Review reference dataset and experimental catalog-building work. They do not convert the 200 Current profiles into live-verified records.
-
 ## Fjelstul World Cup Database
 
-Player records in the reference dataset are derived from the Fjelstul World Cup Database v1.2.0.
+Player records are derived from the Fjelstul World Cup Database v1.2.0.
 
 Required attribution: **Joshua C. Fjelstul, Ph.D., © 2023**. Licensed under **Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)**. This prototype modifies the source by selecting, ranking, normalizing, and combining records with simulated market fields.
 
@@ -25,11 +19,11 @@ Dataset page: https://pantheon.world/data
 
 ## TMDB 5000 sample
 
-Actor and selected music-credit records in the reference dataset are derived from a historical TMDB 5000 credits sample used for prototyping. This package does not represent the sample as a current, complete, or commercially licensed talent feed. Original source terms, attribution requirements, TMDB API terms, and redistribution permissions must be reviewed before commercial use.
+Actor and selected music-credit records are derived from a historical TMDB 5000 credits sample used for prototyping. This package does not represent the sample as a current, complete, or commercially licensed talent feed. Original source terms, attribution requirements, TMDB API terms, and any redistribution permissions must be reviewed before commercial use.
 
-## Curated Current records
+## Curated anchor records
 
-Familiar public figures are included as manually curated prototype records. Their labels are not guaranteed current. Production records require authoritative identity resolution, current source checks, verification timestamps, and correction workflows.
+A small number of familiar public figures are included as manually curated prototype anchors. Their basic labels are not guaranteed current. Production records require authoritative identity resolution, current source checks, and correction workflows.
 
 ## Simulated fields
 
