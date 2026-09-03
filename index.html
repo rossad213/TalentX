@@ -87,10 +87,17 @@
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const dataRequest = url.startsWith('./data/') || url.includes('/TalentX/data/') || url.includes('/data/');
     const currentCatalogRequest = /(?:^|\/)data\/current_catalog\.json(?:$|[?#])/.test(url);
+    const catalogManifestRequest = /(?:^|\/)data\/catalog_manifest\.json(?:$|[?#])/.test(url);
     if (currentCatalogRequest) {
       const fresh = {...init, cache: 'no-store'};
       return nativeFetch('./data/catalog_index.json', fresh)
         .then(response => response.ok ? response : nativeFetch(`${publishedDataBase}/catalog_index.json`, fresh))
+        .then(response => response.ok ? response : nativeFetch(input, fresh))
+        .catch(() => nativeFetch(input, fresh));
+    }
+    if (catalogManifestRequest) {
+      const fresh = {...init, cache: 'no-store'};
+      return nativeFetch(`${publishedDataBase}/catalog_manifest.json`, fresh)
         .then(response => response.ok ? response : nativeFetch(input, fresh))
         .catch(() => nativeFetch(input, fresh));
     }
