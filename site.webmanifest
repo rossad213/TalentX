@@ -6,15 +6,22 @@
   "start_url": "./?source=pwa",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "any",
   "background_color": "#061019",
   "theme_color": "#061019",
-  "categories": ["sports", "entertainment", "finance"],
+  "categories": [
+    "sports",
+    "entertainment",
+    "finance"
+  ],
   "icons": [
     {
-      "src": "./assets/favicon-512.png",
-      "sizes": "512x512",
+      "src": "./assets/favicon-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
@@ -22,7 +29,7 @@
       "src": "./assets/favicon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any maskable"
     }
   ]
 }
