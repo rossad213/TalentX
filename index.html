@@ -82,12 +82,22 @@
     window.structuredClone = value => JSON.parse(JSON.stringify(value));
   }
   const nativeFetch = window.fetch.bind(window);
+  const publishedDataBase = 'https://rossad213.github.io/TalentX/data';
   window.fetch = (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const dataRequest = url.startsWith('./data/') || url.includes('/TalentX/data/') || url.includes('/data/');
+    const currentCatalogRequest = /(?:^|\/)data\/current_catalog\.json(?:$|[?#])/.test(url);
+    if (currentCatalogRequest) {
+      const fresh = {...init, cache: 'no-store'};
+      return nativeFetch('./data/catalog_index.json', fresh)
+        .then(response => response.ok ? response : nativeFetch(`${publishedDataBase}/catalog_index.json`, fresh))
+        .then(response => response.ok ? response : nativeFetch(input, fresh))
+        .catch(() => nativeFetch(input, fresh));
+    }
     if (dataRequest) return nativeFetch(input, {...init, cache: 'no-store'});
     return nativeFetch(input, init);
   };
+  window.__talentxDataFallbackBase = publishedDataBase;
 })();
 </script>
 <script src="./assets/pricing-model-migration-5.2.js?v=20260806-1"></script>
@@ -95,7 +105,7 @@
 <script src="./assets/account-home-routing.js?v=20260901-2"></script>
 <script src="./assets/public-home.js?v=20260903-5"></script>
 <script src="./assets/rookie-ipo-calibration.js?v=20260831-1"></script>
-<script src="./assets/catalog-profile-loader.js?v=20260811-1"></script>
+<script src="./assets/catalog-profile-loader.js?v=20260903-2"></script>
 <script src="./chart-history.js?v=20260807-2"></script>
 <script src="./discovery-profile.js"></script>
 <script src="./assets/sortable-market-table.js"></script>

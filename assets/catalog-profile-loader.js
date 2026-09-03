@@ -23,7 +23,11 @@
 
     const task = (async () => {
       const shard = String(bucketFor(id)).padStart(3, '0');
-      const res = await fetch(`./data/profile_shards/${shard}.json`, {cache: 'no-store'});
+      const localUrl = `./data/profile_shards/${shard}.json`;
+      let res = await fetch(localUrl, {cache: 'no-store'});
+      if (!res.ok && window.__talentxDataFallbackBase) {
+        res = await fetch(`${window.__talentxDataFallbackBase}/profile_shards/${shard}.json`, {cache: 'no-store'});
+      }
       if (!res.ok) throw new Error(`Profile shard ${shard} could not load`);
       const payload = await res.json();
       const full = payload && payload[id];
