@@ -22,6 +22,7 @@ on:
       - "!scripts/music_release_coverage_sweep.py"
       - "!scripts/non_athlete_outcome_refresh.py"
       - "!scripts/creator_attention_refresh.py"
+      - "!scripts/expand_creator_market.py"
       - "!scripts/repair_non_athlete_outcome_manifest.py"
       - "!scripts/normalize_non_athlete_event_timestamps.py"
       - "!scripts/pricing_engine_v2_catalog.py"
