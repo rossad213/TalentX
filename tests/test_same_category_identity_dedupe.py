@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from category_market_store import dedupe_same_category_identities
+from same_category_identity_dedupe import dedupe_same_category_identities
 
 
 def test_curated_music_record_wins_over_discovered_duplicate():
@@ -50,13 +50,40 @@ def test_same_name_in_different_categories_is_not_collapsed_here():
     assert repairs == []
 
 
-def test_strongest_record_wins_when_no_curated_record_exists():
+def test_unverified_same_name_homonyms_are_preserved():
+    records = [
+        {
+            "id": "one",
+            "name": "Jordan Lee",
+            "primaryCategory": "Music",
+            "sourceNamespace": "wikidata-non-athlete",
+            "sourceRecordId": "Q111",
+            "dataConfidence": 0.72,
+        },
+        {
+            "id": "two",
+            "name": "Jordan Lee",
+            "primaryCategory": "Music",
+            "sourceNamespace": "wikidata-music-strict",
+            "sourceRecordId": "Q222",
+            "dataConfidence": 0.88,
+        },
+    ]
+
+    deduped, repairs = dedupe_same_category_identities(records)
+
+    assert len(deduped) == 2
+    assert repairs == []
+
+
+def test_shared_source_identity_is_collapsed():
     records = [
         {
             "id": "one",
             "name": "Example Artist",
             "primaryCategory": "Music",
             "sourceNamespace": "wikidata-non-athlete",
+            "sourceRecordId": "Q333",
             "dataConfidence": 0.72,
             "pricingConfidence": 0.60,
         },
@@ -65,6 +92,7 @@ def test_strongest_record_wins_when_no_curated_record_exists():
             "name": "Example Artist",
             "primaryCategory": "Music",
             "sourceNamespace": "wikidata-music-strict",
+            "sourceRecordId": "Q333",
             "dataConfidence": 0.88,
             "pricingConfidence": 0.68,
         },
