@@ -1,4 +1,4 @@
-/* TalentX Supabase auth + first-pass account sync. */
+/* TalentX Supabase auth + server-authoritative signed-in portfolio sync. */
 (() => {
   const PROJECT_URL='https://selifenorvjodihiaexw.supabase.co';
   const PUBLISHABLE_KEY='sb_publishable_kHtyJKFgJHZy4kRaL5XJ6Q_gqEphAtY';
@@ -15,6 +15,7 @@
   });
   window.talentxSupabase=client;
   window.__talentxAuthUser=null;
+  window.__talentxCloudAuthoritative=true;
   let applyingCloud=false;
   let syncTimer=null;
 
@@ -23,72 +24,22 @@
     else console.log(message);
   }
 
-  function hasGuestActivity(){
-    try{
-      return Math.abs(Number(state.cash??STARTING_CASH)-STARTING_CASH)>.005 ||
-        Object.keys(state.holdings||{}).length>0 ||
-        (state.watchlist||[]).length>0 ||
-        (state.transactions||[]).length>0;
-    }catch{return false;}
-  }
-
-  function transactionKey(tx,index){
-    const time=Number(tx?.time||0);
-    return [tx?.id||'talent',tx?.mode||'trade',tx?.shares||0,time||index].join(':');
-  }
-
-  async function uploadLocalState(userId){
+  async function syncWatchlist(userId){
     if(!userId||applyingCloud) return;
-    const holdings=Object.entries(state.holdings||{}).filter(([,shares])=>Number(shares)>0);
-    const watchlist=[...(state.watchlist||[])];
-    const txs=[...(state.transactions||[])].slice(0,200);
-
-    const {error:accountError}=await client.from('account_state').upsert({
-      user_id:userId,
-      virtual_cash:Number(state.cash||0),
-      pricing_state_revision:String(state.pricingStateRevision||state.pricingModelVersion||'')||null,
-      updated_at:new Date().toISOString()
-    },{onConflict:'user_id'});
-    if(accountError) throw accountError;
-
-    const {error:deleteHoldingsError}=await client.from('holdings').delete().eq('user_id',userId);
-    if(deleteHoldingsError) throw deleteHoldingsError;
-    if(holdings.length){
-      const rows=holdings.map(([talentId,shares])=>({user_id:userId,talent_id:talentId,shares:Number(shares),average_cost:0}));
-      const {error}=await client.from('holdings').insert(rows);
-      if(error) throw error;
-    }
-
-    const {error:deleteWatchError}=await client.from('watchlist').delete().eq('user_id',userId);
-    if(deleteWatchError) throw deleteWatchError;
+    const watchlist=[...(state.watchlist||[])].map(String);
+    const {error:deleteError}=await client.from('watchlist').delete().eq('user_id',userId);
+    if(deleteError) throw deleteError;
     if(watchlist.length){
-      const rows=watchlist.map(talentId=>({user_id:userId,talent_id:String(talentId)}));
+      const rows=watchlist.map(talentId=>({user_id:userId,talent_id:talentId}));
       const {error}=await client.from('watchlist').insert(rows);
       if(error) throw error;
     }
-
-    if(txs.length){
-      const rows=txs.map((tx,index)=>({
-        user_id:userId,
-        talent_id:String(tx.id||''),
-        side:tx.mode==='sell'?'sell':'buy',
-        shares:Number(tx.shares||0),
-        execution_price:Number(tx.price||0),
-        total_value:Number(tx.total||((Number(tx.price)||0)*(Number(tx.shares)||0))),
-        created_at:new Date(Number(tx.time)||Date.now()).toISOString(),
-        client_event_id:transactionKey(tx,index)
-      })).filter(row=>row.talent_id&&row.shares>0&&row.execution_price>=0&&row.total_value>=0);
-      if(rows.length){
-        const {error}=await client.from('transactions').upsert(rows,{onConflict:'user_id,client_event_id',ignoreDuplicates:true});
-        if(error) throw error;
-      }
-    }
   }
 
-  async function loadCloudState(userId,{allowGuestImport=true}={}){
+  async function loadCloudState(userId){
     const [accountRes,holdingsRes,watchRes,txRes]=await Promise.all([
       client.from('account_state').select('*').eq('user_id',userId).maybeSingle(),
-      client.from('holdings').select('talent_id,shares').eq('user_id',userId),
+      client.from('holdings').select('talent_id,shares,average_cost').eq('user_id',userId),
       client.from('watchlist').select('talent_id').eq('user_id',userId),
       client.from('transactions').select('talent_id,side,shares,execution_price,total_value,created_at,client_event_id').eq('user_id',userId).order('created_at',{ascending:false}).limit(200)
     ]);
@@ -96,19 +47,14 @@
     if(firstError) throw firstError;
 
     const cloudCash=Number(accountRes.data?.virtual_cash??STARTING_CASH);
-    const cloudHasNoActivity=!(holdingsRes.data||[]).length && !(watchRes.data||[]).length && !(txRes.data||[]).length;
-    const cloudPristine=(cloudCash===STARTING_CASH||cloudCash===LEGACY_STARTING_CASH)&&cloudHasNoActivity;
-
-    if(allowGuestImport&&cloudPristine&&hasGuestActivity()){
-      await uploadLocalState(userId);
-      notify('Your guest portfolio was added to your TalentX account.');
-      return;
-    }
+    const cloudHasNoTrades=!(holdingsRes.data||[]).length && !(txRes.data||[]).length;
+    const normalizedCash=(cloudCash===LEGACY_STARTING_CASH&&cloudHasNoTrades)?STARTING_CASH:cloudCash;
 
     applyingCloud=true;
     try{
-      state.cash=cloudPristine&&cloudCash===LEGACY_STARTING_CASH?STARTING_CASH:cloudCash;
-      state.holdings=Object.fromEntries((holdingsRes.data||[]).map(row=>[row.talent_id,Number(row.shares||0)]));
+      state.cash=normalizedCash;
+      state.purchasedCashTotal=Number(accountRes.data?.purchased_cash_total||0);
+      state.holdings=Object.fromEntries((holdingsRes.data||[]).filter(row=>Number(row.shares)>0).map(row=>[row.talent_id,Number(row.shares||0)]));
       state.watchlist=(watchRes.data||[]).map(row=>row.talent_id);
       state.transactions=(txRes.data||[]).map(row=>({
         id:row.talent_id,
@@ -116,24 +62,31 @@
         shares:Number(row.shares||0),
         price:Number(row.execution_price||0),
         total:Number(row.total_value||0),
-        time:Date.parse(row.created_at)||Date.now()
+        time:Date.parse(row.created_at)||Date.now(),
+        clientEventId:row.client_event_id||null
       }));
-      // Authoritative market prices remain catalog-driven; never cloud-sync stale simulated overrides.
+      // Signed-in cash, holdings and trades are authoritative in Supabase.
+      // Market prices remain catalog-driven rather than writable per-account overrides.
       state.prices={};
       if(typeof saveState==='function') saveState();
       if(typeof render==='function') render();
     }finally{
       applyingCloud=false;
     }
+    return {
+      cash:state.cash,
+      purchasedCashTotal:state.purchasedCashTotal,
+      holdings:state.holdings,
+      transactions:state.transactions
+    };
   }
 
   function scheduleCloudSync(){
     if(applyingCloud||!window.__talentxAuthUser?.id) return;
     clearTimeout(syncTimer);
     syncTimer=setTimeout(()=>{
-      uploadLocalState(window.__talentxAuthUser.id).catch(err=>{
-        console.warn('TalentX cloud sync failed',err);
-        notify('Cloud sync could not finish. Your local data is still safe.');
+      syncWatchlist(window.__talentxAuthUser.id).catch(err=>{
+        console.warn('TalentX watchlist sync failed',err);
       });
     },700);
   }
@@ -152,28 +105,21 @@
       const {data,error}=await client.auth.signInWithPassword({email,password});
       if(error) throw error;
       window.__talentxAuthUser=data.user||null;
-      if(data.user) await loadCloudState(data.user.id,{allowGuestImport:true});
+      if(data.user) await loadCloudState(data.user.id);
       return data;
     },
     async signup({email,password,name}){
       const {data,error}=await client.auth.signUp({
         email,password,
-        options:{
-          data:{display_name:name||''},
-          emailRedirectTo:APP_REDIRECT
-        }
+        options:{data:{display_name:name||''},emailRedirectTo:APP_REDIRECT}
       });
       if(error) throw error;
       window.__talentxAuthUser=data.user||null;
-      if(data.session&&data.user) await loadCloudState(data.user.id,{allowGuestImport:true});
+      if(data.session&&data.user) await loadCloudState(data.user.id);
       return data;
     },
     async resendConfirmation(email){
-      const {error}=await client.auth.resend({
-        type:'signup',
-        email,
-        options:{emailRedirectTo:APP_REDIRECT}
-      });
+      const {error}=await client.auth.resend({type:'signup',email,options:{emailRedirectTo:APP_REDIRECT}});
       if(error) throw error;
     },
     async logout(){
@@ -186,8 +132,16 @@
       const {error}=await client.auth.resetPasswordForEmail(email,{redirectTo});
       if(error) throw error;
     },
+    async refreshAccount(){
+      const user=window.__talentxAuthUser;
+      if(!user?.id) return null;
+      return loadCloudState(user.id);
+    },
     async syncNow(){
-      if(window.__talentxAuthUser?.id) await uploadLocalState(window.__talentxAuthUser.id);
+      const user=window.__talentxAuthUser;
+      if(!user?.id) return null;
+      await syncWatchlist(user.id);
+      return loadCloudState(user.id);
     }
   };
 
@@ -250,7 +204,7 @@
     const user=data.session?.user||null;
     window.__talentxAuthUser=user;
     if(user){
-      try{await loadCloudState(user.id,{allowGuestImport:false});}catch(err){console.warn('TalentX session restore sync failed',err);}
+      try{await loadCloudState(user.id);}catch(err){console.warn('TalentX session restore sync failed',err);}
     }
   });
 
