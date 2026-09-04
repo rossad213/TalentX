@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/creator-market-refresh.yml"
       - "scripts/creator_attention_refresh.py"
+      - "scripts/prepare_creator_wikipedia_identities.py"
       - "scripts/discover_creators_only.py"
       - "scripts/expand_creator_market.py"
       - "scripts/append_game_event_history.py"
@@ -90,6 +91,12 @@ jobs:
           --per-occupation-limit 1200
           --minimum-sitelinks 3
           --request-timeout 60
+      - name: Resolve exact Creator Wikipedia identities from Wikidata
+        run: >-
+          python scripts/prepare_creator_wikipedia_identities.py
+          --catalog data/market/creators.json
+          --manifest data/creator_attention_manifest.json
+          --request-timeout 20
       - name: Refresh verified Creator audience-attention outcomes
         run: >-
           python scripts/creator_attention_refresh.py
