@@ -8,8 +8,58 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from category_market_store import CSV_FIELDS
+from same_category_identity_dedupe import dedupe_same_category_identities
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
+
+
+def write_csv(records: list[dict], path: Path) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(records)
+
+
+def repair_same_category_duplicates(records: list[dict], catalog_path: Path, csv_path: Path, manifest_path: Path) -> tuple[list[dict], int]:
+    repaired, repairs = dedupe_same_category_identities(records)
+    if not repairs:
+        return records, 0
+
+    catalog_path.write_text(json.dumps(repaired, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    write_csv(repaired, csv_path)
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    category_counts = Counter(str(record.get("primaryCategory") or "") for record in repaired)
+    manifest["totalRecords"] = len(repaired)
+    manifest["currentCatalogRecords"] = len(repaired)
+    manifest["categories"] = dict(category_counts)
+    manifest["sameCategoryIdentityRepairs"] = int(manifest.get("sameCategoryIdentityRepairs") or 0) + len(repairs)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    market_dir = DATA / "market"
+    market_dir.mkdir(parents=True, exist_ok=True)
+    category_files = {
+        "Athlete": "sports.json",
+        "Music": "music.json",
+        "Actor": "actors.json",
+        "Creator": "creators.json",
+    }
+    for category, filename in category_files.items():
+        category_records = [record for record in repaired if record.get("primaryCategory") == category]
+        (market_dir / filename).write_text(
+            json.dumps(category_records, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+
+    print(f"Repaired {len(repairs):,} safe same-category duplicate listing(s) before validation.")
+    for repair in repairs[:20]:
+        print(
+            f"  {repair.get('category')}: {repair.get('name')} — kept {repair.get('primaryId')}, "
+            f"suppressed {repair.get('suppressedId')}"
+        )
+    return repaired, len(repairs)
 
 
 def main() -> int:
@@ -35,6 +85,9 @@ def main() -> int:
     if not isinstance(records, list):
         errors.append("current_catalog.json is not an array")
         records = []
+    else:
+        records, _ = repair_same_category_duplicates(records, catalog_path, csv_path, manifest_path)
+
     if len(records) < args.minimum:
         errors.append(f"Catalog has {len(records):,} records; expected at least {args.minimum:,}")
 
