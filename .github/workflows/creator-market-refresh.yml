@@ -6,10 +6,13 @@ on:
     paths:
       - ".github/workflows/creator-market-refresh.yml"
       - "scripts/creator_attention_refresh.py"
+      - "scripts/discover_creators_only.py"
+      - "scripts/expand_creator_market.py"
       - "scripts/append_game_event_history.py"
       - "scripts/append_price_history.py"
       - "scripts/category_market_store.py"
       - "tests/test_creator_attention_refresh.py"
+      - "tests/test_discover_creators_only.py"
       - "tests/test_category_market_store.py"
   workflow_run:
     workflows: ["Build current catalog baseline"]
@@ -52,6 +55,7 @@ jobs:
           gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline
           baseline_catalog="$(find _baseline -name current_catalog.json -print -quit)"
           test -n "$baseline_catalog" || { echo "Baseline artifact missing current_catalog.json"; exit 1; }
+          cp "$baseline_catalog" data/baseline_current_catalog.json
           python scripts/category_market_store.py extract --catalog "$baseline_catalog" --category creators --output data/market/creators.json
           prior_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/creator-market-refresh.yml/runs?status=success&per_page=1")"
           prior_id="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].id // empty')"
@@ -69,11 +73,23 @@ jobs:
               fi
             fi
           fi
-      - name: Validate Creator event pricing
+      - name: Validate Creator discovery and event pricing
         run: >-
           python -m unittest
+          tests/test_discover_creators_only.py
           tests/test_creator_attention_refresh.py
           tests/test_category_market_store.py -v
+      - name: Expand Creator coverage toward 1,000
+        run: >-
+          python scripts/expand_creator_market.py
+          --baseline data/baseline_current_catalog.json
+          --creator-catalog data/market/creators.json
+          --manifest data/creator_discovery_manifest.json
+          --target-total 1000
+          --minimum-total 900
+          --per-occupation-limit 1200
+          --minimum-sitelinks 3
+          --request-timeout 60
       - name: Refresh verified Creator audience-attention outcomes
         run: >-
           python scripts/creator_attention_refresh.py
@@ -91,4 +107,5 @@ jobs:
           path: |
             data/market/creators.json
             data/creator_attention_manifest.json
+            data/creator_discovery_manifest.json
           retention-days: 14
