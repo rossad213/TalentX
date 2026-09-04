@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Build and maintain dated TalentX price history.
+"""Maintain dated TalentX price history from actual recorded events/observations.
 
-Verified game or market events are appended as permanent dated points. When a
-record has an older undated ``trend`` but no dated history yet, the trend is
-mapped across the prior six months as a clearly marked reconstructed baseline.
-This gives the range filters useful history immediately without pretending the
-legacy points were observed on exact dates.
+Only dated TalentX observations and explicitly supported dated events are stored.
+Legacy undated trend arrays are never mapped onto invented calendar dates. If a
+profile lacks dated history, it remains without dated history until a real,
+source-backed event or a recorded TalentX observation exists.
 """
 from __future__ import annotations
 
@@ -17,7 +16,6 @@ from typing import Any
 
 MAX_HISTORY_POINTS = 2500
 MAX_HISTORY_AGE_DAYS = 3650
-RECONSTRUCTION_DAYS = 182
 
 
 def parse_time(value: Any) -> datetime | None:
@@ -55,6 +53,10 @@ def existing_history(record: dict[str, Any]) -> list[dict[str, Any]]:
     for item in raw:
         if not isinstance(item, dict):
             continue
+        # Purge legacy reconstructed/synthetic dated points as they pass through.
+        history_type = str(item.get("historyType") or "verified").strip().lower()
+        if history_type in {"reconstructed", "synthetic"} or item.get("reconstructed") is True or item.get("synthetic") is True:
+            continue
         timestamp = parse_time(item.get("time") or item.get("date") or item.get("timestamp"))
         price = number(item.get("price") or item.get("value") or item.get("marketPrice"))
         if timestamp is None or price is None:
@@ -68,47 +70,19 @@ def existing_history(record: dict[str, Any]) -> list[dict[str, Any]]:
                 "phase": str(item.get("phase") or "close"),
                 "historyType": str(item.get("historyType") or "verified"),
                 "eventType": str(item.get("eventType") or "market"),
+                **({"source": item.get("source")} if item.get("source") else {}),
+                **({"provider": item.get("provider")} if item.get("provider") else {}),
+                **({"priceBasis": item.get("priceBasis")} if item.get("priceBasis") else {}),
             }
         )
     return output
 
 
-def reconstructed_baseline(record: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
-    raw = record.get("trend")
-    if not isinstance(raw, list):
-        return []
-    values = [number(value) for value in raw]
-    values = [value for value in values if value is not None]
-    if len(values) < 2:
-        return []
-
-    current = number(record.get("marketPrice"))
-    if current is not None:
-        values[-1] = current
-
-    end = parse_time(record.get("lastPriceRefreshAt")) or now
-    start = end - timedelta(days=RECONSTRUCTION_DAYS)
-    span = max(1, len(values) - 1)
-    return [
-        {
-            "time": iso_time(start + (end - start) * (index / span)),
-            "price": round(value, 2),
-            "eventId": f"reconstructed:{index}",
-            "label": "Reconstructed from saved TalentX market trend",
-            "phase": "close",
-            "historyType": "reconstructed",
-            "eventType": "historical-baseline",
-        }
-        for index, value in enumerate(values)
-    ]
-
-
 def append_supported_major_events(record: dict[str, Any], history: list[dict[str, Any]]) -> bool:
-    """Append dated non-game events only when an explicit price or impact exists.
+    """Append dated non-game events only when explicit supported impact exists.
 
-    Supported inputs may come from future injury, trade, award, suspension,
-    retirement, draft, free-agency, record, playoff, or championship feeds.
-    No movement is invented merely from a headline.
+    The upstream event itself must already carry a real date. This utility does
+    not infer dates or fabricate movement merely from a headline.
     """
     sources = [record.get("majorEvents"), record.get("careerEvents"), record.get("marketEvents")]
     events = next((source for source in sources if isinstance(source, list)), [])
@@ -120,6 +94,8 @@ def append_supported_major_events(record: dict[str, Any], history: list[dict[str
     prior_price = history[-1]["price"] if history else number(record.get("previousMarketPrice") or record.get("marketPrice"))
     for index, event in enumerate(events):
         if not isinstance(event, dict):
+            continue
+        if event.get("verified") is False or event.get("synthetic") is True or event.get("reconstructed") is True:
             continue
         when = parse_time(event.get("time") or event.get("date") or event.get("occurredAt"))
         if when is None:
@@ -144,6 +120,8 @@ def append_supported_major_events(record: dict[str, Any], history: list[dict[str
                 "phase": "close",
                 "historyType": "verified",
                 "eventType": str(event.get("type") or "career-event"),
+                **({"source": event.get("sourceUrl")} if event.get("sourceUrl") else {}),
+                **({"provider": event.get("provider")} if event.get("provider") else {}),
             }
         )
         known_ids.add(event_id)
@@ -154,19 +132,17 @@ def append_supported_major_events(record: dict[str, Any], history: list[dict[str
 
 def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[str, Any], bool]:
     result = dict(record)
+    original_history = result.get("priceHistory") if isinstance(result.get("priceHistory"), list) else []
     history = existing_history(result)
-    seeded = False
-    if not history:
-        history = reconstructed_baseline(result, now)
-        seeded = bool(history)
+    removed_legacy = len(history) != len(original_history)
 
     event_id = str(result.get("lastPriceEventId") or "").strip()
     event_time = parse_time(result.get("lastPriceEventAt"))
     current_price = number(result.get("marketPrice"))
     previous_price = number(result.get("previousMarketPrice"))
-    label = str(result.get("lastPriceEvent") or "Completed game")
+    label = str(result.get("lastPriceEvent") or "Completed event")
 
-    changed = seeded
+    changed = removed_legacy
     if event_id and event_time is not None and current_price is not None:
         already_recorded = any(item.get("eventId") == event_id and item.get("phase") == "close" for item in history)
         if not already_recorded:
@@ -179,7 +155,7 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
                         "label": label,
                         "phase": "open",
                         "historyType": "verified",
-                        "eventType": "game",
+                        "eventType": "recorded-event",
                     }
                 )
             history.append(
@@ -190,13 +166,15 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
                     "label": label,
                     "phase": "close",
                     "historyType": "verified",
-                    "eventType": "game",
+                    "eventType": "recorded-event",
                 }
             )
             changed = True
 
     changed = append_supported_major_events(result, history) or changed
 
+    # A current-market observation is a real TalentX observation at a real time;
+    # it is not historical backfill and does not imply a past event.
     if current_price is not None:
         latest_time = parse_time(result.get("lastPriceRefreshAt")) or now
         history.append(
@@ -207,7 +185,7 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
                 "label": "Current TalentX market price",
                 "phase": "close",
                 "historyType": "verified",
-                "eventType": "market",
+                "eventType": "market-observation",
             }
         )
 
@@ -224,8 +202,7 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
         seen.add(key)
         deduped.append(item)
     result["priceHistory"] = deduped[-MAX_HISTORY_POINTS:]
-    kinds = {str(item.get("historyType")) for item in result["priceHistory"]}
-    result["priceHistoryStatus"] = "verified-and-reconstructed" if len(kinds) > 1 else next(iter(kinds), "unavailable")
+    result["priceHistoryStatus"] = "verified" if result["priceHistory"] else "unavailable"
     return result, changed
 
 
@@ -242,7 +219,6 @@ def main() -> int:
     updated: list[dict[str, Any]] = []
     changed_count = 0
     with_history = 0
-    reconstructed = 0
     for item in payload:
         if not isinstance(item, dict):
             continue
@@ -250,12 +226,11 @@ def main() -> int:
         updated.append(record)
         changed_count += int(changed)
         with_history += int(bool(record.get("priceHistory")))
-        reconstructed += int(any(point.get("historyType") == "reconstructed" for point in record.get("priceHistory", [])))
 
     args.catalog.write_text(json.dumps(updated, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(
         f"Updated {changed_count:,} histories; {with_history:,} records contain dated history; "
-        f"{reconstructed:,} include a reconstructed six-month baseline."
+        "0 reconstructed dated baselines retained."
     )
     return 0
 
