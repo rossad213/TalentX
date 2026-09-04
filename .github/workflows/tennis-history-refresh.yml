@@ -25,7 +25,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -83,12 +83,12 @@ jobs:
             fi
           fi
 
-      - name: Build verified one-year Tennis event history
+      - name: Build verified three-year Tennis event history
         run: >-
           python market_jobs/tennis_scoreboard_history.py
           --catalog data/sports.json
           --output data/tennis.json
-          --days 365
+          --days 1095
           --request-timeout 15
           --chunk-days 28
           --max-game-move-pct 2.5
@@ -128,6 +128,7 @@ jobs:
               key=lambda r:(int(r.get("sourceRank") or r.get("rosterSourceRank") or 999999), str(r.get("name") or ""))
           )[:20]
           manifest={
+              "lookbackDays":1095,
               "tennisRecords":len(records),
               "coveredRecords":len(covered),
               "coveragePct":round((len(covered)/len(records)*100) if records else 0,2),
