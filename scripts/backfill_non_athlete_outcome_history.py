@@ -1,39 +1,35 @@
 #!/usr/bin/env python3
-"""Add verified historical outcome events without changing today's market price.
+"""Strictly verify historical Music/Actor event dates and remove inferred outcomes.
 
-Music uses Wikidata chart placements tied to already verified release events.
-Actors use Wikidata box office versus production cost when both amounts share a
-currency. The generated outcome moves use the same bounded outcome policy as
-live TalentX pricing, then the historical event chain is reconstructed backward
-from the unchanged current market price.
+Historical charts may contain source-backed releases/projects, but they must not
+place chart or box-office outcomes on guessed dates. Earlier code used release
++7 days and release +21 days for some outcome events; this verifier removes those
+from historical chart history unless a future adapter supplies an independently
+verified outcome date.
+
+For release/project history, Wikidata must confirm:
+  * the work is related to the TalentX person (performer or cast member), and
+  * P577 contains a day-precision publication/release date matching startedAt.
+Music releases also keep their MusicBrainz release-group source.
+
+Today's TalentX market price is never changed by this script.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from backfill_non_athlete_event_history import (
-    event_key,
-    event_time,
-    existing_events,
-    history_from_events,
-    merge_events,
-    reconstruct_chain,
-)
-from non_athlete_event_refresh import clamp, iso, number, qid_for, utc_now
-from non_athlete_outcome_refresh import (
-    MAX_OUTCOME_MOVE_PCT,
-    actor_box_office_target,
-    best_box_office_ratio,
-    chart_target,
-    music_chart_positions,
-    record_multiplier,
-    wikidata_entities,
-)
+import requests
+
+from backfill_non_athlete_event_history import history_from_events, reconstruct_chain
+from non_athlete_event_refresh import iso, qid_for, utc_now
+
+WIKIDATA_API = "https://www.wikidata.org/w/api.php"
+INFERRED_HISTORICAL_OUTCOMES = {"music-chart-outcome", "actor-box-office-outcome"}
 
 
 def load_catalog(path: Path) -> list[dict[str, Any]]:
@@ -56,156 +52,192 @@ def parse_time(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def release_events(record: dict[str, Any], category: str, cutoff: datetime, now: datetime) -> list[dict[str, Any]]:
-    wanted = "music-release" if category == "Music" else "actor-release"
-    output: list[dict[str, Any]] = []
-    for event in existing_events(record):
-        if str(event.get("eventType") or "") != wanted:
-            continue
-        when = parse_time(event.get("startedAt"))
-        work_qid = str(event.get("workQid") or event.get("eventId") or "")
-        if when is None or when < cutoff or when > now or not re.fullmatch(r"Q\d+", work_qid):
-            continue
-        output.append({**event, "_when": when, "_workQid": work_qid})
+def entity_claims(entity: dict[str, Any], prop: str) -> list[dict[str, Any]]:
+    claims = entity.get("claims") if isinstance(entity.get("claims"), dict) else {}
+    rows = claims.get(prop) if isinstance(claims.get(prop), list) else []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def claim_item_qids(entity: dict[str, Any], prop: str) -> set[str]:
+    output: set[str] = set()
+    for claim in entity_claims(entity, prop):
+        snak = claim.get("mainsnak") if isinstance(claim.get("mainsnak"), dict) else {}
+        value = ((snak.get("datavalue") or {}).get("value")) if isinstance(snak.get("datavalue"), dict) else None
+        if isinstance(value, dict):
+            qid = str(value.get("id") or "")
+            if re.fullmatch(r"Q\d+", qid):
+                output.add(qid)
     return output
 
 
-def outcome_move(record: dict[str, Any], target: float) -> float:
-    return round(clamp(target * record_multiplier(record), -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT), 3)
+def exact_release_dates(entity: dict[str, Any]) -> set[str]:
+    output: set[str] = set()
+    for claim in entity_claims(entity, "P577"):
+        snak = claim.get("mainsnak") if isinstance(claim.get("mainsnak"), dict) else {}
+        data = snak.get("datavalue") if isinstance(snak.get("datavalue"), dict) else {}
+        value = data.get("value") if isinstance(data.get("value"), dict) else {}
+        precision = int(value.get("precision") or 0) if str(value.get("precision") or "").isdigit() else 0
+        time_value = str(value.get("time") or "")
+        if precision < 11 or not time_value:
+            continue
+        match = re.match(r"^[+-]?(\d{4})-(\d{2})-(\d{2})T", time_value)
+        if match:
+            output.add(f"{match.group(1)}-{match.group(2)}-{match.group(3)}")
+    return output
 
 
-def music_outcome(record: dict[str, Any], release: dict[str, Any], entity: dict[str, Any], now: datetime) -> dict[str, Any] | None:
-    positions = music_chart_positions(entity)
-    if not positions:
-        return None
-    best_rank, chart_qid = positions[0]
-    tier, target = chart_target(best_rank)
-    move = outcome_move(record, target)
-    if abs(move) < 0.01:
-        return None
-    when = min(now, release["_when"] + timedelta(days=7))
-    work_qid = release["_workQid"]
-    return {
-        "eventKey": f"wikidata:historical-music-chart:{qid_for(record)}:{work_qid}:{tier}",
-        "eventId": f"historical-music-chart:{work_qid}:{tier}",
-        "eventType": "music-chart-outcome",
-        "provider": "Wikidata",
-        "sourceUrl": f"https://www.wikidata.org/wiki/{work_qid}",
-        "name": f"Verified chart outcome: #{best_rank}",
-        "startedAt": iso(when),
-        "workQid": work_qid,
-        "chartQid": chart_qid,
-        "chartRank": best_rank,
-        "outcomeTier": tier,
-        "movePct": move,
-        "verified": True,
-        "historicalBackfill": True,
-        "backfillModel": "verified-music-chart-history-v1",
-    }
+def fetch_entities(session: requests.Session, qids: set[str], timeout: float) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    output: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    ordered = sorted(qids)
+    for offset in range(0, len(ordered), 45):
+        batch = ordered[offset:offset + 45]
+        try:
+            response = session.get(
+                WIKIDATA_API,
+                params={
+                    "action": "wbgetentities",
+                    "ids": "|".join(batch),
+                    "props": "claims",
+                    "format": "json",
+                    "formatversion": 2,
+                },
+                timeout=timeout,
+            )
+            response.raise_for_status()
+            entities = response.json().get("entities", {})
+            if isinstance(entities, dict):
+                for qid, entity in entities.items():
+                    if isinstance(entity, dict) and entity.get("missing") is None:
+                        output[str(qid)] = entity
+        except Exception as exc:  # noqa: BLE001
+            warnings.append(f"Wikidata entity batch {offset // 45 + 1}: {type(exc).__name__}: {exc}")
+    return output, warnings
 
 
-def actor_outcome(record: dict[str, Any], release: dict[str, Any], entity: dict[str, Any], now: datetime) -> dict[str, Any] | None:
-    ratio_info = best_box_office_ratio(entity)
-    if not ratio_info:
-        return None
-    ratio, gross, cost, unit = ratio_info
-    age_days = max(0.0, (now - release["_when"]).total_seconds() / 86400.0)
-    target_info = actor_box_office_target(ratio, age_days)
-    if not target_info:
-        return None
-    tier, target = target_info
-    move = outcome_move(record, target)
-    if abs(move) < 0.01:
-        return None
-    when = min(now, release["_when"] + timedelta(days=21))
-    work_qid = release["_workQid"]
-    return {
-        "eventKey": f"wikidata:historical-box-office:{qid_for(record)}:{work_qid}:{tier}",
-        "eventId": f"historical-box-office:{work_qid}:{tier}",
-        "eventType": "actor-box-office-outcome",
-        "provider": "Wikidata",
-        "sourceUrl": f"https://www.wikidata.org/wiki/{work_qid}",
-        "name": f"Verified box-office outcome: {ratio:.2f}× production cost",
-        "startedAt": iso(when),
-        "workQid": work_qid,
-        "boxOfficeToCostRatio": round(ratio, 4),
-        "boxOffice": gross,
-        "productionCost": cost,
-        "currencyUnit": unit,
-        "outcomeTier": tier,
-        "movePct": move,
-        "verified": True,
-        "historicalBackfill": True,
-        "backfillModel": "verified-actor-box-office-history-v1",
-    }
+def release_verified(record: dict[str, Any], event: dict[str, Any], entity: dict[str, Any], category: str) -> tuple[bool, str]:
+    started = parse_time(event.get("startedAt"))
+    if started is None:
+        return False, "invalid-startedAt"
+    date_key = started.date().isoformat()
+    if date_key not in exact_release_dates(entity):
+        return False, "no-matching-day-precision-P577"
+
+    person_qid = qid_for(record)
+    if not person_qid:
+        return False, "record-has-no-wikidata-identity"
+    relation = "P175" if category == "Music" else "P161"
+    if person_qid not in claim_item_qids(entity, relation):
+        return False, f"person-not-confirmed-in-{relation}"
+
+    if category == "Music":
+        event_key = str(event.get("eventKey") or "")
+        source_url = str(event.get("sourceUrl") or "")
+        if not event_key.startswith("musicbrainz:") or not source_url.startswith("https://musicbrainz.org/release-group/"):
+            return False, "musicbrainz-source-missing"
+
+    return True, "exact-source-date-and-person-relation"
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--category", choices=["Music", "Actor"], required=True)
-    parser.add_argument("--days", type=int, default=365)
+    parser.add_argument("--days", type=int, default=1825, help="Retained for workflow compatibility")
     parser.add_argument("--request-timeout", type=float, default=15.0)
     args = parser.parse_args()
 
     records = load_catalog(args.catalog)
-    now = utc_now()
-    cutoff = now - timedelta(days=max(1, args.days))
-    releases_by_index: dict[int, list[dict[str, Any]]] = {}
     work_qids: set[str] = set()
-    for index, record in enumerate(records):
+    for record in records:
         if str(record.get("primaryCategory") or "") != args.category:
             continue
-        releases = release_events(record, args.category, cutoff, now)
-        if not releases:
-            continue
-        releases_by_index[index] = releases
-        work_qids.update(str(item["_workQid"]) for item in releases)
-
-    if not work_qids:
-        print(f"No verified {args.category} release events available for historical outcome backfill.")
-        return 0
-
-    import requests
-    session = requests.Session()
-    session.headers.update({"User-Agent": "TalentX-Historical-Outcomes/1.0 (+https://github.com/rossad213/TalentX)"})
-    entities, errors = wikidata_entities(session, work_qids, args.request_timeout)
-    if errors:
-        print(f"Historical outcome source warnings: {len(errors):,}")
-
-    updated = list(records)
-    generated_count = 0
-    touched = 0
-    for index, releases in releases_by_index.items():
-        record = records[index]
-        generated: list[dict[str, Any]] = []
-        for release in releases:
-            entity = entities.get(str(release["_workQid"]), {})
-            if not entity:
+        for event in record.get("priceEvents", []) if isinstance(record.get("priceEvents"), list) else []:
+            if not isinstance(event, dict) or event.get("historicalBackfill") is not True:
                 continue
-            event = (
-                music_outcome(record, release, entity, now)
-                if args.category == "Music"
-                else actor_outcome(record, release, entity, now)
-            )
-            if event is not None:
-                generated.append(event)
-        if not generated:
-            continue
-        result = dict(record)
-        combined = merge_events(existing_events(result), generated)
-        rebuilt = reconstruct_chain(result, combined)
-        result["priceEvents"] = rebuilt
-        result["priceHistory"] = history_from_events(rebuilt)
-        result["priceHistoryStatus"] = "verified-event-and-outcome-backfill"
-        result["priceHistoryBackfilledAt"] = iso(now)
-        result["priceHistoryBackfillDays"] = args.days
-        updated[index] = result
-        generated_count += len([event for event in generated if event_key(event)])
-        touched += 1
+            if str(event.get("eventType") or "") not in {"music-release", "actor-release"}:
+                continue
+            qid = str(event.get("workQid") or "")
+            if re.fullmatch(r"Q\d+", qid):
+                work_qids.add(qid)
 
-    args.catalog.write_text(json.dumps(updated, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Added {generated_count:,} verified historical {args.category} outcome events across {touched:,} profiles.")
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "TalentX-History-Date-Verifier/2.0 (+https://github.com/rossad213/TalentX)",
+        "Accept": "application/json",
+    })
+    entities, warnings = fetch_entities(session, work_qids, args.request_timeout)
+    for warning in warnings[:20]:
+        print(f"WARNING {warning}")
+
+    removed_inferred = 0
+    removed_release = 0
+    retained_release = 0
+    touched = 0
+    now = utc_now()
+    output: list[dict[str, Any]] = []
+
+    wanted_release = "music-release" if args.category == "Music" else "actor-release"
+    for record in records:
+        result = dict(record)
+        if str(result.get("primaryCategory") or "") != args.category:
+            output.append(result)
+            continue
+
+        prior = [dict(event) for event in result.get("priceEvents", []) if isinstance(event, dict)] if isinstance(result.get("priceEvents"), list) else []
+        kept: list[dict[str, Any]] = []
+        changed = False
+        for event in prior:
+            if event.get("historicalBackfill") is not True:
+                kept.append(event)
+                continue
+            event_type = str(event.get("eventType") or "")
+            if event_type in INFERRED_HISTORICAL_OUTCOMES:
+                # No true historical outcome date is present in the source data.
+                # Keep the factual outcome available to other evidence layers, but
+                # do not put an assumed date on the price chart.
+                removed_inferred += 1
+                changed = True
+                continue
+            if event_type != wanted_release:
+                kept.append(event)
+                continue
+
+            work_qid = str(event.get("workQid") or "")
+            entity = entities.get(work_qid, {})
+            ok, reason = release_verified(result, event, entity, args.category) if entity else (False, "work-entity-unavailable")
+            if not ok:
+                removed_release += 1
+                changed = True
+                print(f"DROP {args.category} {result.get('name')} / {event.get('name')}: {reason}")
+                continue
+
+            verified = dict(event)
+            verified["dateVerified"] = True
+            verified["datePrecision"] = "day"
+            verified["dateEvidenceProvider"] = "Wikidata P577"
+            verified["eventEvidenceStatus"] = "source-backed"
+            verified["priceBasis"] = "talentx-simulated-event-backfill"
+            kept.append(verified)
+            retained_release += 1
+
+        if changed or any(event.get("historicalBackfill") is True for event in kept):
+            kept.sort(key=lambda event: str(event.get("startedAt") or ""))
+            rebuilt = reconstruct_chain(result, kept)
+            result["priceEvents"] = rebuilt
+            result["priceHistory"] = history_from_events(rebuilt)
+            result["priceHistoryStatus"] = "source-backed-exact-date-backfill"
+            result["priceHistoryBackfilledAt"] = iso(now)
+            result["priceHistoryBackfillModel"] = "strict-exact-date-history-v2"
+            result["priceHistoryDisclosure"] = "Historical events/dates are source-backed. Backfilled TalentX prices are simulated model responses, not historical securities prices."
+            touched += 1
+        output.append(result)
+
+    args.catalog.write_text(json.dumps(output, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    print(
+        f"Strict {args.category} history verification: retained {retained_release:,} exact-date releases; "
+        f"removed {removed_release:,} unverified/approximate releases and {removed_inferred:,} inferred-date outcomes across {touched:,} profiles."
+    )
     return 0
 
 
