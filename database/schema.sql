@@ -152,7 +152,7 @@ CREATE INDEX market_price_latest_idx
 CREATE TABLE app_user (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email CITEXT UNIQUE,
-    virtual_cash NUMERIC(14,2) NOT NULL DEFAULT 25000,
+    virtual_cash NUMERIC(14,2) NOT NULL DEFAULT 1000,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
