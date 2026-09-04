@@ -65,7 +65,7 @@
       if(!window.supabase?.createClient){
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
       }
-      await loadScript('./assets/supabase-auth-sync.js?v=20260901-2');
+      await loadScript('./assets/supabase-auth-sync.js?v=20260903-1');
       await loadScript('./assets/password-requirements.js?v=20260901-1');
       await loadScript('./assets/neon-brand-assets.js?v=20260903-1');
       loadStylesheet('./assets/account-ui.css?v=20260901-3');
