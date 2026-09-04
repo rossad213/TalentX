@@ -3,6 +3,8 @@
   const PROJECT_URL='https://selifenorvjodihiaexw.supabase.co';
   const PUBLISHABLE_KEY='sb_publishable_kHtyJKFgJHZy4kRaL5XJ6Q_gqEphAtY';
   const APP_REDIRECT='https://rossad213.github.io/TalentX/';
+  const STARTING_CASH=Number(window.TALENTX_STARTING_CASH||1000);
+  const LEGACY_STARTING_CASH=25000;
   if(!window.supabase?.createClient){
     console.warn('TalentX Supabase client library is unavailable.');
     return;
@@ -23,7 +25,7 @@
 
   function hasGuestActivity(){
     try{
-      return Math.abs(Number(state.cash||25000)-25000)>.005 ||
+      return Math.abs(Number(state.cash??STARTING_CASH)-STARTING_CASH)>.005 ||
         Object.keys(state.holdings||{}).length>0 ||
         (state.watchlist||[]).length>0 ||
         (state.transactions||[]).length>0;
@@ -93,8 +95,9 @@
     const firstError=[accountRes,holdingsRes,watchRes,txRes].find(r=>r.error)?.error;
     if(firstError) throw firstError;
 
-    const cloudPristine=Number(accountRes.data?.virtual_cash??25000)===25000 &&
-      !(holdingsRes.data||[]).length && !(watchRes.data||[]).length && !(txRes.data||[]).length;
+    const cloudCash=Number(accountRes.data?.virtual_cash??STARTING_CASH);
+    const cloudHasNoActivity=!(holdingsRes.data||[]).length && !(watchRes.data||[]).length && !(txRes.data||[]).length;
+    const cloudPristine=(cloudCash===STARTING_CASH||cloudCash===LEGACY_STARTING_CASH)&&cloudHasNoActivity;
 
     if(allowGuestImport&&cloudPristine&&hasGuestActivity()){
       await uploadLocalState(userId);
@@ -104,7 +107,7 @@
 
     applyingCloud=true;
     try{
-      state.cash=Number(accountRes.data?.virtual_cash??25000);
+      state.cash=cloudPristine&&cloudCash===LEGACY_STARTING_CASH?STARTING_CASH:cloudCash;
       state.holdings=Object.fromEntries((holdingsRes.data||[]).map(row=>[row.talent_id,Number(row.shares||0)]));
       state.watchlist=(watchRes.data||[]).map(row=>row.talent_id);
       state.transactions=(txRes.data||[]).map(row=>({
