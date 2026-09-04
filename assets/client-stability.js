@@ -23,7 +23,7 @@
         button.classList.toggle('active',button.dataset.route===route);
       });
       const more=document.querySelector('.mobile-bottom-nav .mobile-more');
-      if(more) more.classList.toggle('active',['leaderboard','rules'].includes(route));
+      if(more) more.classList.toggle('active',['leaderboard','store','rules'].includes(route));
     }catch{}
   }
 
@@ -65,7 +65,7 @@
       if(!window.supabase?.createClient){
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
       }
-      await loadScript('./assets/supabase-auth-sync.js?v=20260903-1');
+      await loadScript('./assets/supabase-auth-sync.js?v=20260903-2');
       await loadScript('./assets/password-requirements.js?v=20260901-1');
       await loadScript('./assets/neon-brand-assets.js?v=20260903-1');
       loadStylesheet('./assets/account-ui.css?v=20260901-3');
