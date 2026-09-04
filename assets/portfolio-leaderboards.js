@@ -7,6 +7,7 @@
   const ranges={day:86400000,week:7*86400000,month:30*86400000,all:Infinity};
   const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'}[m]));
   const pct=v=>`${v>=0?'+':''}${Number(v||0).toFixed(2)}%`;
+  const contributedCapital=()=>STARTING_CASH+Math.max(0,Number(state.purchasedCashTotal||0));
 
   function transactions(){return Array.isArray(state.transactions)?state.transactions:[];}
   function costBasisById(){
@@ -53,7 +54,8 @@
   window.setPortfolioRange=function(value){perfRange=value;render();};
   portfolio=function(){
     const s=portfolioSnapshot(),p=performanceForRange(perfRange);
-    return `${note()}<div class="p4-title-row"><div><div class="eyebrow">Your virtual account</div><h1 class="page-title">Portfolio</h1><p class="page-sub">Performance is calculated from trades saved in this browser.</p></div><button class="btn secondary" onclick="go('leaderboard')">View leaderboard</button></div>
+    const storageCopy=window.__talentxAuthUser?.id?'Signed-in trades are verified and stored to your TalentX account.':'Guest performance is calculated from trades saved in this browser.';
+    return `${note()}<div class="p4-title-row"><div><div class="eyebrow">Your virtual account</div><h1 class="page-title">Portfolio</h1><p class="page-sub">${storageCopy}</p></div><button class="btn secondary" onclick="go('leaderboard')">View leaderboard</button></div>
     <div class="p4-range-tabs">${[['day','1D'],['week','1W'],['month','1M'],['all','All']].map(([k,l])=>`<button class="${perfRange===k?'active':''}" onclick="setPortfolioRange('${k}')">${l}</button>`).join('')}</div>
     <div class="grid portfolio-stats p4-stats"><div class="card summary"><small>Total portfolio</small><strong>${money(s.total)}</strong></div><div class="card summary"><small>Range performance</small><strong class="${p.dollar>=0?'positive':'negative'}">${p.dollar>=0?'+':''}${money(p.dollar)}</strong><span>${pct(p.pct)} · ${p.trades} trade${p.trades===1?'':'s'}</span></div><div class="card summary"><small>Unrealized gain/loss</small><strong class="${s.gain>=0?'positive':'negative'}">${s.gain>=0?'+':''}${money(s.gain)}</strong><span>${pct(s.returnPct)}</span></div><div class="card summary"><small>Available cash</small><strong>${money(s.cash)}</strong></div></div>
     <div class="grid p4-dashboard"><section class="card"><div class="section-head"><h2>Allocation</h2><small>${money(s.invested)} invested</small></div>${allocationHtml(s)}</section><section class="card p4-health"><h2>Portfolio health</h2><div><span>Positions</span><strong>${s.rows.length}</strong></div><div><span>Largest position</span><strong>${s.rows.length?(s.rows[0].value/Math.max(1,s.invested)*100).toFixed(1)+'%':'—'}</strong></div><div><span>Cash reserve</span><strong>${(s.cash/Math.max(1,s.total)*100).toFixed(1)}%</strong></div><p>${s.rows.length<3?'A more diversified portfolio may reduce dependence on one player.':s.rows[0]&&s.rows[0].value/s.invested>.5?'More than half of your invested value is in one player.':'Your portfolio is reasonably spread across holdings.'}</p></section></div>
@@ -69,18 +71,19 @@
     const userTrades=transactions().filter(t=>Number(t.time||0)>=rangeStart(range)).length;
     const eligible=userTrades>=2&&user.total>=MIN_PORTFOLIO_VALUE;
     const rows=demoUsers.map(([name,total,trades,score],i)=>({name,total,returnPct:((total-STARTING_CASH)/STARTING_CASH*100)*factor,trades,score,demo:true}));
-    rows.push({name:'You',total:user.total,returnPct:((user.total-STARTING_CASH)/STARTING_CASH*100)*factor,trades:userTrades,score:Math.min(.95,.5+Math.min(20,userTrades)*.015),you:true,eligible});
+    const capital=Math.max(1,contributedCapital());
+    rows.push({name:'You',total:user.total,returnPct:((user.total-capital)/capital*100)*factor,trades:userTrades,score:Math.min(.95,.5+Math.min(20,userTrades)*.015),you:true,eligible});
     return rows.filter(x=>!x.you||x.eligible).sort((a,b)=>b.returnPct-a.returnPct||b.score-a.score).map((x,i)=>({...x,rank:i+1}));
   }
   window.setLeaderboardRange=function(value){boardRange=value;render();};
   window.leaderboard=function(){
     const rows=leaderboardRows(boardRange),you=rows.find(x=>x.you),user=portfolioSnapshot();
     const eligible=transactions().filter(t=>Number(t.time||0)>=rangeStart(boardRange)).length>=2&&user.total>=MIN_PORTFOLIO_VALUE;
-    return `${note()}<div class="eyebrow">Community competition</div><h1 class="page-title">Leaderboard</h1><p class="page-sub">This static prototype uses sample competitors. Your real browser portfolio is inserted when eligible; shared multi-user rankings require account and backend support.</p>
+    return `${note()}<div class="eyebrow">Community competition</div><h1 class="page-title">Leaderboard</h1><p class="page-sub">This static prototype uses sample competitors. Purchased TX Cash is treated as contributed capital, never as investment profit.</p>
     <div class="p4-range-tabs">${[['day','Daily'],['week','Weekly'],['month','Monthly'],['all','All time']].map(([k,l])=>`<button class="${boardRange===k?'active':''}" onclick="setLeaderboardRange('${k}')">${l}</button>`).join('')}</div>
-    <section class="card p4-rules"><strong>Fair ranking rules</strong><span>Ranked by percentage return, not total dollars.</span><span>Minimum 2 completed trades and $200 portfolio value.</span><span>Duplicate or reversed rapid trades do not improve eligibility.</span></section>
+    <section class="card p4-rules"><strong>Fair ranking rules</strong><span>Ranked by percentage return, not total dollars.</span><span>Purchased TX Cash does not count as profit.</span><span>Minimum 2 completed trades and $200 portfolio value.</span><span>Duplicate or reversed rapid trades do not improve eligibility.</span></section>
     ${!eligible?`<div class="notice"><strong>You are not ranked yet.</strong> Complete at least two trades in this period while maintaining a portfolio value of $200 or more.</div>`:''}
-    <section class="card table-card"><div class="table-wrap"><table class="market-table p4-board"><thead><tr><th>Rank</th><th>Trader</th><th>Return</th><th>Portfolio</th><th>Trades</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr class="${x.you?'p4-you':''}"><td><b>${x.rank<=3?['🥇','🥈','🥉'][x.rank-1]:x.rank}</b></td><td><b>${escHtml(x.name)}</b>${x.demo?'<small>Sample competitor</small>':'<small>Your browser portfolio</small>'}</td><td class="${x.returnPct>=0?'positive':'negative'}"><b>${pct(x.returnPct)}</b></td><td>${money(x.total)}</td><td>${x.trades}</td><td><span class="quality-badge">Eligible</span></td></tr>`).join('')}</tbody></table></div></section>
+    <section class="card table-card"><div class="table-wrap"><table class="market-table p4-board"><thead><tr><th>Rank</th><th>Trader</th><th>Return</th><th>Portfolio</th><th>Trades</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr class="${x.you?'p4-you':''}"><td><b>${x.rank<=3?['🥇','🥈','🥉'][x.rank-1]:x.rank}</b></td><td><b>${escHtml(x.name)}</b>${x.demo?'<small>Sample competitor</small>':'<small>Your portfolio</small>'}</td><td class="${x.returnPct>=0?'positive':'negative'}"><b>${pct(x.returnPct)}</b></td><td>${money(x.total)}</td><td>${x.trades}</td><td><span class="quality-badge">Eligible</span></td></tr>`).join('')}</tbody></table></div></section>
     ${you?`<div class="card p4-your-rank"><span>Your current rank</span><strong>#${you.rank}</strong><small>${pct(you.returnPct)} for this period</small></div>`:''}`;
   };
 
