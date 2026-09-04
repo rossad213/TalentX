@@ -97,6 +97,7 @@ jobs:
           --manifest data/creator_attention_manifest.json
           --lookback-days 45
           --request-timeout 12
+          --max-records 100
       - name: Append durable Creator events
         run: python scripts/append_game_event_history.py --catalog data/market/creators.json
       - name: Append dated Creator history
