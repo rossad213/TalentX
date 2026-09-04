@@ -14,6 +14,9 @@ from same_category_identity_dedupe import dedupe_same_category_identities
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data"
 
+# This validator also repairs safely provable same-category duplicate identities
+# after category overlays are composed, so stale market overlays cannot re-add them.
+
 
 def write_csv(records: list[dict], path: Path) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
