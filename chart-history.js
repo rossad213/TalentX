@@ -8,7 +8,7 @@
 (function(){
   const DAY=24*60*60*1000;
   const RECONSTRUCTED_SPAN=365*DAY;
-  const SHORT_RANGES=new Set(['1D','1W']);
+  const SHORT_RANGES=new Set(['1D','5D']);
 
   function txDate(value){
     if(value===null||value===undefined||value==='') return NaN;
@@ -205,5 +205,5 @@
     return txLinearSeries(points,start,now,config.points,current);
   };
 
-  window.talentxChartHistoryDisclosure='1D and 1W show recorded valuations only. 1M, 3M, and 1Y may use reconstructed context until enough verified TalentX history is available.';
+  window.talentxChartHistoryDisclosure='1D and 5D show recorded valuations only. Older chart values may be reconstructed for visual context until verified TalentX history is available.';
 })();
