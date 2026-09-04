@@ -16,6 +16,23 @@
   function purchasedCash(){try{return Number(state?.purchasedCashTotal||0);}catch{return 0;}}
   function isSignedIn(){return Boolean(window.__talentxAuthUser?.id);}
 
+  async function refreshCloudWallet(){
+    const client=window.talentxSupabase;
+    const userId=window.__talentxAuthUser?.id;
+    if(!client||!userId) return false;
+    const {data,error}=await client.from('account_state').select('virtual_cash,purchased_cash_total').eq('user_id',userId).maybeSingle();
+    if(error||!data) return false;
+    if(typeof state==='object'&&state){
+      state.cash=Number(data.virtual_cash||0);
+      state.purchasedCashTotal=Number(data.purchased_cash_total||0);
+      try{localStorage.setItem('talentx_v2_state',JSON.stringify(state));}catch{}
+      if(typeof updateCash==='function') updateCash();
+      if(route==='store'&&typeof render==='function') render();
+    }
+    return true;
+  }
+  window.refreshTalentxWallet=refreshCloudWallet;
+
   window.buyTxCash=async function(packageCode){
     if(buying) return;
     if(!isSignedIn()){
@@ -120,13 +137,13 @@
   async function refreshAfterReturn(){
     const params=new URLSearchParams(window.location.search);
     if(params.get('view')!=='store') return;
-    if(params.get('purchase')==='success'&&window.talentxAuthAdapter?.refreshAccount){
-      for(const delay of [500,1500,3000]){
+    if(typeof go==='function') go('store');
+    if(params.get('purchase')==='success'){
+      for(const delay of [700,1500,2800,4500]){
         await new Promise(resolve=>setTimeout(resolve,delay));
-        try{await window.talentxAuthAdapter.refreshAccount();}catch{}
+        try{await refreshCloudWallet();}catch{}
       }
     }
-    if(typeof go==='function') go('store');
   }
 
   setTimeout(refreshAfterReturn,0);
