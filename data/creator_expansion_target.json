@@ -1,0 +1,6 @@
+{
+  "targetCreatorCount": 1000,
+  "minimumAcceptableCount": 900,
+  "sourceStrategy": "Wikidata explicit creator occupations plus curated Creator anchor roster",
+  "note": "Creator expansion is isolated from Athlete, Music, and Actor catalog counts."
+}
