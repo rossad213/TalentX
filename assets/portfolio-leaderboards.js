@@ -1,10 +1,11 @@
 /* TalentX Phase 4: portfolio analytics and fair leaderboard preview. */
 (function(){
-  const STARTING_CASH=25000;
+  const STARTING_CASH=Number(window.TALENTX_STARTING_CASH||1000);
+  const MIN_PORTFOLIO_VALUE=200;
   let perfRange='all';
   let boardRange='all';
   const ranges={day:86400000,week:7*86400000,month:30*86400000,all:Infinity};
-  const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  const escHtml=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'}[m]));
   const pct=v=>`${v>=0?'+':''}${Number(v||0).toFixed(2)}%`;
 
   function transactions(){return Array.isArray(state.transactions)?state.transactions:[];}
@@ -60,13 +61,13 @@
   };
 
   const demoUsers=[
-    ['MarketMaven',31840,14,0.61],['RookieRadar',29710,21,0.73],['CourtVision',28490,17,0.66],['DiamondHands',27150,12,0.58],['TalentScout',26380,19,0.69],['UpsideOnly',25190,24,0.76],['ValueHunter',24740,16,0.64]
+    ['MarketMaven',1273.6,14,0.61],['RookieRadar',1188.4,21,0.73],['CourtVision',1139.6,17,0.66],['DiamondHands',1086,12,0.58],['TalentScout',1055.2,19,0.69],['UpsideOnly',1007.6,24,0.76],['ValueHunter',989.6,16,0.64]
   ];
   function leaderboardRows(range){
     const factor={day:.08,week:.28,month:.62,all:1}[range]||1;
     const user=portfolioSnapshot();
     const userTrades=transactions().filter(t=>Number(t.time||0)>=rangeStart(range)).length;
-    const eligible=userTrades>=2&&user.total>=5000;
+    const eligible=userTrades>=2&&user.total>=MIN_PORTFOLIO_VALUE;
     const rows=demoUsers.map(([name,total,trades,score],i)=>({name,total,returnPct:((total-STARTING_CASH)/STARTING_CASH*100)*factor,trades,score,demo:true}));
     rows.push({name:'You',total:user.total,returnPct:((user.total-STARTING_CASH)/STARTING_CASH*100)*factor,trades:userTrades,score:Math.min(.95,.5+Math.min(20,userTrades)*.015),you:true,eligible});
     return rows.filter(x=>!x.you||x.eligible).sort((a,b)=>b.returnPct-a.returnPct||b.score-a.score).map((x,i)=>({...x,rank:i+1}));
@@ -74,11 +75,11 @@
   window.setLeaderboardRange=function(value){boardRange=value;render();};
   window.leaderboard=function(){
     const rows=leaderboardRows(boardRange),you=rows.find(x=>x.you),user=portfolioSnapshot();
-    const eligible=transactions().filter(t=>Number(t.time||0)>=rangeStart(boardRange)).length>=2&&user.total>=5000;
+    const eligible=transactions().filter(t=>Number(t.time||0)>=rangeStart(boardRange)).length>=2&&user.total>=MIN_PORTFOLIO_VALUE;
     return `${note()}<div class="eyebrow">Community competition</div><h1 class="page-title">Leaderboard</h1><p class="page-sub">This static prototype uses sample competitors. Your real browser portfolio is inserted when eligible; shared multi-user rankings require account and backend support.</p>
     <div class="p4-range-tabs">${[['day','Daily'],['week','Weekly'],['month','Monthly'],['all','All time']].map(([k,l])=>`<button class="${boardRange===k?'active':''}" onclick="setLeaderboardRange('${k}')">${l}</button>`).join('')}</div>
-    <section class="card p4-rules"><strong>Fair ranking rules</strong><span>Ranked by percentage return, not total dollars.</span><span>Minimum 2 completed trades and $5,000 portfolio value.</span><span>Duplicate or reversed rapid trades do not improve eligibility.</span></section>
-    ${!eligible?`<div class="notice"><strong>You are not ranked yet.</strong> Complete at least two trades in this period while maintaining a portfolio value of $5,000 or more.</div>`:''}
+    <section class="card p4-rules"><strong>Fair ranking rules</strong><span>Ranked by percentage return, not total dollars.</span><span>Minimum 2 completed trades and $200 portfolio value.</span><span>Duplicate or reversed rapid trades do not improve eligibility.</span></section>
+    ${!eligible?`<div class="notice"><strong>You are not ranked yet.</strong> Complete at least two trades in this period while maintaining a portfolio value of $200 or more.</div>`:''}
     <section class="card table-card"><div class="table-wrap"><table class="market-table p4-board"><thead><tr><th>Rank</th><th>Trader</th><th>Return</th><th>Portfolio</th><th>Trades</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr class="${x.you?'p4-you':''}"><td><b>${x.rank<=3?['🥇','🥈','🥉'][x.rank-1]:x.rank}</b></td><td><b>${escHtml(x.name)}</b>${x.demo?'<small>Sample competitor</small>':'<small>Your browser portfolio</small>'}</td><td class="${x.returnPct>=0?'positive':'negative'}"><b>${pct(x.returnPct)}</b></td><td>${money(x.total)}</td><td>${x.trades}</td><td><span class="quality-badge">Eligible</span></td></tr>`).join('')}</tbody></table></div></section>
     ${you?`<div class="card p4-your-rank"><span>Your current rank</span><strong>#${you.rank}</strong><small>${pct(you.returnPct)} for this period</small></div>`:''}`;
   };
