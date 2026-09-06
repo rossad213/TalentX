@@ -26,6 +26,7 @@ on:
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
+      - "tests/test_specialized_uncapped_results.py"
       - "tests/test_game_event_history.py"
       - "tests/test_tennis_event_refresh.py"
       - "tests/test_golf_event_refresh.py"
@@ -99,6 +100,7 @@ jobs:
           tests/test_hourly_price_refresh.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
+          tests/test_specialized_uncapped_results.py
           tests/test_game_event_history.py
           tests/test_tennis_event_refresh.py
           tests/test_golf_event_refresh.py
