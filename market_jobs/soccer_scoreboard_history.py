@@ -25,6 +25,52 @@ ESPN_SCOREBOARD_RANGE = (
     "?limit=1000&dates={start_date}-{end_date}"
 )
 
+# Some high-value curated TalentX profiles predate the ESPN-backed Sports feed
+# and therefore do not carry the source identity fields required by the verified
+# scoreboard-history collector. Keep narrowly validated overrides here so those
+# profiles can participate in history backfills without changing live pricing.
+CURATED_SOCCER_SOURCE_OVERRIDES: dict[str, dict[str, str]] = {
+    "pedri": {
+        "sourceNamespace": "espn",
+        "sourceRecordId": "250465",
+        "sourceLeagueSlug": "esp.1",
+        "sourceTeamId": "83",
+        "sourceUrl": "https://www.espn.com/soccer/player/_/id/250465/pedri",
+    },
+}
+
+
+def apply_curated_source_overrides(records: list[dict[str, Any]]) -> int:
+    """Attach validated ESPN identities to matching legacy curated profiles."""
+    patched = 0
+    for record in records:
+        key = base.norm(record.get("name"))
+        override = CURATED_SOCCER_SOURCE_OVERRIDES.get(key)
+        if override is None:
+            continue
+
+        discipline = str(record.get("discipline") or "").strip().casefold()
+        category = str(record.get("primaryCategory") or "").strip().casefold()
+        team = str(record.get("teamOrPlatform") or record.get("team") or "").strip().casefold()
+        status = str(record.get("status") or "current").strip().casefold()
+        if discipline not in {"soccer", ""} or category not in {"athlete", "sports", ""}:
+            continue
+        if team and "barcelona" not in team:
+            continue
+        if status not in {"current", "active", ""}:
+            continue
+
+        # Canonicalize only this validated legacy profile so the existing ESPN
+        # eligibility gate can consume it. This does not touch market prices.
+        record["primaryCategory"] = "Athlete"
+        record["discipline"] = "Soccer"
+        for field, value in override.items():
+            record[field] = value
+        patched += 1
+
+    print(f"Applied curated Soccer source overrides: {patched:,}")
+    return patched
+
 
 def soccer_completed(event: dict[str, Any]) -> bool:
     status = event.get("status") if isinstance(event.get("status"), dict) else {}
@@ -107,6 +153,7 @@ def main() -> int:
     args = parser.parse_args()
 
     records = base.load_records(args.catalog)
+    apply_curated_source_overrides(records)
     now = base.utc_now()
     start = now - timedelta(days=max(1, args.days))
     priorities = base.priority_names()
