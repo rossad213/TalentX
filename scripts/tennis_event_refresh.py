@@ -254,45 +254,28 @@ def tennis_match_move(
     opponent_record: dict[str, Any] | None = None,
     max_move_pct: float = 2.5,
 ) -> float:
-    """Conservative verified Tennis move based on result + event importance.
-
-    Ranking is used only as a modest upset adjustment when both current ranks are
-    known. The result remains the primary signal.
-    """
+    """Verified Tennis result priced by importance and surprise, without a fixed ceiling."""
+    del max_move_pct
     importance = round_importance(round_name)
-    if winner:
-        move = 0.10 + importance
-    else:
-        # Deep-tournament losses are less negative because previous wins already
-        # earned their own positive events and reaching the round remains evidence.
-        move = -(0.12 + min(importance * 0.35, 0.20))
-
+    move = 0.06 + importance * 1.65 if winner else -(0.07 + importance * 0.22)
     if major:
-        move *= 1.45
-
+        move *= 1.75 if winner else 1.30
     if sets_for or sets_against:
         if winner and sets_against == 0:
-            move += 0.05
+            move += 0.04
         elif not winner and sets_for == 0:
-            move -= 0.04
-
+            move -= 0.03
     own_rank = player_rank(player_record)
     opponent_rank = player_rank(opponent_record)
     if own_rank and opponent_rank:
-        rank_gap = opponent_rank - own_rank
-        # Winning as the lower-ranked player gets a modest upset bonus. Losing as
-        # the much higher-ranked player gets a modest upset penalty.
         if winner and own_rank > opponent_rank:
-            move += min(0.22, (own_rank - opponent_rank) / 250.0)
+            move += 0.22 * math.log1p((own_rank - opponent_rank) / 20.0)
         elif not winner and own_rank < opponent_rank:
-            move -= min(0.18, (opponent_rank - own_rank) / 300.0)
-        elif winner and rank_gap > 0:
-            move -= min(0.04, rank_gap / 1000.0)
-
-    cap = max(0.05, min(float(max_move_pct), 2.5))
-    move = max(-cap, min(cap, move))
-    if abs(move) < 0.05:
-        move = 0.05 if winner else -0.05
+            move -= 0.18 * math.log1p((opponent_rank - own_rank) / 20.0)
+        elif winner and own_rank < opponent_rank:
+            move -= 0.02 * math.log1p((opponent_rank - own_rank) / 100.0)
+    if abs(move) < 0.03:
+        move = 0.03 if winner else -0.03
     return round(move, 3)
 
 

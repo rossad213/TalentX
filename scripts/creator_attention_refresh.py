@@ -5,7 +5,7 @@ Creators do not have a universal box-score or release database comparable to
 sports, MusicBrainz, or film box office. This adapter therefore uses a narrower
 claim: verified English-Wikipedia audience attention. It resolves the curated
 Creator identity to a non-disambiguation Wikipedia article, reads Wikimedia's
-daily pageview series, and emits bounded attention-outcome events only when the
+daily pageview series, and emits expectation-scaled attention-outcome events only when the
 recent window materially differs from its prior baseline.
 
 Live mode can move today's simulated market price. History-only mode generates
@@ -199,16 +199,12 @@ def pageview_series(
 
 
 def attention_target(ratio: float) -> tuple[str, float] | None:
-    if ratio >= 3.0:
-        return "breakout", TARGETS["breakout"]
-    if ratio >= 2.0:
-        return "hot", TARGETS["hot"]
     if ratio >= 1.45:
-        return "warm", TARGETS["warm"]
-    if ratio <= 0.40:
-        return "cold", TARGETS["cold"]
-    if ratio <= 0.65:
-        return "cool", TARGETS["cool"]
+        bucket = "breakout" if ratio >= 3.0 else "hot" if ratio >= 2.0 else "warm"
+        return bucket, 0.45 * math.log2(ratio)
+    if 0 < ratio <= 0.65:
+        bucket = "cold" if ratio <= 0.40 else "cool"
+        return bucket, -0.45 * math.log2(1.0 / ratio)
     return None
 
 
@@ -262,7 +258,7 @@ def creator_event(
     }
     if historical:
         event["historicalBackfill"] = True
-        event["movePct"] = round(clamp(target * record_multiplier(record), -1.5, 1.5), 3)
+        event["movePct"] = round(target * record_multiplier(record), 3)
     return event
 
 
@@ -277,11 +273,11 @@ def event_time(event: dict[str, Any]) -> str:
 def move_for(event: dict[str, Any]) -> float:
     explicit = number(event.get("movePct"), float("nan"))
     if math.isfinite(explicit):
-        return clamp(explicit, -15.0, 15.0)
+        return explicit
     before = number(event.get("priceBefore"), 0.0)
     after = number(event.get("priceAfter"), 0.0)
     if before > 0 and after > 0:
-        return clamp((after / before - 1.0) * 100.0, -15.0, 15.0)
+        return (after / before - 1.0) * 100.0
     return 0.0
 
 

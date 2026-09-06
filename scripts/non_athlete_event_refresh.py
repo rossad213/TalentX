@@ -55,7 +55,6 @@ EVENT_BASE = {
     "award": 0.72,
     "nomination": 0.30,
 }
-MAX_EVENT_MOVE_PCT = 1.50
 
 
 def utc_now() -> datetime:
@@ -315,6 +314,7 @@ def musicbrainz_release_match(
 
 
 def record_prominence_multiplier(record: dict[str, Any]) -> float:
+    """Scale a verified event by how surprising it is for this profile."""
     metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
     audience = clamp(metrics.get("audience", 50), 0, 100)
     confidence_raw = number(record.get("confidenceScore"), -1)
@@ -323,7 +323,8 @@ def record_prominence_multiplier(record: dict[str, Any]) -> float:
         confidence = clamp(raw * 100 if raw <= 1 else raw, 0, 100)
     else:
         confidence = clamp(confidence_raw, 0, 100)
-    return clamp(0.78 + audience / 500 + confidence / 1000, 0.78, 1.10)
+    expectedness = clamp((audience * 0.60 + confidence * 0.40) / 100.0, 0.0, 1.0)
+    return 1.15 - 0.30 * expectedness
 
 
 def event_move_pct(record: dict[str, Any], event: dict[str, Any]) -> float:
@@ -333,7 +334,7 @@ def event_move_pct(record: dict[str, Any], event: dict[str, Any]) -> float:
         base = MUSIC_RELEASE_BASE.get(primary, MUSIC_RELEASE_BASE["Other"])
     else:
         base = EVENT_BASE.get(event_type, 0.0)
-    return round(clamp(base * record_prominence_multiplier(record), -MAX_EVENT_MOVE_PCT, MAX_EVENT_MOVE_PCT), 3)
+    return round(base * record_prominence_multiplier(record), 3)
 
 
 def explanation_for(event: dict[str, Any], move: float, price: float) -> dict[str, Any]:
@@ -390,7 +391,7 @@ def apply_events(record: dict[str, Any], events: list[dict[str, Any]]) -> tuple[
         if abs(move) < .001:
             continue
         before = price
-        after = round(before * (1 + move / 100), 2)
+        after = max(0.01, round(before * (1 + move / 100), 2))
         actual_move = round((after / before - 1) * 100, 3)
         price = after
         stored_event = {
@@ -709,7 +710,8 @@ def main() -> int:
         "sourceErrors": errors[-100:],
         "largestMoves": sorted(largest_moves, key=lambda item: abs(number(item.get("movePct"))), reverse=True)[:50],
         "policy": {
-            "maximumSingleEventMovePct": MAX_EVENT_MOVE_PCT,
+            "maximumSingleEventMovePct": None,
+            "movementPolicy": "verified evidence versus expectations; no fixed percentage ceiling",
             "musicReleaseBases": MUSIC_RELEASE_BASE,
             "actorReleaseBasePct": EVENT_BASE["actor-release"],
             "actorUpcomingProjectBasePct": EVENT_BASE["actor-upcoming-project"],

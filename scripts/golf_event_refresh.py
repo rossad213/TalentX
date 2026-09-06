@@ -273,47 +273,43 @@ def golf_tournament_move(
     player_record: dict[str, Any] | None = None,
     max_move_pct: float = 2.5,
 ) -> float:
-    """Conservative verified move based on finish relative to expectation."""
+    """Verified Golf result priced by finish versus expectation, without a fixed ceiling."""
+    del max_move_pct
     field = max(2, int(field_size or 0))
     position = max(1, min(int(finish or field), field))
     own_rank = player_rank(player_record)
     expected = min(field, own_rank) if own_rank else max(1, round(field * 0.50))
-
-    # Beating or missing the golfer's ranking/roster expectation is the main
-    # continuous signal. Tournament placement adds a modest absolute achievement
-    # component so wins/top finishes matter even for elite players.
-    expectation = max(-0.55, min(0.85, ((expected - position) / field) * 1.25))
+    expectation = ((expected - position) / field) * 0.95
     if position == 1:
-        placement = 0.85
+        placement = 1.05
     elif position <= 3:
-        placement = 0.55
+        placement = 0.62
     elif position <= 10:
-        placement = 0.30
+        placement = 0.32
     elif position <= 25:
-        placement = 0.12
+        placement = 0.14
     elif position <= 50:
         placement = 0.02
     else:
         placement = -0.08
-
     status_key = str(status or "").upper()
     if status_key in {"DQ", "WD", "W/D", "DNS"}:
         placement -= 0.42
     elif status_key in {"CUT", "MC", "MDF", "CUT_OR_INCOMPLETE"}:
         placement -= 0.28
-
     score_component = 0.0
-    if score_to_par is not None and math.isfinite(float(score_to_par)):
-        score_component = max(-0.15, min(0.15, -float(score_to_par) * 0.012))
-
+    if score_to_par is not None:
+        try:
+            score = float(score_to_par)
+        except (TypeError, ValueError):
+            score = float("nan")
+        if math.isfinite(score):
+            score_component = -score * 0.012
     move = expectation + placement + score_component
     if major:
-        move *= 1.35
-
-    cap = max(0.05, min(float(max_move_pct), 2.5))
-    move = max(-cap, min(cap, move))
-    if abs(move) < 0.05:
-        move = 0.05 if position <= expected else -0.05
+        move *= 1.55
+    if abs(move) < 0.03:
+        move = 0.03 if position <= expected else -0.03
     return round(move, 3)
 
 

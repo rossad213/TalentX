@@ -361,6 +361,7 @@ def stat(stats: dict[str, Any], key: str) -> float:
 
 
 def direct_soccer_move(event: dict[str, Any], max_move: float) -> tuple[float, dict[str, Any]]:
+    del max_move  # legacy compatibility; no fixed percentage ceiling
     stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
     appearance = stat(stats, "appearances") > 0 or stat(stats, "minutes") > 0
     if not appearance:
@@ -377,7 +378,6 @@ def direct_soccer_move(event: dict[str, Any], max_move: float) -> tuple[float, d
     move = performance + outcome
     if abs(move) < 0.05 and event.get("teamWon") is not None:
         move = 0.05 if event.get("teamWon") is True else -0.05
-    move = max(-min(max_move, 1.25), min(min(max_move, 1.50), move))
     return round(move, 3), {
         "comparable": True,
         "pricingBasis": "verified-soccer-box-score-fallback",

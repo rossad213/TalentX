@@ -10,7 +10,7 @@ Supported outcome evidence:
   as proof of artistic or commercial success.
 
 The script only evaluates profiles that already have a verified release event
-in ``priceEvents``. Outcome events are durable, deduplicated, and bounded.
+in ``priceEvents``. Outcome events are durable, deduplicated, and scaled to verified surprise versus expectations.
 """
 from __future__ import annotations
 
@@ -36,7 +36,6 @@ WIKIMEDIA_PAGEVIEWS = (
     "en.wikipedia.org/all-access/all-agents/{title}/daily/{start}/{end}"
 )
 MODEL_VERSION = "1.0-outcome-driven-music-actor-pricing"
-MAX_OUTCOME_MOVE_PCT = 1.50
 MAX_PRICE_EVENTS = 1500
 
 MUSIC_CHART_TARGET = {1: 1.25, 5: 0.95, 10: 0.70, 40: 0.35, 100: 0.12}
@@ -155,17 +154,18 @@ def chart_target(rank: int) -> tuple[str, float]:
 
 
 def actor_box_office_target(ratio: float, age_days: float) -> tuple[str, float] | None:
-    if ratio >= 3.0:
-        return "breakout", ACTOR_BOX_OFFICE_TARGETS["breakout"]
-    if ratio >= 2.0:
-        return "strong", ACTOR_BOX_OFFICE_TARGETS["strong"]
+    """Translate gross/cost outcome into a continuous performance-surprise move."""
+    ratio = max(0.0, ratio)
     if ratio >= 1.0:
-        return "cost-recovered", ACTOR_BOX_OFFICE_TARGETS["cost-recovered"]
-    if age_days >= 21 and ratio < 0.50:
-        return "severe-underperform", ACTOR_BOX_OFFICE_TARGETS["severe-underperform"]
-    if age_days >= 14 and ratio < 0.75:
-        return "underperform", ACTOR_BOX_OFFICE_TARGETS["underperform"]
-    return None
+        label = "breakout" if ratio >= 3.0 else "strong" if ratio >= 2.0 else "cost-recovered"
+        return label, 0.25 + 0.55 * math.log2(max(1.0, ratio))
+    if age_days < 14:
+        return None
+    shortfall = 1.0 - ratio
+    age_weight = 0.75 + 0.25 * math.log1p(max(0.0, age_days - 14.0) / 7.0)
+    move = -(0.35 + 1.05 * shortfall) * age_weight
+    label = "severe-underperform" if ratio < 0.50 and age_days >= 21 else "underperform"
+    return label, move
 
 
 def enwiki_title(entity: dict[str, Any]) -> str:
@@ -215,25 +215,26 @@ def attention_ratio(points: list[tuple[datetime, int]], event_time: datetime) ->
 
 
 def attention_target(ratio: float) -> tuple[str, float] | None:
-    if ratio >= 3.0:
-        return "breakout", ATTENTION_TARGETS["breakout"]
-    if ratio >= 2.0:
-        return "hot", ATTENTION_TARGETS["hot"]
+    """Price verified attention surprise continuously rather than by a capped bucket."""
     if ratio >= 1.5:
-        return "warm", ATTENTION_TARGETS["warm"]
-    if ratio <= 0.65:
-        return "cool", ATTENTION_TARGETS["cool"]
+        bucket = "breakout" if ratio >= 3.0 else "hot" if ratio >= 2.0 else "warm"
+        return bucket, 0.50 * math.log2(ratio)
+    if 0 < ratio <= 0.65:
+        return "cool", -0.50 * math.log2(1.0 / ratio)
     return None
 
 
 def record_multiplier(record: dict[str, Any]) -> float:
+    """Reduce response when a strong outcome was already more expected."""
     metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
     audience = clamp(metrics.get("audience", 50), 0, 100)
     confidence = number(record.get("confidenceScore"), -1)
     if confidence < 0:
         raw = number(record.get("pricingConfidence", record.get("dataConfidence", 0.6)), 0.6)
         confidence = raw * 100 if raw <= 1 else raw
-    return clamp(0.82 + audience / 650 + confidence / 1200, 0.82, 1.08)
+    confidence = clamp(confidence, 0, 100)
+    expectedness = clamp((audience * 0.60 + confidence * 0.40) / 100.0, 0.0, 1.0)
+    return 1.15 - 0.30 * expectedness
 
 
 def outcome_event(record: dict[str, Any], event_key: str, event_type: str, label: str, provider: str, source_url: str, target_move: float, occurred_at: datetime, details: dict[str, Any]) -> dict[str, Any]:
@@ -304,12 +305,12 @@ def apply_outcome_events(record: dict[str, Any], events: list[dict[str, Any]]) -
     trend = [number(item) for item in result.get("trend", []) if number(item) > 0] or [old_price]
     stored: list[dict[str, Any]] = []
     for event in pending:
-        target = clamp(number(event.get("targetOutcomeMovePct"), 0), -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT)
-        move = clamp(target * record_multiplier(result), -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT)
+        target = number(event.get("targetOutcomeMovePct"), 0)
+        move = target * record_multiplier(result)
         if abs(move) < 0.01:
             continue
         before = price
-        after = round(before * (1 + move / 100), 2)
+        after = max(0.01, round(before * (1 + move / 100), 2))
         actual = round((after / before - 1) * 100, 3)
         price = after
         stored.append({**event, "priceBefore": round(before, 2), "priceAfter": round(after, 2), "movePct": actual, "verified": True})
@@ -353,7 +354,8 @@ def recent_release_events(record: dict[str, Any], now: datetime, lookback_days: 
 
 
 def state_delta(previous_target: float, target: float) -> float:
-    return clamp(target - previous_target, -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT)
+    """Apply the full verified change in outcome expectation with no fixed ceiling."""
+    return target - previous_target
 
 
 def main() -> int:
@@ -554,7 +556,8 @@ def main() -> int:
         "sourceErrors": errors[-100:],
         "largestMoves": sorted(largest, key=lambda item: abs(number(item.get("movePct"), 0)), reverse=True)[:50],
         "policy": {
-            "maximumSingleOutcomeMovePct": MAX_OUTCOME_MOVE_PCT,
+            "maximumSingleOutcomeMovePct": None,
+            "movementPolicy": "verified outcomes versus expectations; no fixed percentage ceiling",
             "noOutcomeNoMove": True,
             "musicChartProperty": "P2291 with P1352 ranking qualifier",
             "actorBoxOfficeProperty": "P2142",

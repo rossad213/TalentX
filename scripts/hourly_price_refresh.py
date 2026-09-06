@@ -757,11 +757,13 @@ def game_event_move(
     production_delta = (actual_production / expected_production - 1.0) * 100.0
     efficiency_delta: float | None = None
     if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
-        efficiency_delta = clamp((actual_efficiency / expected_efficiency - 1.0) * 100.0, -100.0, 100.0)
+        efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0
     performance_delta = production_delta if efficiency_delta is None else production_delta * 0.80 + efficiency_delta * 0.20
-    performance_move = clamp(performance_delta / 100.0 * 1.75, -2.25, 2.25)
+    # Smooth surprise curve: normal variance stays small; exceptional results keep growing.
+    surprise = abs(performance_delta) / 20.0
+    performance_move = math.copysign(0.32 * (surprise ** 1.50), performance_delta) if abs(performance_delta) > 2.0 else 0.0
     outcome_move = 0.15 if event.get("teamWon") is True else -0.10 if event.get("teamWon") is False else 0.0
-    move_pct = clamp(performance_move + outcome_move, -max_game_move_pct, max_game_move_pct)
+    move_pct = performance_move + outcome_move
     if abs(move_pct) < 0.05 and (abs(performance_delta) >= 1.0 or event.get("teamWon") is not None):
         direction = move_pct if abs(move_pct) > 1e-9 else performance_delta or (1 if event.get("teamWon") else -1)
         move_pct = 0.05 if direction > 0 else -0.05
@@ -787,9 +789,8 @@ def apply_game_market_moves(
     """Move market price once per completed game while keeping fundamentals anchored."""
     old_price = max(0.01, float(old_record.get("marketPrice") or new_record.get("marketPrice") or 0.01))
     model_target = max(0.01, float(new_record.get("marketPrice") or old_price))
-    anchor_gap_pct = (model_target / old_price - 1.0) * 100.0
-    anchor_budget = clamp(anchor_gap_pct * 0.15, -0.50, 0.50)
-    per_event_anchor = anchor_budget / max(1, len(events))
+    # A verified result moves price on its own evidence; no capped fair-value drift is mixed in.
+    per_event_anchor = 0.0
     price = old_price
     prior_trend = [float(value) for value in old_record.get("trend", []) if isinstance(value, (int, float))]
     trend = [round(value, 2) for value in prior_trend] or [round(old_price, 2)] * 18
@@ -800,7 +801,7 @@ def apply_game_market_moves(
         if not evidence.get("comparable"):
             event_results.append({**event, **evidence, "movePct": 0.0})
             continue
-        combined_move = clamp(event_move + per_event_anchor, -max_game_move_pct, max_game_move_pct)
+        combined_move = event_move + per_event_anchor
         next_price = round(price * (1.0 + combined_move / 100.0), 2)
         actual_move = round((next_price / price - 1.0) * 100.0, 2)
         price = next_price

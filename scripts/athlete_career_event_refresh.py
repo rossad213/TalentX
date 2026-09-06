@@ -8,7 +8,7 @@ This adapter has two inputs:
 1. Curated, source-backed events in ``data/verified_athlete_events.json``. These
    can carry a stronger event-specific move for major signings, retirements, etc.
 2. Automatic roster deltas between the prior Sports state and the newest verified
-   roster state. These receive only a small bounded move because the roster feed
+   roster state. These receive only a small expectation-sensitive move because the roster feed
    verifies the team change but does not by itself explain whether the move is
    strongly positive or negative.
 
@@ -28,7 +28,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-MAX_EVENT_MOVE_PCT = 2.5
 MAX_PRICE_EVENTS = 2500
 
 
@@ -113,7 +112,7 @@ def curated_event(record: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any
     source = str(spec.get("sourceUrl") or "").strip()
     if not key or not started or not source:
         return None
-    move = clamp(number(spec.get("targetMovePct"), 0.0), -MAX_EVENT_MOVE_PCT, MAX_EVENT_MOVE_PCT)
+    move = number(spec.get("targetMovePct"), 0.0)
     if abs(move) < 0.01:
         return None
     return {
@@ -172,7 +171,9 @@ def automatic_team_move(record: dict[str, Any]) -> float:
         current,
     )
     gap_pct = (target / current - 1.0) * 100.0 if current > 0 else 0.0
-    move = clamp(gap_pct * 0.12, -0.60, 0.60)
+    # Smooth response to verified surprise versus fair-value expectation.
+    # log1p keeps ordinary roster changes modest without imposing a ceiling.
+    move = math.copysign(0.60 * math.log1p(abs(gap_pct) / 5.0), gap_pct) if gap_pct else 0.0
     if abs(move) < 0.10:
         # A verified active-roster team change is itself a small career-continuity
         # catalyst, but we deliberately keep it much smaller than curated major
@@ -246,11 +247,11 @@ def merge_events(existing: list[dict[str, Any]], generated: list[dict[str, Any]]
 def move_for(event: dict[str, Any]) -> float:
     move = number(event.get("movePct"), float("nan"))
     if math.isfinite(move):
-        return clamp(move, -15.0, 15.0)
+        return move
     before = number(event.get("priceBefore"), 0.0)
     after = number(event.get("priceAfter"), 0.0)
     if before > 0 and after > 0:
-        return clamp((after / before - 1.0) * 100.0, -15.0, 15.0)
+        return (after / before - 1.0) * 100.0
     return 0.0
 
 
@@ -280,7 +281,7 @@ def reconstruct_chain(current_price: float, events: list[dict[str, Any]]) -> lis
 def explanation(event: dict[str, Any], move: float, price: float, applied_at: str) -> dict[str, Any]:
     summary = [
         "A verified non-game career event was added to the athlete market.",
-        str(event.get("reason") or "The event was source-backed and applied through the bounded athlete career-event policy."),
+        str(event.get("reason") or "The event was source-backed and applied through the expectation-sensitive athlete career-event policy."),
     ]
     return {
         "version": "athlete-career-events-v1",
@@ -312,7 +313,8 @@ def apply_new_events(record: dict[str, Any], generated: list[dict[str, Any]], ap
     old_price = max(0.01, number(record.get("marketPrice"), 0.01))
     factor = 1.0
     for event in added:
-        factor *= 1.0 + move_for(event) / 100.0
+        # Mathematical safety only: never allow a non-positive reconstructed price.
+        factor *= max(0.0001, 1.0 + move_for(event) / 100.0)
     new_price = max(0.01, round(old_price * factor, 2))
     rebuilt = reconstruct_chain(new_price, combined)
 
