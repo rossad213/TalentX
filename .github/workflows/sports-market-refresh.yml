@@ -11,7 +11,9 @@ on:
       - "scripts/event_pricing_policy.py"
       - "scripts/game_event_history.py"
       - "scripts/tennis_event_refresh.py"
+      - "scripts/tennis_event_refresh_results.py"
       - "scripts/golf_event_refresh.py"
+      - "scripts/golf_event_refresh_results.py"
       - "scripts/athlete_career_event_refresh.py"
       - "scripts/restore_hourly_event_market_state.py"
       - "scripts/explain_event_pricing_only.py"
@@ -113,18 +115,16 @@ jobs:
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
       - name: Refresh verified ATP and WTA match evidence
         run: >-
-          python scripts/tennis_event_refresh.py
+          python scripts/tennis_event_refresh_results.py
           --catalog data/current_catalog.json
           --lookback-hours 120
           --request-timeout 15
-          --max-game-move-pct 2.5
       - name: Refresh verified PGA and LPGA tournament evidence
         run: >-
-          python scripts/golf_event_refresh.py
+          python scripts/golf_event_refresh_results.py
           --catalog data/current_catalog.json
           --lookback-hours 240
           --request-timeout 15
-          --max-game-move-pct 2.5
       - name: Save authoritative Sports game-market state
         run: cp data/current_catalog.json data/sports_event_market_state.json
       - name: Recalculate Sports fair values
