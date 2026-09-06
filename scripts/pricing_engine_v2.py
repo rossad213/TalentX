@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-MODEL_VERSION = "5.3-rookie-ipo-calibration"
+MODEL_VERSION = "5.4-uncapped-event-signal"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -130,8 +130,14 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     audience = clamp(metrics.get("audience", record.get("audienceScore", talent)))
     momentum_pct = clamp(record.get("momentumPct", 0), -20, 20)
     demand_pct = clamp(record.get("demandPremiumPct", 0), -20, 20)
-    event_pct = clamp(record.get("lastGameMovePct", 0), -2.5, 2.5)
-    current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_pct * 3.0
+
+    # A live verified result may legitimately move by more than 2.5%. Do not
+    # silently flatten that result here. Because marketScore is a normalized
+    # 0–100 context score rather than the live market price itself, compress the
+    # event contribution logarithmically instead of imposing a hard ceiling.
+    event_pct = num(record.get("lastGameMovePct", 0))
+    event_signal = math.copysign(math.log1p(abs(event_pct)) * 2.5, event_pct) if event_pct else 0.0
+    current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_signal
     score = audience * .38 + talent * .37 + clamp(current_signal) * .25
     return round(clamp(score), 2)
 
@@ -287,7 +293,7 @@ def main() -> int:
         "pricingEngine": "v2",
         "pricingV2CatalogsProcessed": totals,
         "rookieIpoCeilings": ROOKIE_IPO_CEILINGS,
-        "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence. Drafted rookies retain a league-calibrated IPO anchor that fades only as verified professional evidence accumulates. Curated Music and Actor reviews receive a moderate evidence floor; generic Wikidata-only discoveries are capped until profession-specific evidence is present.",
+        "pricingRule": "Category-normalized talent is discounted by evidence confidence and adjusted by current market and situation evidence. Drafted rookies retain a league-calibrated IPO anchor that fades only as verified professional evidence accumulates. Verified game-event contributions are compressed smoothly in the normalized market score rather than hard-capped. Curated Music and Actor reviews receive a moderate evidence floor; generic Wikidata-only discoveries are capped until profession-specific evidence is present.",
     })
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print("Applied pricing engine v2:", totals)
