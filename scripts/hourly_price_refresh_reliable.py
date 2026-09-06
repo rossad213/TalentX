@@ -3,28 +3,33 @@
 
 This wrapper keeps the original retry behavior, adds durable game-by-game
 market events, normalizes inherited Sports ticker collisions, repairs thin
-Soccer box-score participation before pricing, prevents repeated game-event
-moves from compounding Sports prices away from fair value indefinitely, and
-ensures current NFL rookies receive durable IPO/preseason chart history.
+Soccer box-score participation before pricing, prevents duplicate event moves,
+and ensures current NFL rookies receive durable IPO/preseason chart history.
+
+Sports event pricing is results-proportional and has no fixed percentage ceiling.
+Routine variance produces small moves; increasingly exceptional verified results
+are allowed to produce increasingly large moves.
 """
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
 import hourly_price_refresh as refresh
 from category_market_store import dedupe_tickers, load_records, write_records
 from game_event_history import attach_price_events
+from results_event_pricing import MODEL_VERSION as RESULTS_MODEL_VERSION
+from results_event_pricing import result_move_from_delta, result_sensitivity
 
 _original_discover = refresh.discover_recent_events
 _original_game_event_move = refresh.game_event_move
-_original_apply_game_market_moves = refresh.apply_game_market_moves
 
-SPORTS_EVENT_PRICE_BAND_PCT = 30.0
-EXTREME_PRICE_RATIO_LOW = 0.50
-EXTREME_PRICE_RATIO_HIGH = 2.00
+# These are corruption-detection thresholds only. They are never applied to a
+# price with durable verified event history and are not market-movement caps.
+EXTREME_UNSUPPORTED_PRICE_RATIO_LOW = 0.10
+EXTREME_UNSUPPORTED_PRICE_RATIO_HIGH = 10.0
 ROOKIE_HISTORY_BACKFILL_DAYS = 45
-ROOKIE_PRESEASON_MOVE_CAP_PCT = 1.50
 NFL_2026_DRAFT_SOURCE = "https://www.nfl.com/news/2026-nfl-draft-order-for-all-seven-rounds"
 NFL_DRAFT_STARTS_UTC = {
     2026: {
@@ -44,7 +49,7 @@ def _number(value):
         parsed = float(value)
     except (TypeError, ValueError):
         return None
-    return parsed if parsed > 0 else None
+    return parsed if math.isfinite(parsed) and parsed > 0 else None
 
 
 def _iso_now(now: datetime | None = None) -> str:
@@ -68,6 +73,16 @@ def _has_game_price_event(record) -> bool:
     return any(isinstance(event, dict) and str(event.get("eventType") or "").lower() == "game" for event in events)
 
 
+def _has_supported_price_history(record) -> bool:
+    events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
+    return any(
+        isinstance(event, dict)
+        and event.get("verified") is not False
+        and (event.get("priceAfter") is not None or event.get("movePct") is not None)
+        for event in events
+    )
+
+
 def _draft_timestamp(record) -> str | None:
     try:
         year = int(record.get("draftYear") or 0)
@@ -78,12 +93,7 @@ def _draft_timestamp(record) -> str | None:
 
 
 def seed_rookie_ipo_history(catalog_path: Path = Path("data/current_catalog.json")) -> int:
-    """Persist a verified NFL Draft/IPO event so rookie charts have a true origin.
-
-    The event date is used only when TalentX has an explicit, source-backed draft
-    schedule for that year/round. No ingestion or verification timestamp is ever
-    substituted for the actual draft date.
-    """
+    """Persist a verified NFL Draft/IPO event so rookie charts have a true origin."""
     if not catalog_path.exists():
         return 0
     records = load_records(catalog_path)
@@ -127,11 +137,10 @@ def seed_rookie_ipo_history(catalog_path: Path = Path("data/current_catalog.json
 
 
 def fair_value_anchor(record) -> float | None:
-    """Return the best saved fair-value anchor for Sports event pricing."""
+    """Return the best saved fair-value anchor for integrity checks only."""
     target = _number(record.get("modelTargetPrice"))
     fundamental = _number(record.get("fundamentalValue"))
     if target is not None and fundamental is not None:
-        # Reject a stale/corrupt target that is itself detached from fundamentals.
         ratio = target / fundamental
         if 0.70 <= ratio <= 1.30:
             return target
@@ -139,20 +148,11 @@ def fair_value_anchor(record) -> float | None:
     return target or fundamental
 
 
-def bounded_event_price(price: float, anchor: float) -> float:
-    """Keep cumulative game-event pricing inside a durable fair-value band."""
-    band = SPORTS_EVENT_PRICE_BAND_PCT / 100.0
-    lower = anchor * (1.0 - band)
-    upper = anchor * (1.0 + band)
-    return round(max(lower, min(upper, price)), 2)
-
-
 def repair_sports_price_integrity(catalog_path: Path = Path("data/current_catalog.json")) -> int:
-    """Repair inherited Sports prices that escaped the event-pricing band.
+    """Repair only clearly unsupported/corrupt inherited Sports prices.
 
-    Severe outliers are reset to the current fair-value anchor. Lesser outliers
-    are clipped to the allowed event band. This is a data-integrity repair, not a
-    new market event, so the displayed hourly/daily move is reset to zero.
+    A valid positive price with verified event history is never clipped to a fair-
+    value band. This preserves legitimate cumulative result-driven movement.
     """
     if not catalog_path.exists():
         return 0
@@ -161,34 +161,40 @@ def repair_sports_price_integrity(catalog_path: Path = Path("data/current_catalo
     for record in records:
         price = _number(record.get("marketPrice"))
         anchor = fair_value_anchor(record)
-        if price is None or anchor is None:
-            continue
-        lower = anchor * (1.0 - SPORTS_EVENT_PRICE_BAND_PCT / 100.0)
-        upper = anchor * (1.0 + SPORTS_EVENT_PRICE_BAND_PCT / 100.0)
-        if lower <= price <= upper:
+        if anchor is None:
             continue
 
-        ratio = price / anchor
-        repaired = anchor if ratio < EXTREME_PRICE_RATIO_LOW or ratio > EXTREME_PRICE_RATIO_HIGH else bounded_event_price(price, anchor)
-        old_price = round(price, 2)
-        repaired = round(repaired, 2)
-        record["previousMarketPrice"] = old_price
+        reason = ""
+        if price is None:
+            reason = "invalid or non-positive Sports price"
+        elif not _has_supported_price_history(record):
+            ratio = price / anchor
+            if ratio < EXTREME_UNSUPPORTED_PRICE_RATIO_LOW or ratio > EXTREME_UNSUPPORTED_PRICE_RATIO_HIGH:
+                reason = "extreme inherited Sports price had no verified event history"
+        if not reason:
+            record.pop("eventPriceBand", None)
+            continue
+
+        old_price = round(price, 2) if price is not None else None
+        repaired = round(anchor, 2)
+        record["previousMarketPrice"] = old_price if old_price is not None else repaired
         record["marketPrice"] = repaired
         record["dailyChange"] = 0.0
         record["hourlyChangePct"] = 0.0
         record["trend"] = [repaired] * 18
         record["priceIntegrityRepair"] = {
-            "reason": "cumulative Sports game-event price escaped fair-value band",
+            "reason": reason,
             "oldPrice": old_price,
             "repairedPrice": repaired,
             "fairValueAnchor": round(anchor, 2),
-            "allowedBandPct": SPORTS_EVENT_PRICE_BAND_PCT,
+            "verifiedEventHistoryPresent": False,
         }
+        record.pop("eventPriceBand", None)
         repairs += 1
 
     if repairs:
         write_records(catalog_path, records)
-        print(f"Repaired {repairs:,} Sports price outlier(s) before game refresh.")
+        print(f"Repaired {repairs:,} unsupported Sports price outlier(s) before game refresh.")
     return repairs
 
 
@@ -205,14 +211,7 @@ def normalize_sports_tickers(catalog_path: Path = Path("data/current_catalog.jso
 
 
 def add_soccer_participation(records, athlete_events) -> None:
-    """Give a verified Soccer appearance a one-game participation baseline.
-
-    ESPN Soccer summaries often expose minutes/goals/assists/shots but omit an
-    explicit appearances column. TalentX's season model includes appearances, so
-    a player who logs minutes must receive ``appearances=1`` for the one-game
-    comparison. Without this normalization, a scoreless 90-minute appearance can
-    be mistaken for zero production.
-    """
+    """Give a verified Soccer appearance a one-game participation baseline."""
     soccer_keys = {
         (str(record.get("sourceNamespace") or ""), str(record.get("sourceRecordId") or ""))
         for record in records
@@ -256,8 +255,6 @@ def _is_nfl_preseason_event(record, event) -> bool:
         draft_year = int(record.get("draftYear") or 0)
     except (TypeError, ValueError):
         return False
-    # NFL preseason games are played in July/August before the September regular
-    # season. The event timestamp itself still comes directly from ESPN.
     return started.year == draft_year and started.month in {7, 8}
 
 
@@ -276,11 +273,27 @@ def _rookie_preseason_expected_signal(record) -> float | None:
     return 1.2
 
 
-def game_event_move_with_rookie_preseason(record, item, event, max_game_move_pct):
-    """Allow verified rookie preseason games to move price before a season baseline exists."""
-    move, evidence = _original_game_event_move(record, item, event, max_game_move_pct)
-    if evidence.get("comparable") or not _is_nfl_preseason_event(record, event):
-        return move, evidence
+def results_based_game_event_move(record, item, event, _legacy_max_game_move_pct):
+    """Price a verified game from performance surprise with no hard move cap."""
+    _legacy_move, evidence = _original_game_event_move(record, item, event, float("inf"))
+    if evidence.get("comparable"):
+        delta = float(evidence.get("performanceDeltaPct") or 0.0)
+        tier, sensitivity = result_sensitivity(record)
+        performance_move = result_move_from_delta(delta) * sensitivity
+        outcome_move = 0.06 if event.get("teamWon") is True else -0.05 if event.get("teamWon") is False else 0.0
+        move_pct = performance_move + outcome_move
+        return round(move_pct, 3), {
+            **evidence,
+            "outcomeMovePct": outcome_move,
+            "performanceMovePct": round(performance_move, 3),
+            "volatilityTier": tier,
+            "resultSensitivity": round(sensitivity, 3),
+            "pricingBasis": RESULTS_MODEL_VERSION,
+            "hardMoveCapPct": None,
+        }
+
+    if not _is_nfl_preseason_event(record, event):
+        return 0.0, evidence
 
     expected = _rookie_preseason_expected_signal(record)
     actual = evidence.get("actualPerformanceScore")
@@ -289,18 +302,18 @@ def game_event_move_with_rookie_preseason(record, item, event, max_game_move_pct
     except (TypeError, ValueError):
         actual = None
     if expected is None or actual is None:
-        return move, evidence
+        return 0.0, evidence
 
-    production_delta = refresh.clamp((actual / expected - 1.0) * 100.0, -100.0, 250.0)
-    performance_move = refresh.clamp(production_delta / 100.0 * 0.90, -ROOKIE_PRESEASON_MOVE_CAP_PCT, ROOKIE_PRESEASON_MOVE_CAP_PCT)
-    outcome_move = 0.05 if event.get("teamWon") is True else -0.03 if event.get("teamWon") is False else 0.0
-    move_pct = refresh.clamp(
-        performance_move + outcome_move,
-        -min(max_game_move_pct, ROOKIE_PRESEASON_MOVE_CAP_PCT),
-        min(max_game_move_pct, ROOKIE_PRESEASON_MOVE_CAP_PCT),
+    production_delta = (actual / expected - 1.0) * 100.0
+    performance_move = result_move_from_delta(
+        production_delta,
+        scale=0.48,
+        reference_pct=25.0,
+        exponent=1.45,
+        dead_zone_pct=4.0,
     )
-    if abs(move_pct) < 0.05 and abs(production_delta) >= 1.0:
-        move_pct = 0.05 if production_delta > 0 else -0.05
+    outcome_move = 0.04 if event.get("teamWon") is True else -0.03 if event.get("teamWon") is False else 0.0
+    move_pct = performance_move + outcome_move
     return round(move_pct, 3), {
         **evidence,
         "comparable": True,
@@ -309,8 +322,11 @@ def game_event_move_with_rookie_preseason(record, item, event, max_game_move_pct
         "performanceDeltaPct": round(production_delta, 2),
         "productionDeltaPct": round(production_delta, 2),
         "efficiencyDeltaPct": None,
+        "performanceMovePct": round(performance_move, 3),
         "outcomeMovePct": outcome_move,
         "rookiePreseason": True,
+        "pricingBasis": f"{RESULTS_MODEL_VERSION}-rookie-preseason",
+        "hardMoveCapPct": None,
     }
 
 
@@ -325,9 +341,7 @@ def discover_recent_events_reliably(
     processed_player_keys=None,
 ):
     # Do not let an event-level marker suppress players that were missed during
-    # an earlier partial run. The underlying function still checks
-    # processed_player_keys before returning each athlete/event pair, so an
-    # already-priced player cannot be priced twice for the same game.
+    # an earlier partial run. Player/event keys still prevent double-pricing.
     result = _original_discover(
         records,
         now=now,
@@ -340,9 +354,6 @@ def discover_recent_events_reliably(
     participant_ids, athlete_events, events, warnings = result
     add_soccer_participation(records, athlete_events)
 
-    # A rebuilt baseline can contain a current drafted rookie but no durable game
-    # events even though that player already appeared in preseason. Rehydrate a
-    # short NFL-only window once, then normal 48-hour processing owns new games.
     backfill_records = [
         record for record in records
         if _is_nfl_rookie(record)
@@ -361,8 +372,6 @@ def discover_recent_events_reliably(
             timeout=timeout,
             workers=workers,
             processed_keys=set(),
-            # Rehydrate durable history even if an older manifest says the game
-            # was processed before a later baseline rebuild discarded the event.
             processed_player_keys=set(),
         )
         _, backfill_athlete_events, backfill_events, backfill_warnings = backfill
@@ -399,48 +408,76 @@ def apply_game_market_moves_with_history(
     new_record,
     item,
     events,
-    max_game_move_pct,
+    _legacy_max_game_move_pct,
     refreshed_at,
 ):
-    result, change_pct, event_results = _original_apply_game_market_moves(
-        old_record,
-        new_record,
-        item,
-        events,
-        max_game_move_pct,
-        refreshed_at,
-    )
+    """Apply distinct verified game results without a hard event or daily cap."""
+    old_price = max(0.01, float(old_record.get("marketPrice") or new_record.get("marketPrice") or 0.01))
+    model_target = max(0.01, float(new_record.get("marketPrice") or old_price))
+    price = old_price
+    prior_trend = [float(value) for value in old_record.get("trend", []) if isinstance(value, (int, float))]
+    trend = [round(value, 2) for value in prior_trend] or [round(old_price, 2)] * 18
+    event_results = []
+    seen_keys: set[str] = set()
 
-    anchor = fair_value_anchor(result)
-    price = _number(result.get("marketPrice"))
-    if anchor is not None and price is not None:
-        bounded = bounded_event_price(price, anchor)
-        if abs(bounded - price) >= 0.01:
-            old_price = max(0.01, float(old_record.get("marketPrice") or price))
-            result["marketPrice"] = bounded
-            result["dailyChange"] = round((bounded / old_price - 1.0) * 100.0, 2)
-            result["hourlyChangePct"] = result["dailyChange"]
-            trend = [float(value) for value in result.get("trend", []) if isinstance(value, (int, float))]
-            result["trend"] = ([round(value, 2) for value in trend[-17:]] + [bounded]) if trend else [bounded] * 18
-            result["eventPriceBand"] = {
-                "fairValueAnchor": round(anchor, 2),
-                "allowedBandPct": SPORTS_EVENT_PRICE_BAND_PCT,
-                "clamped": True,
-            }
-            change_pct = result["dailyChange"]
-        else:
-            result["eventPriceBand"] = {
-                "fairValueAnchor": round(anchor, 2),
-                "allowedBandPct": SPORTS_EVENT_PRICE_BAND_PCT,
-                "clamped": False,
-            }
+    for event in sorted(events, key=lambda value: str(value.get("startedAt") or "")):
+        key = str(event.get("eventKey") or event.get("eventId") or "").strip()
+        if key and key in seen_keys:
+            continue
+        if key:
+            seen_keys.add(key)
+
+        event_move, evidence = results_based_game_event_move(old_record, item, event, None)
+        if not evidence.get("comparable"):
+            event_results.append({**event, **evidence, "movePct": 0.0})
+            continue
+        if event_move <= -100.0:
+            event_results.append({**event, **evidence, "comparable": False, "reason": "Invalid move would make price non-positive", "movePct": 0.0})
+            continue
+
+        before = price
+        next_price = max(0.01, round(before * (1.0 + event_move / 100.0), 2))
+        actual_move = round((next_price / before - 1.0) * 100.0, 3)
+        price = next_price
+        trend = trend[-17:] + [price]
+        event_results.append({
+            **event,
+            **evidence,
+            "modelMovePct": round(event_move, 3),
+            "movePct": actual_move,
+            "priceBefore": round(before, 2),
+            "priceAfter": price,
+        })
+
+    change_pct = round((price / old_price - 1.0) * 100.0, 2)
+    result = dict(new_record)
+    result["modelTargetPrice"] = round(model_target, 2)
+    result["previousMarketPrice"] = round(old_price, 2)
+    result["marketPrice"] = round(price, 2)
+    result["dailyChange"] = change_pct
+    result["hourlyChangePct"] = change_pct
+    result["lastPriceRefreshAt"] = refreshed_at
+    result["trend"] = trend
+    result["eventPricingModel"] = RESULTS_MODEL_VERSION
+    result.pop("eventPriceBand", None)
+
+    comparable = [event for event in event_results if event.get("comparable")]
+    if comparable:
+        latest = comparable[-1]
+        result["lastPriceEventAt"] = latest.get("startedAt") or refreshed_at
+        result["lastPriceEvent"] = str(latest.get("name") or "Completed game")
+        result["lastPriceEventId"] = latest.get("eventKey") or latest.get("eventId")
+        result["lastGameMovePct"] = latest.get("movePct")
+        result["lastGamePerformanceDeltaPct"] = latest.get("performanceDeltaPct")
+        result["lastGameStats"] = latest.get("stats", {})
+        result["volatilityTier"] = latest.get("volatilityTier") or result.get("volatilityTier")
 
     result = attach_price_events(old_record, result, event_results)
     return result, change_pct, event_results
 
 
 refresh.discover_recent_events = discover_recent_events_reliably
-refresh.game_event_move = game_event_move_with_rookie_preseason
+refresh.game_event_move = results_based_game_event_move
 refresh.apply_game_market_moves = apply_game_market_moves_with_history
 
 if __name__ == "__main__":
