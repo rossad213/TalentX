@@ -99,7 +99,22 @@ class HourlyGamePricingTests(unittest.TestCase):
         self.assertLess(details["productionDeltaPct"], 0)
         self.assertGreater(details["efficiencyDeltaPct"], 0)
         self.assertGreater(move, 0)
-        self.assertLessEqual(abs(move), 2.5)
+        same_move, _ = game_event_move(self.aja, self.evidence, self.event, 0.01)
+        self.assertEqual(move, same_move)
+
+    def test_extreme_verified_result_can_exceed_old_2_5_percent_limit(self) -> None:
+        extreme = {
+            **self.event,
+            "eventKey": "espn:extreme",
+            "eventId": "extreme",
+            "stats": {
+                "points": 100, "rebounds": 30, "assists": 20, "blocks": 10, "steals": 10,
+                "turnovers": 0, "fieldGoalPct": 100, "threePointFieldGoalPct": 100, "freeThrowPct": 100,
+            },
+        }
+        move, details = game_event_move(self.aja, self.evidence, extreme, 0.01)
+        self.assertTrue(details["comparable"])
+        self.assertGreater(move, 2.5)
 
     def test_completed_game_creates_one_recorded_price_point(self) -> None:
         repriced = {**self.aja, "marketPrice": 155.50, "fundamentalValue": 150.25}

@@ -76,8 +76,18 @@ class TennisEventRefreshTests(unittest.TestCase):
         )
         self.assertGreater(win, 0)
         self.assertLess(loss, 0)
-        self.assertLessEqual(abs(win), 2.5)
-        self.assertLessEqual(abs(loss), 2.5)
+        same_win = tennis_match_move(
+            winner=True, round_name="Quarterfinal", major=False, sets_for=2, sets_against=0,
+            player_record={"sourceRank": 12}, opponent_record={"sourceRank": 8}, max_move_pct=0.01,
+        )
+        self.assertEqual(win, same_win)
+
+    def test_extreme_upset_can_exceed_old_2_5_percent_limit(self):
+        move = tennis_match_move(
+            winner=True, round_name="Final", major=True, sets_for=3, sets_against=0,
+            player_record={"sourceRank": 500}, opponent_record={"sourceRank": 1}, max_move_pct=0.01,
+        )
+        self.assertGreater(move, 2.5)
 
     def test_live_match_is_applied_once(self):
         records = [

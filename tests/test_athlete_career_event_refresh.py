@@ -111,7 +111,18 @@ class AthleteCareerEventRefreshTests(unittest.TestCase):
         self.assertTrue(event["verified"])
         self.assertEqual(event["eventType"], "athlete-team-change")
         self.assertGreater(abs(float(event["movePct"])), 0.0)
-        self.assertLessEqual(abs(float(event["movePct"])), 0.6)
+
+    def test_large_expectation_gap_can_exceed_old_team_change_limit(self):
+        prior = {"id": "player", "primaryCategory": "Athlete", "teamOrPlatform": "Old Club"}
+        current = {
+            "id": "player", "name": "Player Example", "primaryCategory": "Athlete",
+            "teamOrPlatform": "New Club", "marketPrice": 20.0, "fundamentalValue": 200.0,
+            "lastVerifiedAt": "2026-08-09T18:00:00Z", "sourceName": "Verified roster feed",
+            "sourceUrl": "https://example.com/roster",
+        }
+        event = automatic_team_change(current, prior)
+        self.assertIsNotNone(event)
+        self.assertGreater(abs(float(event["movePct"])), 0.6)
 
 
 if __name__ == "__main__":

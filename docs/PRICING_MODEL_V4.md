@@ -80,7 +80,7 @@ Market price is separated from fundamental value.
 - Current momentum adjustment
 - Availability/risk adjustment
 
-These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined market adjustment is capped at ±6%, preventing hype from overpowering documented career value.
+These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined fundamental-model adjustment is bounded at ±6% so audience/risk normalization cannot overpower documented career value; this is not a ceiling on verified event movement.
 
 After a full evidence build, every listing begins with a 0.00% change and a flat chart. A shared price changes only after a completed game with a player-level box score, or when another supported evidence event is added in a future feed. A virtual trade changes only that user's browser price. Hourly runs leave all unrelated listings unchanged.
 
@@ -88,9 +88,9 @@ After a full evidence build, every listing begins with a 0.00% change and a flat
 
 - Each completed game is identified by its stable provider and event ID and is processed once.
 - The player's individual box-score production and efficiency are compared with that player's saved season baseline (80% production, 20% efficiency when comparable efficiency data is present).
-- Season and career evidence continues to set fundamental value and supplies a small anchor toward the model target.
+- Season and career evidence sets the expectation baseline used to judge the result.
 - A normal above- or below-expectation game creates a modest move; outcome adds only a small adjustment.
-- A single game is capped at 2.5%, preventing one result from overwhelming established value.
+- There is no fixed percentage ceiling on a verified result. Movement grows continuously with the magnitude and surprise of performance versus expectations, so exceptional and historic results can produce correspondingly larger moves.
 - The hourly job searches the prior 48 hours, so delayed runs can catch games that a short hourly window would miss.
 - Processed-event history is retained across weekly rebuilds, preventing the same game from being priced twice.
 - Weekly evidence rebuilds keep their newly calculated fundamentals while carrying forward recorded event prices and chart history.
@@ -107,7 +107,8 @@ The validation suite now checks:
 - Repricing is reproducible from the saved evidence
 - Full builds cannot manufacture a daily change or chart movement
 - Live games cannot move prices before their box scores are final
-- A completed game creates one bounded price point and a repeated event ID creates none
+- A completed game creates one expectation-based price point and a repeated event ID creates none
+- Legacy max-move arguments do not clip verified results
 - No-game refreshes preserve both price and chart history
 - Anthony Edwards prices above Amen Thompson and Tyrese Maxey
 - Taylor Swift and Beyoncé price above Gracie Abrams
