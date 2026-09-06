@@ -16,6 +16,9 @@ from creator_attention_refresh import (
     window_ratio,
 )
 
+# Deep-history coverage policy: never invent creator events or dates. This test
+# file is also an intentional workflow trigger for a fresh verified backfill.
+
 
 class CreatorAttentionRefreshTests(unittest.TestCase):
     def test_parenthetical_wikipedia_title_can_match_creator_name(self):
