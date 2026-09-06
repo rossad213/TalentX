@@ -2,12 +2,14 @@
  * Long chart ranges must not imply that TalentX observed prices before durable
  * event history existed. Full coverage renders normally; partial coverage masks
  * the unobserved prefix; no coverage renders an explicit pending/empty state.
+ * Detailed methodology belongs in Data & Rules, not on every profile chart.
  */
 (function(){
   if(typeof detailedTrendSvg!=='function'||typeof chartStats!=='function') return;
   const priorDetailedTrendSvg=detailedTrendSvg;
   const priorChartStats=chartStats;
   const EVENT_CATEGORIES=new Set(['Athlete','Music','Actor','Creator']);
+  const RULES_CARD_ID='talentxHistoricalChartMethodology';
 
   function eventCategory(record){
     return EVENT_CATEGORIES.has(String(record?.primaryCategory||''));
@@ -23,15 +25,11 @@
   function seriesValues(record){
     return chartSeries(record,chartRange).filter(point=>point&&point.verified===true&&Number.isFinite(Number(point.value)));
   }
-  function disclosure(record){
-    if(!eventCategory(record)) return '';
-    return `<div class="event-history-disclosure"><strong>Historical chart methodology:</strong> event facts, dates, and attached sources are verified where shown. Backfilled TalentX prices are simulated model responses to those real events, reconstructed from the current TalentX price; they are not historical security prices. Unsupported or undated events are omitted rather than estimated.</div>`;
-  }
 
   detailedTrendSvg=function(record,height=250){
     const info=coverage(record,chartRange);
     if(!info) return priorDetailedTrendSvg(record,height);
-    if(info.status==='complete') return priorDetailedTrendSvg(record,height)+disclosure(record);
+    if(info.status==='complete') return priorDetailedTrendSvg(record,height);
 
     const current=Math.max(1,Number(localPrice(record))||1);
     if(info.status==='none'){
@@ -42,7 +40,7 @@
           <small>Current market price ${money(current)}</small>
         </div>
       </div>
-      <div class="stock-chart-footer event-coverage-footer"><span>Verification coverage pending for this period</span><span>Current ${money(current)}</span></div>${disclosure(record)}`;
+      <div class="stock-chart-footer event-coverage-footer"><span>Verification coverage pending for this period</span><span>Current ${money(current)}</span></div>`;
     }
 
     const start=Number(info.start),now=Number(info.now),coverageStart=Number(info.coverageStart);
@@ -57,7 +55,7 @@
     output=output.replace(`style="height:${height}px"`,`style="height:${height}px;--event-coverage-left:${visualPct.toFixed(2)}%"`);
     output=output.replace('</svg>',`</svg><div class="event-coverage-boundary" style="left:${visualPct.toFixed(2)}%"><span>Verified history begins ${esc(label)}</span></div>`);
     output=output.replace(/event-driven ([^<]+) history/,`verified since ${esc(label)} · partial $1 coverage`);
-    return output+disclosure(record);
+    return output;
   };
 
   chartStats=function(record){
@@ -89,5 +87,45 @@
     </div>`;
   };
 
-  window.talentxChartCoveragePresentation='verified-range-coverage-v4-source-backed-disclosure';
+  function currentRoute(){
+    try{return typeof route!=='undefined'?String(route||''):'';}catch{return '';}
+  }
+
+  function addRulesMethodology(){
+    const app=document.getElementById('app');
+    if(!app) return;
+    const existing=document.getElementById(RULES_CARD_ID);
+    if(currentRoute()!=='rules'){
+      existing?.remove();
+      return;
+    }
+    if(existing) return;
+
+    const card=document.createElement('article');
+    card.id=RULES_CARD_ID;
+    card.className='card';
+    card.style.cssText='margin-top:17px;padding:22px';
+    card.innerHTML=`
+      <div class="eyebrow">Chart transparency</div>
+      <h2 style="margin:6px 0 10px;font-size:1.25rem">Historical chart methodology</h2>
+      <p style="margin:0;color:var(--muted);line-height:1.65">TalentX historical charts use real-world events only when the event fact, date, and supporting source are available. Backfilled TalentX prices are simulated model responses to those verified events, reconstructed from the current TalentX price; they are not actual historical security prices. Unsupported or undated events are omitted rather than estimated.</p>
+      <div style="margin-top:16px;padding-top:15px;border-top:1px solid var(--line)">
+        <strong style="display:block;margin-bottom:7px">Event movement limits</strong>
+        <p style="margin:0;color:var(--muted);line-height:1.65">Many athlete game and career-event calculations currently cap a single modeled event move at ±2.50%. Standard Music, Actor, and Creator event refreshes currently cap a single modeled event move at ±1.50%. These are event-level limits, not a universal daily price limit. A displayed move can differ by about 0.01 percentage point when the resulting price is rounded to cents.</p>
+      </div>`;
+    app.appendChild(card);
+  }
+
+  let rulesScheduled=false;
+  function scheduleRulesMethodology(){
+    if(rulesScheduled) return;
+    rulesScheduled=true;
+    requestAnimationFrame(()=>{rulesScheduled=false;addRulesMethodology();});
+  }
+  const app=document.getElementById('app');
+  if(app) new MutationObserver(scheduleRulesMethodology).observe(app,{childList:true,subtree:true});
+  document.addEventListener('DOMContentLoaded',scheduleRulesMethodology,{once:true});
+  scheduleRulesMethodology();
+
+  window.talentxChartCoveragePresentation='verified-range-coverage-v5-rules-methodology';
 })();
