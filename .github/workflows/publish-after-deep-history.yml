@@ -1,0 +1,21 @@
+name: Publish after deep verified history
+
+on:
+  workflow_run:
+    workflows:
+      - "Backfill verified deep event history"
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger unified market publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run publish-market.yml -R "$GITHUB_REPOSITORY"
