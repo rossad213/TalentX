@@ -1,0 +1,138 @@
+name: Align uncapped pricing tests and docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/uncapped-pricing-consistency.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -r requirements.txt
+
+      - name: Remove outdated cap assumptions from tests and docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"expected text not found in {path}: {old[:140]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          # Athlete career-event regression: normal team changes stay modest because
+          # of the response curve, not because of a 0.6% ceiling.
+          path = "tests/test_athlete_career_event_refresh.py"
+          replace_once(
+              path,
+              '        self.assertGreater(abs(float(event["movePct"])), 0.0)\n        self.assertLessEqual(abs(float(event["movePct"])), 0.6)\n',
+              '        self.assertGreater(abs(float(event["movePct"])), 0.0)\n\n'
+              '    def test_large_expectation_gap_can_exceed_old_team_change_limit(self):\n'
+              '        prior = {"id": "player", "primaryCategory": "Athlete", "teamOrPlatform": "Old Club"}\n'
+              '        current = {\n'
+              '            "id": "player", "name": "Player Example", "primaryCategory": "Athlete",\n'
+              '            "teamOrPlatform": "New Club", "marketPrice": 20.0, "fundamentalValue": 200.0,\n'
+              '            "lastVerifiedAt": "2026-08-09T18:00:00Z", "sourceName": "Verified roster feed",\n'
+              '            "sourceUrl": "https://example.com/roster",\n'
+              '        }\n'
+              '        event = automatic_team_change(current, prior)\n'
+              '        self.assertIsNotNone(event)\n'
+              '        self.assertGreater(abs(float(event["movePct"])), 0.6)\n',
+          )
+
+          # Tennis regression: legacy max_move_pct remains API compatibility only.
+          path = "tests/test_tennis_event_refresh.py"
+          replace_once(
+              path,
+              '        self.assertGreater(win, 0)\n        self.assertLess(loss, 0)\n        self.assertLessEqual(abs(win), 2.5)\n        self.assertLessEqual(abs(loss), 2.5)\n',
+              '        self.assertGreater(win, 0)\n'
+              '        self.assertLess(loss, 0)\n'
+              '        same_win = tennis_match_move(\n'
+              '            winner=True, round_name="Quarterfinal", major=False, sets_for=2, sets_against=0,\n'
+              '            player_record={"sourceRank": 12}, opponent_record={"sourceRank": 8}, max_move_pct=0.01,\n'
+              '        )\n'
+              '        self.assertEqual(win, same_win)\n\n'
+              '    def test_extreme_upset_can_exceed_old_2_5_percent_limit(self):\n'
+              '        move = tennis_match_move(\n'
+              '            winner=True, round_name="Final", major=True, sets_for=3, sets_against=0,\n'
+              '            player_record={"sourceRank": 500}, opponent_record={"sourceRank": 1}, max_move_pct=0.01,\n'
+              '        )\n'
+              '        self.assertGreater(move, 2.5)\n',
+          )
+
+          # Generic Sports regression: the compatibility argument must not clip a result.
+          path = "tests/test_hourly_price_refresh.py"
+          replace_once(
+              path,
+              '        self.assertGreater(move, 0)\n        self.assertLessEqual(abs(move), 2.5)\n',
+              '        self.assertGreater(move, 0)\n'
+              '        same_move, _ = game_event_move(self.aja, self.evidence, self.event, 0.01)\n'
+              '        self.assertEqual(move, same_move)\n\n'
+              '    def test_extreme_verified_result_can_exceed_old_2_5_percent_limit(self) -> None:\n'
+              '        extreme = {\n'
+              '            **self.event,\n'
+              '            "eventKey": "espn:extreme",\n'
+              '            "eventId": "extreme",\n'
+              '            "stats": {\n'
+              '                "points": 100, "rebounds": 30, "assists": 20, "blocks": 10, "steals": 10,\n'
+              '                "turnovers": 0, "fieldGoalPct": 100, "threePointFieldGoalPct": 100, "freeThrowPct": 100,\n'
+              '            },\n'
+              '        }\n'
+              '        move, details = game_event_move(self.aja, self.evidence, extreme, 0.01)\n'
+              '        self.assertTrue(details["comparable"])\n'
+              '        self.assertGreater(move, 2.5)\n',
+          )
+
+          # Documentation must describe the actual pricing philosophy.
+          path = "docs/PRICING_MODEL_V4.md"
+          replace_once(
+              path,
+              'These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined market adjustment is capped at ±6%, preventing hype from overpowering documented career value.\n',
+              'These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined fundamental-model adjustment is bounded at ±6% so audience/risk normalization cannot overpower documented career value; this is not a ceiling on verified event movement.\n',
+          )
+          replace_once(
+              path,
+              '- Season and career evidence continues to set fundamental value and supplies a small anchor toward the model target.\n- A normal above- or below-expectation game creates a modest move; outcome adds only a small adjustment.\n- A single game is capped at 2.5%, preventing one result from overwhelming established value.\n',
+              '- Season and career evidence sets the expectation baseline used to judge the result.\n- A normal above- or below-expectation game creates a modest move; outcome adds only a small adjustment.\n- There is no fixed percentage ceiling on a verified result. Movement grows continuously with the magnitude and surprise of performance versus expectations, so exceptional and historic results can produce correspondingly larger moves.\n',
+          )
+          replace_once(
+              path,
+              '- A completed game creates one bounded price point and a repeated event ID creates none\n',
+              '- A completed game creates one expectation-based price point and a repeated event ID creates none\n- Legacy max-move arguments do not clip verified results\n',
+          )
+          PY
+
+      - name: Run pricing regression tests
+        run: |
+          python -m unittest \
+            tests/test_no_hard_movement_caps.py \
+            tests/test_athlete_career_event_refresh.py \
+            tests/test_tennis_event_refresh.py \
+            tests/test_golf_event_refresh.py \
+            tests/test_hourly_price_refresh.py -v
+
+      - name: Commit aligned tests and docs
+        run: |
+          set -euo pipefail
+          git config user.name "TalentX pricing migration"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            tests/test_athlete_career_event_refresh.py \
+            tests/test_tennis_event_refresh.py \
+            tests/test_hourly_price_refresh.py \
+            docs/PRICING_MODEL_V4.md
+          git commit -m "Align TalentX pricing tests with uncapped movement"
+          git push origin HEAD:main
