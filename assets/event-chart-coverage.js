@@ -110,8 +110,12 @@
       <h2 style="margin:6px 0 10px;font-size:1.25rem">Historical chart methodology</h2>
       <p style="margin:0;color:var(--muted);line-height:1.65">TalentX historical charts use real-world events only when the event fact, date, and supporting source are available. Backfilled TalentX prices are simulated model responses to those verified events, reconstructed from the current TalentX price; they are not actual historical security prices. Unsupported or undated events are omitted rather than estimated.</p>
       <div style="margin-top:16px;padding-top:15px;border-top:1px solid var(--line)">
-        <strong style="display:block;margin-bottom:7px">Event movement limits</strong>
-        <p style="margin:0;color:var(--muted);line-height:1.65">Many athlete game and career-event calculations currently cap a single modeled event move at ±2.50%. Standard Music, Actor, and Creator event refreshes currently cap a single modeled event move at ±1.50%. These are event-level limits, not a universal daily price limit. A displayed move can differ by about 0.01 percentage point when the resulting price is rounded to cents.</p>
+        <strong style="display:block;margin-bottom:7px">Result-driven sports movement</strong>
+        <p style="margin:0;color:var(--muted);line-height:1.65">Verified sports results do not use a fixed percentage movement ceiling. TalentX compares performance with the person’s own expectation or event context and uses a damped response curve so routine good or bad results usually create modest moves. As a verified result becomes more exceptional, the modeled move can continue to grow instead of flattening at an arbitrary cap. Tennis and Golf use the same principle with result-specific factors such as round or tournament importance, ranking surprise, finish, and scoring. Exact event IDs are deduplicated so the same result cannot be applied twice.</p>
+      </div>
+      <div style="margin-top:16px;padding-top:15px;border-top:1px solid var(--line)">
+        <strong style="display:block;margin-bottom:7px">Price rounding</strong>
+        <p style="margin:0;color:var(--muted);line-height:1.65">TalentX stores market prices to the nearest cent. A percentage recalculated from two rounded prices can differ slightly from the model’s pre-rounding percentage. Historical events created under earlier pricing versions can retain their originally recorded movement.</p>
       </div>`;
     app.appendChild(card);
   }
@@ -127,5 +131,5 @@
   document.addEventListener('DOMContentLoaded',scheduleRulesMethodology,{once:true});
   scheduleRulesMethodology();
 
-  window.talentxChartCoveragePresentation='verified-range-coverage-v5-rules-methodology';
+  window.talentxChartCoveragePresentation='verified-range-coverage-v6-uncapped-results-rules';
 })();
