@@ -23,10 +23,15 @@
   function seriesValues(record){
     return chartSeries(record,chartRange).filter(point=>point&&point.verified===true&&Number.isFinite(Number(point.value)));
   }
+  function disclosure(record){
+    if(!eventCategory(record)) return '';
+    return `<div class="event-history-disclosure"><strong>Historical chart methodology:</strong> event facts, dates, and attached sources are verified where shown. Backfilled TalentX prices are simulated model responses to those real events, reconstructed from the current TalentX price; they are not historical security prices. Unsupported or undated events are omitted rather than estimated.</div>`;
+  }
 
   detailedTrendSvg=function(record,height=250){
     const info=coverage(record,chartRange);
-    if(!info||info.status==='complete') return priorDetailedTrendSvg(record,height);
+    if(!info) return priorDetailedTrendSvg(record,height);
+    if(info.status==='complete') return priorDetailedTrendSvg(record,height)+disclosure(record);
 
     const current=Math.max(1,Number(localPrice(record))||1);
     if(info.status==='none'){
@@ -37,7 +42,7 @@
           <small>Current market price ${money(current)}</small>
         </div>
       </div>
-      <div class="stock-chart-footer event-coverage-footer"><span>Verification coverage pending for this period</span><span>Current ${money(current)}</span></div>`;
+      <div class="stock-chart-footer event-coverage-footer"><span>Verification coverage pending for this period</span><span>Current ${money(current)}</span></div>${disclosure(record)}`;
     }
 
     const start=Number(info.start),now=Number(info.now),coverageStart=Number(info.coverageStart);
@@ -52,7 +57,7 @@
     output=output.replace(`style="height:${height}px"`,`style="height:${height}px;--event-coverage-left:${visualPct.toFixed(2)}%"`);
     output=output.replace('</svg>',`</svg><div class="event-coverage-boundary" style="left:${visualPct.toFixed(2)}%"><span>Verified history begins ${esc(label)}</span></div>`);
     output=output.replace(/event-driven ([^<]+) history/,`verified since ${esc(label)} · partial $1 coverage`);
-    return output;
+    return output+disclosure(record);
   };
 
   chartStats=function(record){
@@ -84,5 +89,5 @@
     </div>`;
   };
 
-  window.talentxChartCoveragePresentation='verified-range-coverage-v3-all-categories';
+  window.talentxChartCoveragePresentation='verified-range-coverage-v4-source-backed-disclosure';
 })();
