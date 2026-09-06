@@ -1,12 +1,13 @@
 /* TalentX account-aware Home routing.
- * Preserve the original app dashboard, while keeping the public landing page
- * as the signed-out front door and a dedicated welcome route for the logo.
+ * Preserve the original app dashboard. The public landing page remains an
+ * explicit welcome route, while clicking Home always opens the dashboard.
  */
 (() => {
   const appDashboard = typeof dashboard === 'function' ? dashboard : null;
   if (!appDashboard) return;
 
   let authUser = window.__talentxAuthUser || null;
+  let explicitDashboard = false;
   try {
     Object.defineProperty(window,'__talentxAuthUser',{
       configurable:true,
@@ -25,7 +26,7 @@
     if (typeof publicHome !== 'function') return;
 
     dashboard = function(){
-      return window.__talentxAuthUser ? appDashboard() : publicHome();
+      return (explicitDashboard || window.__talentxAuthUser) ? appDashboard() : publicHome();
     };
 
     const routedRender = typeof render === 'function' ? render : null;
@@ -40,7 +41,7 @@
         }
         const result = routedRender.apply(this,arguments);
         if(route==='dashboard'){
-          document.body.classList.toggle('public-site-route',!window.__talentxAuthUser);
+          document.body.classList.toggle('public-site-route',!(explicitDashboard || window.__talentxAuthUser));
         }
         return result;
       };
@@ -50,6 +51,7 @@
     if(routedGo){
       go=function(next){
         if(next==='welcome'){
+          explicitDashboard=false;
           route='welcome';
           selectedId=null;
           profileTab='overview';
@@ -57,6 +59,7 @@
           render();
           return;
         }
+        if(next==='dashboard') explicitDashboard=true;
         return routedGo(next);
       };
     }
@@ -71,7 +74,7 @@
       }
     };
 
-    window.talentxAccountAwareHome='signed-in-dashboard-with-welcome-v2';
+    window.talentxAccountAwareHome='explicit-home-always-dashboard-v3';
     window.talentxRefreshAccountHome();
   },0);
 })();
