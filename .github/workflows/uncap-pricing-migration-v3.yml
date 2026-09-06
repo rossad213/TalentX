@@ -1,0 +1,80 @@
+name: Uncap TalentX pricing migration v3
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/uncap-pricing-migration-v3.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Apply v2 migration plus residual outcome-cap cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          # Reuse the already-validated transformation script embedded in v2.
+          workflow = Path(".github/workflows/uncap-pricing-migration-v2.yml").read_text(encoding="utf-8")
+          marker = "          python - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          code = textwrap.dedent(workflow[start:end])
+          exec(compile(code, "uncap-pricing-migration-v2", "exec"), {})
+
+          p = Path("scripts/non_athlete_outcome_refresh.py")
+          text = p.read_text(encoding="utf-8")
+          old = 'def state_delta(previous_target: float, target: float) -> float:\n    return clamp(target - previous_target, -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT)\n'
+          new = 'def state_delta(previous_target: float, target: float) -> float:\n    """Apply the full verified change in outcome expectation with no fixed ceiling."""\n    return target - previous_target\n'
+          if old not in text:
+              raise SystemExit("legacy outcome state-delta cap was not found")
+          text = text.replace(old, new, 1)
+          old = '            "maximumSingleOutcomeMovePct": MAX_OUTCOME_MOVE_PCT,\n'
+          new = '            "maximumSingleOutcomeMovePct": None,\n            "movementPolicy": "verified outcomes versus expectations; no fixed percentage ceiling",\n'
+          if old not in text:
+              raise SystemExit("legacy outcome manifest cap was not found")
+          p.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: Validate changed pricing code
+        run: |
+          python -m py_compile \
+            scripts/athlete_career_event_refresh.py \
+            scripts/non_athlete_event_refresh.py \
+            scripts/non_athlete_outcome_refresh.py \
+            scripts/creator_attention_refresh.py \
+            market_jobs/soccer_json_history.py \
+            scripts/hourly_price_refresh.py \
+            scripts/tennis_event_refresh.py \
+            scripts/golf_event_refresh.py
+          python -m unittest tests/test_no_hard_movement_caps.py -v
+
+      - name: Commit pricing changes
+        run: |
+          set -euo pipefail
+          git config user.name "TalentX pricing migration"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            scripts/athlete_career_event_refresh.py \
+            scripts/non_athlete_event_refresh.py \
+            scripts/non_athlete_outcome_refresh.py \
+            scripts/creator_attention_refresh.py \
+            market_jobs/soccer_json_history.py \
+            scripts/hourly_price_refresh.py \
+            scripts/tennis_event_refresh.py \
+            scripts/golf_event_refresh.py \
+            tests/test_no_hard_movement_caps.py
+          git commit -m "Make TalentX movement expectation-driven and uncapped"
+          git push origin HEAD:main
