@@ -7,6 +7,8 @@ on:
       - ".github/workflows/sports-market-refresh.yml"
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
+      - "scripts/results_event_pricing.py"
+      - "scripts/event_pricing_policy.py"
       - "scripts/game_event_history.py"
       - "scripts/tennis_event_refresh.py"
       - "scripts/golf_event_refresh.py"
@@ -20,6 +22,8 @@ on:
       - "scripts/category_market_store.py"
       - "data/verified_athlete_events.json"
       - "tests/test_hourly_price_refresh.py"
+      - "tests/test_results_event_pricing.py"
+      - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_game_event_history.py"
       - "tests/test_tennis_event_refresh.py"
       - "tests/test_golf_event_refresh.py"
@@ -91,6 +95,8 @@ jobs:
         run: >-
           python -m unittest
           tests/test_hourly_price_refresh.py
+          tests/test_results_event_pricing.py
+          tests/test_uncapped_sports_refresh.py
           tests/test_game_event_history.py
           tests/test_tennis_event_refresh.py
           tests/test_golf_event_refresh.py
@@ -104,7 +110,6 @@ jobs:
           --request-timeout 10
           --lookback-hours 96
           --max-athletes 1800
-          --max-game-move-pct 2.5
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
       - name: Refresh verified ATP and WTA match evidence
         run: >-
