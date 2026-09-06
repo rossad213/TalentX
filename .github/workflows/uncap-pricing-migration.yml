@@ -1,0 +1,223 @@
+name: Uncap TalentX pricing migration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/uncap-pricing-migration.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Remove legacy hard movement caps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"expected text not found in {path}: {old[:120]!r}")
+              p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          def regex_once(path, pattern, replacement, flags=0):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              new, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f"expected one regex match in {path}, got {count}: {pattern[:120]!r}")
+              p.write_text(new, encoding="utf-8")
+
+          # Athlete career events: no 2.5% event cap and no hidden ±15% history cap.
+          path = "scripts/athlete_career_event_refresh.py"
+          replace_once(path, "MAX_EVENT_MOVE_PCT = 2.5\n", "")
+          replace_once(
+              path,
+              '    move = clamp(number(spec.get("targetMovePct"), 0.0), -MAX_EVENT_MOVE_PCT, MAX_EVENT_MOVE_PCT)\n',
+              '    move = number(spec.get("targetMovePct"), 0.0)\n',
+          )
+          replace_once(
+              path,
+              '    move = clamp(gap_pct * 0.12, -0.60, 0.60)\n',
+              '    # The farther verified fair value is from price, the larger the response.\n'
+              '    # log1p keeps ordinary team changes modest without imposing a hard ceiling.\n'
+              '    move = math.copysign(0.60 * math.log1p(abs(gap_pct) / 5.0), gap_pct) if gap_pct else 0.0\n',
+          )
+          replace_once(
+              path,
+              '        return clamp(move, -15.0, 15.0)\n',
+              '        return move\n',
+          )
+          replace_once(
+              path,
+              '        return clamp((after / before - 1.0) * 100.0, -15.0, 15.0)\n',
+              '        return (after / before - 1.0) * 100.0\n',
+          )
+          replace_once(
+              path,
+              '        factor *= 1.0 + move_for(event) / 100.0\n',
+              '        factor *= max(0.0001, 1.0 + move_for(event) / 100.0)\n',
+          )
+          replace_once(path, "small bounded move", "small expectation-sensitive move")
+          replace_once(path, "bounded athlete career-event policy", "expectation-sensitive athlete career-event policy")
+
+          # Music/Actor announcement events: remove 1.5% clamp and make expected prominence
+          # reduce surprise rather than mechanically amplifying famous names.
+          path = "scripts/non_athlete_event_refresh.py"
+          replace_once(path, "MAX_EVENT_MOVE_PCT = 1.50\n", "")
+          regex_once(
+              path,
+              r"def record_prominence_multiplier\(record: dict\[str, Any\]\) -> float:\n.*?\n\ndef event_move_pct",
+              '''def record_prominence_multiplier(record: dict[str, Any]) -> float:\n    \"\"\"Scale event response by how surprising the evidence is for this profile.\"\"\"\n    metrics = record.get(\"activeMetrics\") if isinstance(record.get(\"activeMetrics\"), dict) else {}\n    audience = clamp(metrics.get(\"audience\", 50), 0, 100)\n    confidence_raw = number(record.get(\"confidenceScore\"), -1)\n    if confidence_raw < 0:\n        raw = number(record.get(\"pricingConfidence\", record.get(\"dataConfidence\", .6)), .6)\n        confidence = clamp(raw * 100 if raw <= 1 else raw, 0, 100)\n    else:\n        confidence = clamp(confidence_raw, 0, 100)\n    expectedness = clamp((audience * 0.60 + confidence * 0.40) / 100.0, 0.0, 1.0)\n    return 1.15 - 0.30 * expectedness\n\n\ndef event_move_pct''',
+              flags=re.S,
+          )
+          replace_once(
+              path,
+              '    return round(clamp(base * record_prominence_multiplier(record), -MAX_EVENT_MOVE_PCT, MAX_EVENT_MOVE_PCT), 3)\n',
+              '    return round(base * record_prominence_multiplier(record), 3)\n',
+          )
+
+          # Music/Actor outcomes: continuous outcome-vs-expectation scaling with no 1.5% ceiling.
+          path = "scripts/non_athlete_outcome_refresh.py"
+          replace_once(path, "Outcome events are durable, deduplicated, and bounded.", "Outcome events are durable, deduplicated, and scaled to verified surprise versus expectations.")
+          replace_once(path, "MAX_OUTCOME_MOVE_PCT = 1.50\n", "")
+          regex_once(
+              path,
+              r"def actor_box_office_target\(ratio: float, age_days: float\) -> tuple\[str, float\] \| None:\n.*?\n\ndef enwiki_title",
+              '''def actor_box_office_target(ratio: float, age_days: float) -> tuple[str, float] | None:\n    \"\"\"Translate verified gross/cost performance into a continuous surprise move.\"\"\"\n    ratio = max(0.0, ratio)\n    if ratio >= 1.0:\n        if ratio >= 3.0:\n            label = \"breakout\"\n        elif ratio >= 2.0:\n            label = \"strong\"\n        else:\n            label = \"cost-recovered\"\n        # 1x cost is modest; increasingly exceptional multiples keep increasing.\n        return label, 0.25 + 0.55 * math.log2(max(1.0, ratio))\n    if age_days < 14:\n        return None\n    shortfall = 1.0 - ratio\n    age_weight = 0.75 + 0.25 * math.log1p(max(0.0, age_days - 14.0) / 7.0)\n    move = -(0.35 + 1.05 * shortfall) * age_weight\n    return (\"severe-underperform\" if ratio < 0.50 and age_days >= 21 else \"underperform\"), move\n\n\ndef enwiki_title''',
+              flags=re.S,
+          )
+          regex_once(
+              path,
+              r"def attention_target\(ratio: float\) -> tuple\[str, float\] \| None:\n.*?\n\ndef record_multiplier",
+              '''def attention_target(ratio: float) -> tuple[str, float] | None:\n    \"\"\"Price audience-attention surprise continuously instead of by a capped bucket.\"\"\"\n    if ratio >= 1.5:\n        bucket = \"breakout\" if ratio >= 3.0 else \"hot\" if ratio >= 2.0 else \"warm\"\n        return bucket, 0.50 * math.log2(ratio)\n    if 0 < ratio <= 0.65:\n        return \"cool\", -0.50 * math.log2(1.0 / ratio)\n    return None\n\n\ndef record_multiplier''',
+              flags=re.S,
+          )
+          regex_once(
+              path,
+              r"def record_multiplier\(record: dict\[str, Any\]\) -> float:\n.*?\n\ndef outcome_event",
+              '''def record_multiplier(record: dict[str, Any]) -> float:\n    \"\"\"Lower the response when strong outcomes were already more expected.\"\"\"\n    metrics = record.get(\"activeMetrics\") if isinstance(record.get(\"activeMetrics\"), dict) else {}\n    audience = clamp(metrics.get(\"audience\", 50), 0, 100)\n    confidence = number(record.get(\"confidenceScore\"), -1)\n    if confidence < 0:\n        raw = number(record.get(\"pricingConfidence\", record.get(\"dataConfidence\", 0.6)), 0.6)\n        confidence = raw * 100 if raw <= 1 else raw\n    confidence = clamp(confidence, 0, 100)\n    expectedness = clamp((audience * 0.60 + confidence * 0.40) / 100.0, 0.0, 1.0)\n    return 1.15 - 0.30 * expectedness\n\n\ndef outcome_event''',
+              flags=re.S,
+          )
+          replace_once(
+              path,
+              '        target = clamp(number(event.get("targetOutcomeMovePct"), 0), -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT)\n        move = clamp(target * record_multiplier(result), -MAX_OUTCOME_MOVE_PCT, MAX_OUTCOME_MOVE_PCT)\n',
+              '        target = number(event.get("targetOutcomeMovePct"), 0)\n        move = target * record_multiplier(result)\n',
+          )
+
+          # Creator history: remove both the visible 1.5% clamp and hidden ±15% history clamp.
+          path = "scripts/creator_attention_refresh.py"
+          replace_once(path, "emits bounded attention-outcome events", "emits expectation-scaled attention-outcome events")
+          regex_once(
+              path,
+              r"def attention_target\(ratio: float\) -> tuple\[str, float\] \| None:\n.*?\n\ndef window_ratio",
+              '''def attention_target(ratio: float) -> tuple[str, float] | None:\n    if ratio >= 1.45:\n        bucket = \"breakout\" if ratio >= 3.0 else \"hot\" if ratio >= 2.0 else \"warm\"\n        return bucket, 0.45 * math.log2(ratio)\n    if 0 < ratio <= 0.65:\n        bucket = \"cold\" if ratio <= 0.40 else \"cool\"\n        return bucket, -0.45 * math.log2(1.0 / ratio)\n    return None\n\n\ndef window_ratio''',
+              flags=re.S,
+          )
+          replace_once(
+              path,
+              '        event["movePct"] = round(clamp(target * record_multiplier(record), -1.5, 1.5), 3)\n',
+              '        event["movePct"] = round(target * record_multiplier(record), 3)\n',
+          )
+          replace_once(path, "        return clamp(explicit, -15.0, 15.0)\n", "        return explicit\n")
+          replace_once(
+              path,
+              "        return clamp((after / before - 1.0) * 100.0, -15.0, 15.0)\n",
+              "        return (after / before - 1.0) * 100.0\n",
+          )
+
+          # Soccer JSON fallback: verified stats determine the move; the CLI max argument is compatibility only.
+          path = "market_jobs/soccer_json_history.py"
+          replace_once(
+              path,
+              'def direct_soccer_move(event: dict[str, Any], max_move: float) -> tuple[float, dict[str, Any]]:\n',
+              'def direct_soccer_move(event: dict[str, Any], max_move: float) -> tuple[float, dict[str, Any]]:\n    del max_move  # legacy CLI compatibility; verified performance has no fixed ceiling\n',
+          )
+          replace_once(
+              path,
+              '    move = max(-min(max_move, 1.25), min(min(max_move, 1.50), move))\n',
+              '',
+          )
+
+          # Old Sports base path: use the same uncapped result-surprise curve as the reliable wrapper.
+          path = "scripts/hourly_price_refresh.py"
+          replace_once(
+              path,
+              '    efficiency_delta: float | None = None\n    if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:\n        efficiency_delta = clamp((actual_efficiency / expected_efficiency - 1.0) * 100.0, -100.0, 100.0)\n    performance_delta = production_delta if efficiency_delta is None else production_delta * 0.80 + efficiency_delta * 0.20\n    performance_move = clamp(performance_delta / 100.0 * 1.75, -2.25, 2.25)\n    outcome_move = 0.15 if event.get("teamWon") is True else -0.10 if event.get("teamWon") is False else 0.0\n    move_pct = clamp(performance_move + outcome_move, -max_game_move_pct, max_game_move_pct)\n',
+              '    efficiency_delta: float | None = None\n    if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:\n        efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0\n    performance_delta = production_delta if efficiency_delta is None else production_delta * 0.80 + efficiency_delta * 0.20\n    # Smooth surprise curve: ordinary deviations stay small while exceptional results keep growing.\n    surprise = abs(performance_delta) / 20.0\n    performance_move = math.copysign(0.32 * (surprise ** 1.50), performance_delta) if abs(performance_delta) > 2.0 else 0.0\n    outcome_move = 0.15 if event.get("teamWon") is True else -0.10 if event.get("teamWon") is False else 0.0\n    move_pct = performance_move + outcome_move\n',
+          )
+          replace_once(
+              path,
+              '    anchor_gap_pct = (model_target / old_price - 1.0) * 100.0\n    anchor_budget = clamp(anchor_gap_pct * 0.15, -0.50, 0.50)\n    per_event_anchor = anchor_budget / max(1, len(events))\n',
+              '    # Live event movement comes from the verified result itself, not a capped fair-value drift.\n    per_event_anchor = 0.0\n',
+          )
+          replace_once(
+              path,
+              '        combined_move = clamp(event_move + per_event_anchor, -max_game_move_pct, max_game_move_pct)\n',
+              '        combined_move = event_move + per_event_anchor\n',
+          )
+
+          # Dormant direct Tennis/Golf paths: mirror the uncapped specialized implementations.
+          path = "scripts/tennis_event_refresh.py"
+          regex_once(
+              path,
+              r"def tennis_match_move\(\n.*?\n    return round\(move, 3\)\n",
+              '''def tennis_match_move(\n    *,\n    winner: bool,\n    round_name: str,\n    major: bool,\n    sets_for: int,\n    sets_against: int,\n    player_record: dict[str, Any] | None = None,\n    opponent_record: dict[str, Any] | None = None,\n    max_move_pct: float = 2.5,\n) -> float:\n    \"\"\"Verified Tennis result priced by importance and surprise, without a fixed ceiling.\"\"\"\n    del max_move_pct\n    importance = round_importance(round_name)\n    move = 0.06 + importance * 1.65 if winner else -(0.07 + importance * 0.22)\n    if major:\n        move *= 1.75 if winner else 1.30\n    if sets_for or sets_against:\n        if winner and sets_against == 0:\n            move += 0.04\n        elif not winner and sets_for == 0:\n            move -= 0.03\n    own_rank = player_rank(player_record)\n    opponent_rank = player_rank(opponent_record)\n    if own_rank and opponent_rank:\n        if winner and own_rank > opponent_rank:\n            move += 0.22 * math.log1p((own_rank - opponent_rank) / 20.0)\n        elif not winner and own_rank < opponent_rank:\n            move -= 0.18 * math.log1p((opponent_rank - own_rank) / 20.0)\n        elif winner and own_rank < opponent_rank:\n            move -= 0.02 * math.log1p((opponent_rank - own_rank) / 100.0)\n    if abs(move) < 0.03:\n        move = 0.03 if winner else -0.03\n    return round(move, 3)\n''',
+              flags=re.S,
+          )
+
+          path = "scripts/golf_event_refresh.py"
+          regex_once(
+              path,
+              r"def golf_tournament_move\(\n.*?\n    return round\(move, 3\)\n",
+              '''def golf_tournament_move(\n    *,\n    finish: int,\n    field_size: int,\n    score_to_par: float | None,\n    status: str,\n    major: bool,\n    player_record: dict[str, Any] | None = None,\n    max_move_pct: float = 2.5,\n) -> float:\n    \"\"\"Verified Golf result priced by finish versus expectation, without a fixed ceiling.\"\"\"\n    del max_move_pct\n    field = max(2, int(field_size or 0))\n    position = max(1, min(int(finish or field), field))\n    own_rank = player_rank(player_record)\n    expected = min(field, own_rank) if own_rank else max(1, round(field * 0.50))\n    expectation = ((expected - position) / field) * 0.95\n    if position == 1:\n        placement = 1.05\n    elif position <= 3:\n        placement = 0.62\n    elif position <= 10:\n        placement = 0.32\n    elif position <= 25:\n        placement = 0.14\n    elif position <= 50:\n        placement = 0.02\n    else:\n        placement = -0.08\n    status_key = str(status or \"\").upper()\n    if status_key in {\"DQ\", \"WD\", \"W/D\", \"DNS\"}:\n        placement -= 0.42\n    elif status_key in {\"CUT\", \"MC\", \"MDF\", \"CUT_OR_INCOMPLETE\"}:\n        placement -= 0.28\n    score_component = 0.0\n    if score_to_par is not None:\n        try:\n            score = float(score_to_par)\n        except (TypeError, ValueError):\n            score = float(\"nan\")\n        if math.isfinite(score):\n            score_component = -score * 0.012\n    move = expectation + placement + score_component\n    if major:\n        move *= 1.55\n    if abs(move) < 0.03:\n        move = 0.03 if position <= expected else -0.03\n    return round(move, 3)\n''',
+              flags=re.S,
+          )
+
+          # Regression guard: explicit legacy movement ceilings must not return.
+          guard = Path("tests/test_no_hard_movement_caps.py")
+          guard.write_text('''from pathlib import Path\nimport unittest\n\nROOT = Path(__file__).resolve().parents[1]\n\nclass NoHardMovementCapsTests(unittest.TestCase):\n    def test_legacy_event_caps_are_absent(self):\n        files = {\n            \"scripts/athlete_career_event_refresh.py\": [\"MAX_EVENT_MOVE_PCT\", \"-15.0, 15.0\"],\n            \"scripts/non_athlete_event_refresh.py\": [\"MAX_EVENT_MOVE_PCT\"],\n            \"scripts/non_athlete_outcome_refresh.py\": [\"MAX_OUTCOME_MOVE_PCT\"],\n            \"scripts/creator_attention_refresh.py\": [\"-1.5, 1.5\", \"-15.0, 15.0\"],\n            \"market_jobs/soccer_json_history.py\": [\"min(max_move, 1.50)\", \"min(max_move, 1.25)\"],\n        }\n        for rel, banned in files.items():\n            text = (ROOT / rel).read_text(encoding=\"utf-8\")\n            for token in banned:\n                self.assertNotIn(token, text, f\"legacy movement cap returned in {rel}: {token}\")\n\nif __name__ == \"__main__\":\n    unittest.main()\n''', encoding="utf-8")
+          PY
+
+      - name: Validate changed pricing code
+        run: |
+          python -m py_compile \
+            scripts/athlete_career_event_refresh.py \
+            scripts/non_athlete_event_refresh.py \
+            scripts/non_athlete_outcome_refresh.py \
+            scripts/creator_attention_refresh.py \
+            market_jobs/soccer_json_history.py \
+            scripts/hourly_price_refresh.py \
+            scripts/tennis_event_refresh.py \
+            scripts/golf_event_refresh.py
+          python -m unittest tests/test_no_hard_movement_caps.py -v
+
+      - name: Commit pricing changes
+        run: |
+          set -euo pipefail
+          git config user.name "TalentX pricing migration"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            scripts/athlete_career_event_refresh.py \
+            scripts/non_athlete_event_refresh.py \
+            scripts/non_athlete_outcome_refresh.py \
+            scripts/creator_attention_refresh.py \
+            market_jobs/soccer_json_history.py \
+            scripts/hourly_price_refresh.py \
+            scripts/tennis_event_refresh.py \
+            scripts/golf_event_refresh.py \
+            tests/test_no_hard_movement_caps.py
+          git commit -m "Make TalentX movement expectation-driven and uncapped"
+          git push origin HEAD:main
