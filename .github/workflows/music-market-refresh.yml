@@ -9,6 +9,8 @@ on:
       - "scripts/repair_non_athlete_award_timeline.py"
       - "scripts/music_release_coverage_sweep.py"
       - "scripts/non_athlete_outcome_refresh.py"
+      - "scripts/billboard_chart_refresh.py"
+      - "scripts/sync_billboard_outcome_manifest.py"
       - "scripts/repair_non_athlete_outcome_manifest.py"
       - "scripts/restore_hourly_event_market_state.py"
       - "scripts/append_game_event_history.py"
@@ -20,6 +22,8 @@ on:
       - "tests/test_non_athlete_event_refresh.py"
       - "tests/test_repair_non_athlete_award_timeline.py"
       - "tests/test_non_athlete_outcome_refresh.py"
+      - "tests/test_billboard_chart_refresh.py"
+      - "tests/test_sync_billboard_outcome_manifest.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
   workflow_run:
@@ -90,6 +94,8 @@ jobs:
           tests/test_non_athlete_event_refresh.py
           tests/test_repair_non_athlete_award_timeline.py
           tests/test_non_athlete_outcome_refresh.py
+          tests/test_billboard_chart_refresh.py
+          tests/test_sync_billboard_outcome_manifest.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
       - name: Refresh Music awards and verified career claims
@@ -135,6 +141,17 @@ jobs:
           --max-pageview-checks 400
           --max-events 800
           --allow-source-errors
+      - name: Refresh direct Billboard chart movement
+        run: >-
+          python scripts/billboard_chart_refresh.py
+          --catalog data/current_catalog.json
+          --request-timeout 18
+          --allow-source-errors
+      - name: Sync Billboard outcomes into Music chart state
+        run: >-
+          python scripts/sync_billboard_outcome_manifest.py
+          --catalog data/current_catalog.json
+          --manifest data/music_outcome_manifest.json
       - name: Keep incomplete Music outcome checks retryable
         run: python scripts/repair_non_athlete_outcome_manifest.py --manifest data/music_outcome_manifest.json
       - name: Save authoritative Music market state
