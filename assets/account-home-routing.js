@@ -1,6 +1,7 @@
 /* TalentX account-aware Home routing.
  * Preserve the original app dashboard. The public landing page remains an
  * explicit welcome route, while clicking Home always opens the dashboard.
+ * Every TalentX brand/logo target routes back to the welcome page.
  */
 (() => {
   const appDashboard = typeof dashboard === 'function' ? dashboard : null;
@@ -21,6 +22,28 @@
       }
     });
   } catch {}
+
+  function brandTarget(target){
+    return target?.closest?.('.brand,.public-brand,.auth-back-brand,.public-footer-brand');
+  }
+
+  function goWelcomeFromBrand(event){
+    const brand=brandTarget(event.target);
+    if(!brand) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if(typeof window.talentxGoWelcome==='function') window.talentxGoWelcome();
+    else if(typeof go==='function') go('welcome');
+  }
+
+  // Capture brand clicks before any legacy inline onclick handler can redirect
+  // the logo to the dashboard.
+  document.addEventListener('click',goWelcomeFromBrand,true);
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='Enter'&&event.key!==' ') return;
+    if(!brandTarget(event.target)) return;
+    goWelcomeFromBrand(event);
+  },true);
 
   setTimeout(() => {
     if (typeof publicHome !== 'function') return;
@@ -74,7 +97,7 @@
       }
     };
 
-    window.talentxAccountAwareHome='explicit-home-always-dashboard-v3';
+    window.talentxAccountAwareHome='logo-welcome-home-dashboard-v4';
     window.talentxRefreshAccountHome();
   },0);
 })();
