@@ -2,6 +2,64 @@
 (() => {
   const CATALOG_PRICING_REVISION='20260831-1';
   const STORAGE_KEY='talentx_v2_state';
+  let authBootstrapState='loading';
+  let resolveAuthReady=null;
+  window.talentxAuthReady=new Promise(resolve=>{resolveAuthReady=resolve;});
+
+  function settleAuthReady(status){
+    if(authBootstrapState!=='loading') return;
+    authBootstrapState=status;
+    resolveAuthReady?.(status);
+  }
+
+  async function waitForAuthAdapter(timeoutMs=12000){
+    if(window.talentxAuthAdapter) return true;
+    let timer=null;
+    try{
+      await Promise.race([
+        window.talentxAuthReady,
+        new Promise(resolve=>{timer=setTimeout(()=>resolve('timeout'),timeoutMs);})
+      ]);
+    }finally{
+      if(timer) clearTimeout(timer);
+    }
+    return Boolean(window.talentxAuthAdapter);
+  }
+
+  function authMode(){
+    try{return route==='signup'?'signup':'login';}catch{return 'login';}
+  }
+
+  // The public auth form can render before the asynchronously loaded Supabase
+  // adapter is ready. Intercept an early submit instead of letting the temporary
+  // placeholder handler run; once auth is ready, replay that one intended click.
+  document.addEventListener('click',async event=>{
+    const button=event.target?.closest?.('.auth-submit');
+    if(!button||window.talentxAuthAdapter) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    if(button.dataset.talentxAuthWaiting==='1') return;
+
+    const originalText=button.textContent;
+    const mode=authMode();
+    button.dataset.talentxAuthWaiting='1';
+    button.disabled=true;
+    button.textContent='Preparing secure login…';
+
+    const ready=await waitForAuthAdapter();
+    button.disabled=false;
+    button.textContent=originalText;
+    delete button.dataset.talentxAuthWaiting;
+
+    if(!ready){
+      const message='Secure login could not initialize. Please try again.';
+      if(typeof toast==='function') toast(message); else console.warn(message);
+      return;
+    }
+    if(typeof window.submitTalentxAuth==='function'){
+      window.submitTalentxAuth(mode);
+    }
+  },true);
 
   function migrateLocalPriceState(){
     try{
@@ -136,6 +194,7 @@
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
       }
       await loadScript('./assets/supabase-auth-sync.js?v=20260903-2');
+      settleAuthReady('ready');
       await loadScript('./assets/password-requirements.js?v=20260901-1');
       await loadScript('./assets/neon-brand-assets.js?v=20260903-1');
       loadStylesheet('./assets/account-ui.css?v=20260901-3');
@@ -145,6 +204,7 @@
       await loadScript('./assets/notification-center.js?v=20260901-1');
       await loadScript('./assets/logo-welcome-routing.js?v=20260901-1');
     }catch(error){
+      settleAuthReady('failed');
       console.warn('TalentX account services could not load; guest mode remains available.',error);
     }
   }
