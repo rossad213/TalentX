@@ -1,11 +1,14 @@
 /* TalentX lightweight search discovery. Reuses currentRecords already loaded by app.js. */
 (function(){
   const STORAGE_KEY='talentx_recent_searches_v1';
+  const SEARCH_RENDER_DEBOUNCE_MS=140;
   let panel=null;
   let input=null;
   let readyTimer=null;
+  let marketRenderTimer=null;
+  const searchCache=new WeakMap();
 
-  const escSearch=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
+  const escSearch=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#039;'}[m]));
   const readRecents=()=>{
     try{
       const value=JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
@@ -29,20 +32,35 @@
   function changeValue(r){
     try{return Number(displayChange(r)||0);}catch{return Number(r.dailyChange||0);}
   }
+  function searchable(r){
+    const cached=searchCache.get(r);
+    if(cached)return cached;
+    const name=String(r.name||'').toLowerCase();
+    const ticker=String(r.ticker||'').toLowerCase();
+    const search=String(r.searchText||[r.name,r.ticker,r.team,r.leagueOrMedium,r.discipline,r.role].filter(Boolean).join(' ')).toLowerCase();
+    const value={name,ticker,search,nameParts:name.split(/\s+/)};
+    searchCache.set(r,value);
+    return value;
+  }
   function rankMatches(query){
     const q=query.trim().toLowerCase();
     if(!q)return [];
-    return currentList().map(r=>{
-      const name=String(r.name||'').toLowerCase();
-      const ticker=String(r.ticker||'').toLowerCase();
-      const search=String(r.searchText||[r.name,r.ticker,r.team,r.leagueOrMedium,r.discipline,r.role].filter(Boolean).join(' ')).toLowerCase();
+    const best=[];
+    for(const r of currentList()){
+      const fields=searchable(r);
       let score=0;
-      if(name===q||ticker===q)score=100;
-      else if(name.startsWith(q)||ticker.startsWith(q))score=80;
-      else if(name.split(/\s+/).some(part=>part.startsWith(q)))score=65;
-      else if(search.includes(q))score=40;
-      return {r,score};
-    }).filter(x=>x.score>0).sort((a,b)=>b.score-a.score||Number(b.r.careerScore||0)-Number(a.r.careerScore||0)).slice(0,6).map(x=>x.r);
+      if(fields.name===q||fields.ticker===q)score=100;
+      else if(fields.name.startsWith(q)||fields.ticker.startsWith(q))score=80;
+      else if(fields.nameParts.some(part=>part.startsWith(q)))score=65;
+      else if(fields.search.includes(q))score=40;
+      if(!score)continue;
+      const item={r,score};
+      let index=best.findIndex(existing=>score>existing.score||(score===existing.score&&Number(r.careerScore||0)>Number(existing.r.careerScore||0)));
+      if(index<0)index=best.length;
+      best.splice(index,0,item);
+      if(best.length>6)best.pop();
+    }
+    return best.map(item=>item.r);
   }
   function discoveryPicks(){
     return [...currentList()].sort((a,b)=>Number(b.careerScore||0)-Number(a.careerScore||0)).slice(0,5);
@@ -51,6 +69,24 @@
     const change=changeValue(r);
     const meta=[r.discipline,r.leagueOrMedium||r.team,r.role].filter(Boolean).slice(0,2).join(' · ');
     return `<button class="search-suggestion" type="button" data-search-id="${escSearch(r.id)}"><span class="search-suggestion-avatar">${escSearch(r.avatar||r.ticker||'TX')}</span><span class="search-suggestion-copy"><strong>${escSearch(r.name)}${r.ticker?` <span class="ticker">${escSearch(r.ticker)}</span>`:''}</strong><span>${escSearch(meta||r.primaryCategory||'TalentX listing')}</span></span><span class="search-suggestion-price"><strong>${escSearch(priceText(r))}</strong><span class="${change>=0?'positive':'negative'}">${change>=0?'+':''}${change.toFixed(2)}%</span></span></button>`;
+  }
+  function cancelMarketRender(){
+    if(marketRenderTimer){clearTimeout(marketRenderTimer);marketRenderTimer=null;}
+  }
+  function applyMarketSearch(){
+    marketRenderTimer=null;
+    if(route!=='market'){
+      route='market';
+      filters.segment='Current';
+      setActiveNav();
+    }
+    render();
+  }
+  function scheduleMarketSearch(value){
+    filters.query=String(value??'');
+    filters.page=1;
+    cancelMarketRender();
+    marketRenderTimer=setTimeout(applyMarketSearch,SEARCH_RENDER_DEBOUNCE_MS);
   }
   function ensurePanel(){
     if(panel&&panel.isConnected)return panel;
@@ -63,15 +99,15 @@
       const result=e.target.closest('[data-search-id]');
       if(result){
         const r=currentList().find(x=>String(x.id)===String(result.dataset.searchId));
-        if(r){remember({id:r.id,label:r.name});closePanel();input.value='';filters.query='';openProfile(r.id);}
+        if(r){remember({id:r.id,label:r.name});cancelMarketRender();closePanel();input.value='';filters.query='';openProfile(r.id);}
         return;
       }
       const recent=e.target.closest('[data-recent-index]');
       if(recent){
         const item=readRecents()[Number(recent.dataset.recentIndex)];
         if(!item)return;
-        if(item.id&&currentList().some(r=>String(r.id)===String(item.id))){closePanel();input.value='';filters.query='';openProfile(item.id);}
-        else{input.value=item.label||'';input.dispatchEvent(new Event('input',{bubbles:true}));renderPanel(input.value);input.focus();}
+        if(item.id&&currentList().some(r=>String(r.id)===String(item.id))){cancelMarketRender();closePanel();input.value='';filters.query='';openProfile(item.id);}
+        else{input.value=item.label||'';input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();}
       }
       if(e.target.closest('[data-clear-recents]')){writeRecents([]);renderPanel(input.value);}
     });
@@ -99,16 +135,25 @@
     input.setAttribute('autocomplete','off');
     input.setAttribute('aria-haspopup','listbox');
     input.addEventListener('focus',()=>renderPanel(input.value));
-    input.addEventListener('input',()=>renderPanel(input.value));
+    // app.js has a legacy input handler that redraws the full Market on every
+    // keystroke. Capture this event first so suggestions remain immediate while
+    // the expensive Market redraw happens only after the user pauses typing.
+    input.addEventListener('input',event=>{
+      event.stopImmediatePropagation();
+      scheduleMarketSearch(input.value);
+      renderPanel(input.value);
+    },true);
     input.addEventListener('keydown',e=>{
       if(e.key==='Escape'){closePanel();input.blur();}
       if(e.key==='Enter'&&input.value.trim()){
         remember({label:input.value.trim()});
         closePanel();
+        cancelMarketRender();
+        applyMarketSearch();
       }
     });
     document.addEventListener('pointerdown',e=>{if(!e.target.closest('.global-search'))closePanel();});
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',attach,{once:true});else attach();
-  window.addEventListener('beforeunload',()=>{if(readyTimer)clearTimeout(readyTimer);});
+  window.addEventListener('beforeunload',()=>{if(readyTimer)clearTimeout(readyTimer);cancelMarketRender();});
 })();
