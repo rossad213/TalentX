@@ -15,6 +15,7 @@ from creator_youtube_refresh import (
     parse_youtube_feed,
     performance_target,
 )
+from creator_youtube_rss_refresh import parse_rss_video_stats
 
 
 class CreatorYouTubeRefreshTests(unittest.TestCase):
@@ -33,6 +34,33 @@ class CreatorYouTubeRefreshTests(unittest.TestCase):
         self.assertEqual(rows[0]["videoId"], "abc123")
         self.assertEqual(rows[0]["title"], "New Video")
         self.assertEqual(rows[0]["publishedAt"].date().isoformat(), "2026-09-05")
+
+    def test_production_rss_parser_reads_official_view_statistics(self) -> None:
+        sample = """<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:yt='http://www.youtube.com/xml/schemas/2015'
+      xmlns:media='http://search.yahoo.com/mrss/'
+      xmlns='http://www.w3.org/2005/Atom'>
+  <entry>
+    <yt:videoId>abc123</yt:videoId>
+    <yt:channelId>UC1234567890123456789012</yt:channelId>
+    <title>New Video</title>
+    <published>2026-09-05T12:00:00+00:00</published>
+    <media:group>
+      <media:community><media:statistics views='987654'/></media:community>
+    </media:group>
+  </entry>
+</feed>"""
+        rows = parse_rss_video_stats(sample)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["views"], 987654)
+        self.assertEqual(rows[0]["channelId"], "UC1234567890123456789012")
+
+    def test_production_rss_parser_fails_closed_without_view_statistics(self) -> None:
+        sample = """<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:yt='http://www.youtube.com/xml/schemas/2015' xmlns='http://www.w3.org/2005/Atom'>
+  <entry><yt:videoId>abc123</yt:videoId><title>New Video</title><published>2026-09-05T12:00:00+00:00</published></entry>
+</feed>"""
+        self.assertEqual(parse_rss_video_stats(sample), [])
 
     def test_watch_page_parser_requires_expected_video(self) -> None:
         html = '''<script>var ytInitialPlayerResponse = {"videoDetails":{"videoId":"abc123","channelId":"UC1234567890123456789012","title":"Test","viewCount":"987654"}};</script>'''
