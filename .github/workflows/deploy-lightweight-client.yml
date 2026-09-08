@@ -87,6 +87,13 @@ jobs:
             --manifest data/catalog_manifest.json
           test -s data/catalog_index.json
           test -s data/profile_shards/000.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=json.loads(Path('data/catalog_index.json').read_text(encoding='utf-8'))
+          assert len(rows) >= 10000, f'Refusing to deploy shrunken browser catalog: {len(rows)} records'
+          print(f'Browser catalog safety gate passed: {len(rows):,} records')
+          PY
 
       - name: Prepare lightweight static Pages site
         run: |
