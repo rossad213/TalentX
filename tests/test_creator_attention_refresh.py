@@ -25,12 +25,29 @@ class CreatorAttentionRefreshTests(unittest.TestCase):
         self.assertTrue(title_matches_name("Example Creator (YouTuber)", "Example Creator"))
         self.assertFalse(title_matches_name("Different Person", "Example Creator"))
 
-    def test_attention_thresholds_support_up_and_down_moves(self):
-        self.assertEqual(attention_target(3.2), ("breakout", 0.75))
-        self.assertEqual(attention_target(2.1), ("hot", 0.50))
-        self.assertEqual(attention_target(0.50), ("cool", -0.25))
-        self.assertEqual(attention_target(0.30), ("cold", -0.50))
+    def test_attention_thresholds_support_uncapped_up_and_down_moves(self):
+        breakout = attention_target(3.2)
+        hot = attention_target(2.1)
+        cool = attention_target(0.50)
+        cold = attention_target(0.30)
+        self.assertIsNotNone(breakout)
+        self.assertIsNotNone(hot)
+        self.assertIsNotNone(cool)
+        self.assertIsNotNone(cold)
+        self.assertEqual(breakout[0], "breakout")
+        self.assertEqual(hot[0], "hot")
+        self.assertEqual(cool[0], "cool")
+        self.assertEqual(cold[0], "cold")
+        self.assertGreater(breakout[1], hot[1])
+        self.assertGreater(hot[1], 0)
+        self.assertLess(cool[1], 0)
+        self.assertLess(cold[1], cool[1])
         self.assertIsNone(attention_target(1.05))
+
+    def test_extreme_attention_breakout_can_exceed_old_one_point_five_cap(self):
+        bucket, move = attention_target(16.0)
+        self.assertEqual(bucket, "breakout")
+        self.assertGreater(move, 1.5)
 
     def test_window_ratio_compares_recent_week_to_prior_baseline(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
