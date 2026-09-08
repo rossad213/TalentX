@@ -22,7 +22,7 @@ on:
     workflows: ["Build current catalog baseline"]
     types: [completed]
   schedule:
-    - cron: "37 9 * * *"
+    - cron: "37 */6 * * *"
   workflow_dispatch:
 
 permissions:
