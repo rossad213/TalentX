@@ -7,6 +7,7 @@ on:
       - ".github/workflows/creator-market-refresh.yml"
       - "scripts/creator_attention_refresh.py"
       - "scripts/creator_youtube_refresh.py"
+      - "scripts/creator_youtube_rss_refresh.py"
       - "scripts/prepare_creator_wikipedia_identities.py"
       - "scripts/discover_creators_only.py"
       - "scripts/expand_creator_market.py"
@@ -112,14 +113,14 @@ jobs:
           --max-records 100
       - name: Refresh direct Creator YouTube performance
         run: >-
-          python scripts/creator_youtube_refresh.py
+          python scripts/creator_youtube_rss_refresh.py
           --catalog data/market/creators.json
           --attention-manifest data/creator_attention_manifest.json
           --manifest data/creator_youtube_manifest.json
           --lookback-days 21
-          --request-timeout 12
-          --max-records 80
-          --max-videos-per-record 4
+          --request-timeout 10
+          --max-records 500
+          --max-videos-per-record 8
           --allow-source-errors
       - name: Append durable Creator events
         run: python scripts/append_game_event_history.py --catalog data/market/creators.json
