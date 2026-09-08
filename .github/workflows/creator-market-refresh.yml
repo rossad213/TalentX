@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/creator-market-refresh.yml"
       - "scripts/creator_attention_refresh.py"
+      - "scripts/creator_youtube_refresh.py"
       - "scripts/prepare_creator_wikipedia_identities.py"
       - "scripts/discover_creators_only.py"
       - "scripts/expand_creator_market.py"
@@ -13,6 +14,7 @@ on:
       - "scripts/append_price_history.py"
       - "scripts/category_market_store.py"
       - "tests/test_creator_attention_refresh.py"
+      - "tests/test_creator_youtube_refresh.py"
       - "tests/test_discover_creators_only.py"
       - "tests/test_category_market_store.py"
   workflow_run:
@@ -34,7 +36,7 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -65,7 +67,9 @@ jobs:
             gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-creator-market -D _prior || true
             prior_state="$(find _prior -name creators.json -print -quit)"
             prior_manifest="$(find _prior -name creator_attention_manifest.json -print -quit)"
+            prior_youtube="$(find _prior -name creator_youtube_manifest.json -print -quit)"
             if [ -n "$prior_manifest" ]; then cp "$prior_manifest" data/creator_attention_manifest.json; fi
+            if [ -n "$prior_youtube" ]; then cp "$prior_youtube" data/creator_youtube_manifest.json; fi
             if [ -n "$prior_state" ]; then
               if [ -n "$prior_time" ] && [ "$prior_time" \> "$baseline_time" ]; then
                 cp "$prior_state" data/market/creators.json
@@ -79,6 +83,7 @@ jobs:
           python -m unittest
           tests/test_discover_creators_only.py
           tests/test_creator_attention_refresh.py
+          tests/test_creator_youtube_refresh.py
           tests/test_category_market_store.py -v
       - name: Expand Creator coverage toward 1,000
         run: >-
@@ -105,6 +110,17 @@ jobs:
           --lookback-days 45
           --request-timeout 12
           --max-records 100
+      - name: Refresh direct Creator YouTube performance
+        run: >-
+          python scripts/creator_youtube_refresh.py
+          --catalog data/market/creators.json
+          --attention-manifest data/creator_attention_manifest.json
+          --manifest data/creator_youtube_manifest.json
+          --lookback-days 21
+          --request-timeout 12
+          --max-records 80
+          --max-videos-per-record 4
+          --allow-source-errors
       - name: Append durable Creator events
         run: python scripts/append_game_event_history.py --catalog data/market/creators.json
       - name: Append dated Creator history
@@ -115,5 +131,6 @@ jobs:
           path: |
             data/market/creators.json
             data/creator_attention_manifest.json
+            data/creator_youtube_manifest.json
             data/creator_discovery_manifest.json
           retention-days: 14
