@@ -46,7 +46,10 @@
       'actor-release':'Screen release',
       'actor-upcoming-project':'Upcoming project',
       'actor-box-office-outcome':'Box office',
+      'actor-streaming-outcome':'Streaming performance',
       'audience-attention-outcome':'Audience attention',
+      'creator-attention-outcome':'Creator attention',
+      'creator-youtube-outcome':'YouTube performance',
       award:'Award',
       nomination:'Nomination'
     };
@@ -123,15 +126,20 @@
   function detailFacts(event){
     const facts=[];
     const keys=[
-      ['chartRank','Chart rank'],['boxOfficeToCostRatio','Box office / cost'],['attentionRatio','Attention ratio'],
+      ['chartRank','Chart rank'],['boxOfficeRank','Box office rank'],['weekendGross','Weekend gross'],
+      ['boxOfficeToCostRatio','Box office / cost'],['streamingRank','Streaming rank'],['weeklyViews','Weekly views'],
+      ['attentionRatio','Attention ratio'],['viewGrowthRatio','View growth ratio'],['youtubeViews','YouTube views'],
+      ['recentViewsPerDay','Recent views / day'],['baselineViewsPerDay','Baseline views / day'],
       ['performanceDeltaPct','Performance vs expectation'],['productionDeltaPct','Production delta'],['efficiencyDeltaPct','Efficiency delta']
     ];
     for(const [key,label] of keys){
       const value=event[key];
       if(value===undefined||value===null||value==='')continue;
       let display=String(value);
-      if(key==='chartRank')display=`#${value}`;
-      if(key==='boxOfficeToCostRatio'||key==='attentionRatio')display=`${Number(value).toFixed(2)}×`;
+      if(key==='chartRank'||key==='boxOfficeRank'||key==='streamingRank')display=`#${value}`;
+      if(key==='boxOfficeToCostRatio'||key==='attentionRatio'||key==='viewGrowthRatio')display=`${Number(value).toFixed(2)}×`;
+      if(key==='weekendGross')display=money(value);
+      if(key==='weeklyViews'||key==='youtubeViews'||key==='recentViewsPerDay'||key==='baselineViewsPerDay')display=new Intl.NumberFormat('en-US',{maximumFractionDigits:0}).format(Number(value));
       if(key.endsWith('Pct'))display=`${Number(value)>=0?'+':''}${Number(value).toFixed(1)}%`;
       facts.push([label,display]);
     }
