@@ -38,7 +38,7 @@ on:
         required: false
         default: "2400"
   schedule:
-    - cron: "41 7 1 * *"
+    - cron: "41 7 * * 0"
 
 permissions:
   actions: read
