@@ -16,7 +16,7 @@ on:
       - "Music market refresh"
       - "Actor market refresh"
       - "Creator market refresh"
-      - "Backfill verified 1Y event history"
+      - "Backfill verified deep event history"
       - "Soccer history refresh"
       - "Tennis history refresh"
       - "Golf history refresh"
