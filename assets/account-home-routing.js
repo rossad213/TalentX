@@ -27,22 +27,39 @@
     return target?.closest?.('.brand,.public-brand,.auth-back-brand,.public-footer-brand');
   }
 
+  function homeTarget(target){
+    return target?.closest?.('button[data-route="dashboard"]');
+  }
+
   function goWelcomeFromBrand(event){
     const brand=brandTarget(event.target);
     if(!brand) return;
     event.preventDefault();
-    event.stopPropagation();
+    event.stopImmediatePropagation();
+    explicitDashboard=false;
     if(typeof window.talentxGoWelcome==='function') window.talentxGoWelcome();
     else if(typeof go==='function') go('welcome');
   }
 
-  // Capture brand clicks before any legacy inline onclick handler can redirect
-  // the logo to the dashboard.
-  document.addEventListener('click',goWelcomeFromBrand,true);
+  function goDashboardFromHome(event){
+    const home=homeTarget(event.target);
+    if(!home) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    explicitDashboard=true;
+    if(typeof go==='function') go('dashboard');
+  }
+
+  // Capture navigation before any legacy inline onclick handler can swap the
+  // intended behavior. Brand/logo is always Welcome; Home is always Dashboard.
+  document.addEventListener('click',event=>{
+    if(brandTarget(event.target)) return goWelcomeFromBrand(event);
+    if(homeTarget(event.target)) return goDashboardFromHome(event);
+  },true);
   document.addEventListener('keydown',event=>{
     if(event.key!=='Enter'&&event.key!==' ') return;
-    if(!brandTarget(event.target)) return;
-    goWelcomeFromBrand(event);
+    if(brandTarget(event.target)) return goWelcomeFromBrand(event);
+    if(homeTarget(event.target)) return goDashboardFromHome(event);
   },true);
 
   setTimeout(() => {
@@ -88,7 +105,13 @@
     }
 
     window.talentxGoWelcome=function(){
+      explicitDashboard=false;
       if(typeof go==='function') go('welcome');
+    };
+
+    window.talentxGoDashboard=function(){
+      explicitDashboard=true;
+      if(typeof go==='function') go('dashboard');
     };
 
     window.talentxRefreshAccountHome=function(){
@@ -97,7 +120,7 @@
       }
     };
 
-    window.talentxAccountAwareHome='logo-welcome-home-dashboard-v4';
+    window.talentxAccountAwareHome='locked-logo-welcome-home-dashboard-v5';
     window.talentxRefreshAccountHome();
   },0);
 })();
