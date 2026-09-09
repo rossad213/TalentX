@@ -7,8 +7,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import tennis_event_refresh as tennis_base  # noqa: E402
 from golf_event_refresh_results import golf_tournament_move_results  # noqa: E402
-from tennis_event_refresh_results import tennis_match_move_results  # noqa: E402
+from tennis_event_refresh_results import (  # noqa: E402
+    flatten_scoreboard_results,
+    tennis_match_move_results,
+    verified_tennis_record_strength,
+)
 
 
 class SpecializedUncappedResultTests(unittest.TestCase):
@@ -37,6 +42,151 @@ class SpecializedUncappedResultTests(unittest.TestCase):
             max_move_pct=0.5,
         )
         self.assertGreater(move, 2.5)
+
+    def test_tennis_all_board_infers_draw_tour_and_keeps_one_match(self) -> None:
+        payload = {
+            "events": [{
+                "id": "us-open-2026",
+                "name": "US Open",
+                "major": True,
+                "groupings": [{
+                    "grouping": {"slug": "mens-singles", "displayName": "Men's Singles"},
+                    "competitions": [{
+                        "id": "shelton-alcaraz-qf",
+                        "date": "2026-09-09T03:05:00Z",
+                        "status": {"type": {"state": "post", "completed": True}},
+                        "type": {"slug": "mens-singles", "text": "Men's Singles"},
+                        "round": {"displayName": "Quarterfinal"},
+                        "competitors": [
+                            {
+                                "id": "shelton",
+                                "winner": True,
+                                "athlete": {"displayName": "Ben Shelton"},
+                                "linescores": [
+                                    {"value": 6, "winner": False},
+                                    {"value": 6, "winner": True},
+                                    {"value": 6, "winner": True},
+                                    {"value": 1, "winner": False},
+                                    {"value": 7, "winner": True},
+                                ],
+                            },
+                            {
+                                "id": "alcaraz",
+                                "winner": False,
+                                "athlete": {"displayName": "Carlos Alcaraz"},
+                                "linescores": [
+                                    {"value": 7, "winner": True},
+                                    {"value": 1, "winner": False},
+                                    {"value": 3, "winner": False},
+                                    {"value": 6, "winner": True},
+                                    {"value": 6, "winner": False},
+                                ],
+                            },
+                        ],
+                    }],
+                }],
+            }]
+        }
+        matches = flatten_scoreboard_results(payload, "https://example.invalid")
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["tour"], "ATP")
+        self.assertTrue(matches[0]["major"])
+        self.assertEqual(matches[0]["round"], "Quarterfinal")
+        self.assertEqual(matches[0]["matchKey"], "atp:shelton-alcaraz-qf")
+
+        # Even if a tour-specific endpoint is mislabeled or broad, explicit draw
+        # metadata must win so the same men's match cannot also become WTA.
+        mislabeled = flatten_scoreboard_results(
+            payload,
+            "https://example.invalid/wta",
+            default_tour="wta",
+        )
+        self.assertEqual(len(mislabeled), 1)
+        self.assertEqual(mislabeled[0]["tour"], "ATP")
+        self.assertEqual(mislabeled[0]["matchKey"], "atp:shelton-alcaraz-qf")
+
+    def test_verified_tennis_identity_beats_higher_priced_prototype_duplicate(self) -> None:
+        official = {
+            "id": "athlete-tennis-ben-shelton",
+            "name": "Ben Shelton",
+            "primaryCategory": "Athlete",
+            "discipline": "Tennis",
+            "marketSegment": "Current",
+            "sourceNamespace": "curated-individual-sport-roster",
+            "sourceType": "official-ranking-roster",
+            "verificationStatus": "Official current ranking snapshot",
+            "sourceRank": 5,
+            "pricingConfidence": 0.7,
+            "marketPrice": 110.34,
+            "priceEvents": [],
+        }
+        prototype = {
+            "id": "cur-ben-shelton",
+            "name": "Ben Shelton",
+            "primaryCategory": "Athlete",
+            "discipline": "Tennis",
+            "marketSegment": "Current",
+            "verificationStatus": "Prototype current seed — connect a live source before launch",
+            "rosterSourceRank": 5,
+            "pricingConfidence": 0.7,
+            "marketPrice": 115.51,
+            "priceEvents": [],
+        }
+        alcaraz = {
+            "id": "athlete-tennis-carlos-alcaraz",
+            "name": "Carlos Alcaraz",
+            "primaryCategory": "Athlete",
+            "discipline": "Tennis",
+            "marketSegment": "Current",
+            "sourceNamespace": "curated-individual-sport-roster",
+            "sourceType": "official-ranking-roster",
+            "verificationStatus": "Official current ranking snapshot",
+            "sourceRank": 2,
+            "pricingConfidence": 0.7,
+            "marketPrice": 139.16,
+            "priceEvents": [],
+        }
+        self.assertGreater(
+            verified_tennis_record_strength(official),
+            verified_tennis_record_strength(prototype),
+        )
+
+        match = {
+            "matchKey": "atp:shelton-alcaraz-qf",
+            "competitionId": "shelton-alcaraz-qf",
+            "tour": "ATP",
+            "tournament": "US Open",
+            "round": "Quarterfinal",
+            "major": True,
+            "startedAt": "2026-09-09T03:05:00Z",
+            "sourceUrl": "https://example.invalid",
+            "competitors": [
+                {
+                    "name": "Ben Shelton",
+                    "normalizedName": "benshelton",
+                    "winner": True,
+                    "setsWon": 3,
+                    "linescores": [],
+                },
+                {
+                    "name": "Carlos Alcaraz",
+                    "normalizedName": "carlosalcaraz",
+                    "winner": False,
+                    "setsWon": 2,
+                    "linescores": [],
+                },
+            ],
+        }
+        updated, touched, added = tennis_base.apply_live_matches(
+            [official, prototype, alcaraz],
+            [match],
+            max_move_pct=2.5,
+        )
+        self.assertEqual(touched, 2)
+        self.assertEqual(added, 2)
+        self.assertGreater(updated[0]["marketPrice"], official["marketPrice"])
+        self.assertEqual(updated[1]["marketPrice"], prototype["marketPrice"])
+        self.assertEqual(updated[0]["lastPriceEvent"], "US Open · Quarterfinal · vs Carlos Alcaraz")
 
     def test_routine_golf_finish_remains_small(self) -> None:
         move = golf_tournament_move_results(
