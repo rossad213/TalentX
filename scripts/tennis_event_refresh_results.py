@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Run Tennis event refresh with results-proportional, uncapped movement.
 
-This wrapper also hardens live ESPN Tennis discovery. ESPN's tennis scoreboards
-have changed shape over time and Grand Slam main-draw matches are more reliable
-on the date-scoped ``tennis/all`` board than on a multi-day tour-specific query.
-The parser below accepts the verified grouped and direct competition shapes,
-infers ATP/WTA from draw metadata, and prevents the same match from being tagged
-once as ATP and again as WTA.
+Live discovery is hardened for ESPN Tennis by reading date-scoped scoreboards,
+accepting grouped/direct competition shapes, inferring ATP/WTA from draw metadata,
+and preferring verified canonical TalentX identities over prototype duplicates.
 """
 from __future__ import annotations
 
@@ -38,20 +35,10 @@ def tennis_match_move_results(
     opponent_record=None,
     max_move_pct: float = 2.5,
 ) -> float:
-    """Price a verified Tennis result without a fixed percentage ceiling.
-
-    Match outcome is the base signal. Round importance, major status, straight-set
-    dominance and ranking surprise determine how unusual the result is. The
-    legacy ``max_move_pct`` argument is accepted for CLI compatibility only.
-    """
+    """Price a verified Tennis result without a fixed percentage ceiling."""
     del max_move_pct
     importance = base.round_importance(round_name)
-    if winner:
-        move = 0.06 + importance * 1.65
-    else:
-        # Reaching a late round is already reflected in the preceding wins, so a
-        # late-round loss is negative but not the mirror image of a title win.
-        move = -(0.07 + importance * 0.22)
+    move = 0.06 + importance * 1.65 if winner else -(0.07 + importance * 0.22)
 
     if major:
         move *= 1.75 if winner else 1.30
@@ -66,13 +53,10 @@ def tennis_match_move_results(
     opponent_rank = base.player_rank(opponent_record)
     if own_rank and opponent_rank:
         if winner and own_rank > opponent_rank:
-            # Ranking surprise grows continuously rather than flattening at a
-            # fixed upset bonus.
             move += 0.22 * math.log1p((own_rank - opponent_rank) / 20.0)
         elif not winner and own_rank < opponent_rank:
             move -= 0.18 * math.log1p((opponent_rank - own_rank) / 20.0)
         elif winner and own_rank < opponent_rank:
-            # Expected favorite wins should still move, just slightly less.
             move -= 0.02 * math.log1p((opponent_rank - own_rank) / 100.0)
 
     if abs(move) < 0.03:
@@ -81,13 +65,7 @@ def tennis_match_move_results(
 
 
 def verified_tennis_record_strength(record):
-    """Prefer the verified current roster identity over legacy/prototype duplicates.
-
-    Live match evidence must land on the same canonical record that survives the
-    catalog finalizer. Price is deliberately only a late tie-breaker: a stale
-    prototype duplicate must never win identity matching merely because its old
-    market price is higher.
-    """
+    """Prefer verified current roster identities over legacy/prototype duplicates."""
     source_namespace = str(record.get("sourceNamespace") or "").strip().lower()
     source_type = str(record.get("sourceType") or "").strip().lower()
     verification = str(record.get("verificationStatus") or "").strip().lower()
@@ -118,7 +96,7 @@ def _draw_text(*values: Any) -> str:
 
 
 def infer_tour(*values: Any, default: str = "") -> str:
-    """Infer ATP/WTA from ESPN draw metadata, using endpoint tour only as fallback."""
+    """Infer ATP/WTA from draw metadata; use endpoint tour only as fallback."""
     text = _draw_text(*values)
     if any(token in text for token in ("women's", "womens", "women singles", "female")):
         return "WTA"
@@ -128,17 +106,15 @@ def infer_tour(*values: Any, default: str = "") -> str:
     return fallback if fallback in {"ATP", "WTA"} else ""
 
 
-def _competition_candidates(payload: dict[str, Any]) -> Iterable[tuple[dict[str, Any], dict[str, Any], str, str]]:
-    """Yield competition, tournament, grouping slug and grouping display name."""
+def _competition_candidates(payload: dict[str, Any]):
+    """Yield competition, tournament, grouping slug, grouping display name."""
     for tournament in payload.get("events") or []:
         if not isinstance(tournament, dict):
             continue
 
-        # Older ESPN shape: a top-level event may itself be the match.
         if isinstance(tournament.get("competitors"), list):
             yield tournament, tournament, "", ""
 
-        # Current verified shape: tournament -> draw grouping -> matches.
         for grouping_block in tournament.get("groupings") or []:
             if not isinstance(grouping_block, dict):
                 continue
@@ -155,7 +131,6 @@ def _competition_candidates(payload: dict[str, Any]) -> Iterable[tuple[dict[str,
                 if isinstance(competition, dict):
                     yield competition, tournament, grouping_slug, grouping_name
 
-        # Defensive ESPN variant: tournament -> competitions[] directly.
         for competition in tournament.get("competitions") or []:
             if isinstance(competition, dict):
                 yield competition, tournament, "", ""
@@ -167,7 +142,7 @@ def flatten_scoreboard_results(
     *,
     default_tour: str = "",
 ) -> list[dict[str, Any]]:
-    """Flatten all supported ESPN Tennis shapes into unique completed singles matches."""
+    """Flatten supported ESPN Tennis shapes into unique completed singles matches."""
     matches: dict[str, dict[str, Any]] = {}
     for competition, tournament, grouping_slug, grouping_name in _competition_candidates(payload):
         if not base.tennis_completed(competition):
@@ -184,13 +159,12 @@ def flatten_scoreboard_results(
 
         tour = infer_tour(grouping_slug, grouping_name, type_slug, type_text, default=default_tour)
         if not tour:
-            # On tennis/all we would rather skip an ambiguous row than tag a
-            # women's match as ATP (or vice versa) and double-price it.
             continue
 
         competitors = [item for item in (competition.get("competitors") or []) if isinstance(item, dict)]
         if len(competitors) != 2:
             continue
+
         started = base.parse_datetime(
             competition.get("date")
             or competition.get("startDate")
@@ -226,12 +200,11 @@ def flatten_scoreboard_results(
             or "Match"
         )
         tournament_name = str(tournament.get("name") or tournament.get("shortName") or "Tennis event")
-        tournament_id = str(tournament.get("id") or "")
         key = f"{tour.lower()}:{competition_id}"
         matches[key] = {
             "matchKey": key,
             "competitionId": competition_id,
-            "tournamentId": tournament_id,
+            "tournamentId": str(tournament.get("id") or ""),
             "tour": tour,
             "tournament": tournament_name,
             "round": round_name,
@@ -251,13 +224,7 @@ def discover_matches_results(
     tours: Iterable[str] = base.TOURS,
     http=None,
 ):
-    """Discover Tennis matches one date at a time, preferring ESPN tennis/all.
-
-    Grand Slam main draws can disappear from a multi-day tour-specific query even
-    while the date-scoped ESPN scoreboard shows them. Date-by-date collection also
-    gives late-night matches a chance to be returned under either local calendar
-    date within the lookback window.
-    """
+    """Discover Tennis matches date-by-date, preferring ESPN tennis/all."""
     client = http or base.session()
     matches: dict[str, dict[str, Any]] = {}
     warnings: list[str] = []
@@ -276,9 +243,6 @@ def discover_matches_results(
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"all scoreboard {date_text}: {type(exc).__name__}: {exc}")
 
-        # Fallback only when the all-board did not produce parseable completed
-        # singles for this date. Explicit draw metadata overrides endpoint labels,
-        # so even a broad/misrouted response cannot create ATP+WTA duplicates.
         if not all_matches:
             for tour in tours:
                 tour_text = str(tour or "").lower()
@@ -297,7 +261,6 @@ def discover_matches_results(
 
 base.tennis_match_move = tennis_match_move_results
 base.record_strength = verified_tennis_record_strength
-base.flatten_scoreboard = flatten_scoreboard_results
 base.discover_matches = discover_matches_results
 base.RESULTS_EVENT_PRICING_MODEL = RESULTS_MODEL_VERSION
 
