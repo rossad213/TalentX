@@ -24,7 +24,7 @@ INDEX_FIELDS = (
     "careerStage", "marketPrice", "dailyChange", "careerScore",
     "fundamentalValue", "pricingConfidence", "dataConfidence", "avatar",
     "searchText", "modelType", "demandPremiumPct", "momentumPct", "volume",
-    "lastPriceEventId", "lastGameMovePct", "lastPriceEventAt", "lastPriceEvent",
+    "lastPriceEventId", "lastGameMovePct", "lastEventMovePct", "lastPriceEventAt", "lastPriceEvent",
     "verificationStatus", "lastVerifiedAt", "statusSource", "sourceName",
     "pricingDataStatus", "pricingModelVersion", "priceHistoryStatus",
 )
@@ -46,6 +46,21 @@ def load_catalog(path: Path) -> list[dict[str, Any]]:
     if not records:
         raise ValueError(f"{path} contains no records")
     return records
+
+
+def browser_compatible_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Preserve generic event movement for legacy UI readers.
+
+    Some browser components still read ``lastGameMovePct`` because that field
+    predates non-sports event pricing. Music/Actor/Creator pipelines store the
+    same latest-event concept in ``lastEventMovePct``. Mirror it only in the
+    generated client data when the legacy field is absent; the authoritative
+    current_catalog.json is never changed.
+    """
+    item = dict(record)
+    if item.get("lastGameMovePct") is None and item.get("lastEventMovePct") is not None:
+        item["lastGameMovePct"] = item.get("lastEventMovePct")
+    return item
 
 
 def compact_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -86,7 +101,7 @@ def patch_manifest(manifest_path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def build(catalog_path: Path, index_path: Path, shards_dir: Path, manifest_path: Path) -> None:
-    records = load_catalog(catalog_path)
+    records = [browser_compatible_record(record) for record in load_catalog(catalog_path)]
     index = [compact_record(record) for record in records]
 
     index_path.parent.mkdir(parents=True, exist_ok=True)
