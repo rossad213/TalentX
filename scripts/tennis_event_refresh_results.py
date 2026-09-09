@@ -61,7 +61,41 @@ def tennis_match_move_results(
     return round(move, 3)
 
 
+def verified_tennis_record_strength(record):
+    """Prefer the verified current roster identity over legacy/prototype duplicates.
+
+    Live match evidence must land on the same canonical record that survives the
+    catalog finalizer. Price is deliberately only a late tie-breaker: a stale
+    prototype duplicate must never win identity matching merely because its old
+    market price is higher.
+    """
+    source_namespace = str(record.get("sourceNamespace") or "").strip().lower()
+    source_type = str(record.get("sourceType") or "").strip().lower()
+    verification = str(record.get("verificationStatus") or "").strip().lower()
+    record_id = str(record.get("id") or "")
+
+    official_roster = int(
+        source_namespace == "curated-individual-sport-roster"
+        or source_type == "official-ranking-roster"
+    )
+    non_prototype = int("prototype" not in verification and "seed" not in verification)
+    canonical_id = int(record_id.startswith("athlete-tennis-"))
+    current_segment = int(str(record.get("marketSegment") or "").strip().lower() == "current")
+    confidence = float(record.get("pricingConfidence") or record.get("dataConfidence") or 0)
+    market_price = float(record.get("marketPrice") or 0)
+    return (
+        official_roster,
+        non_prototype,
+        canonical_id,
+        current_segment,
+        confidence,
+        market_price,
+        record_id,
+    )
+
+
 base.tennis_match_move = tennis_match_move_results
+base.record_strength = verified_tennis_record_strength
 base.RESULTS_EVENT_PRICING_MODEL = RESULTS_MODEL_VERSION
 
 if __name__ == "__main__":
