@@ -22,6 +22,13 @@ ESPN_TOUR_SCOREBOARD = (
     "https://site.api.espn.com/apis/site/v2/sports/tennis/{tour}/scoreboard"
     "?limit=1000&dates={date}"
 )
+GRAND_SLAM_NAMES = {
+    "australianopen",
+    "frenchopen",
+    "rolandgarros",
+    "wimbledon",
+    "usopen",
+}
 
 
 def tennis_match_move_results(
@@ -104,6 +111,13 @@ def infer_tour(*values: Any, default: str = "") -> str:
         return "ATP"
     fallback = str(default or "").strip().upper()
     return fallback if fallback in {"ATP", "WTA"} else ""
+
+
+def infer_major(tournament_name: str, explicit_flag: Any = None) -> bool:
+    """Recognize the four Grand Slams even when ESPN omits its major flag."""
+    if explicit_flag is True:
+        return True
+    return base.norm(tournament_name) in GRAND_SLAM_NAMES
 
 
 def _competition_candidates(payload: dict[str, Any]):
@@ -208,7 +222,7 @@ def flatten_scoreboard_results(
             "tour": tour,
             "tournament": tournament_name,
             "round": round_name,
-            "major": bool(tournament.get("major")),
+            "major": infer_major(tournament_name, tournament.get("major")),
             "startedAt": base.iso_utc(started),
             "sourceUrl": source_url,
             "competitors": parsed_competitors,
@@ -224,9 +238,15 @@ def discover_matches_results(
     tours: Iterable[str] = base.TOURS,
     http=None,
 ):
-    """Discover Tennis matches date-by-date, preferring ESPN tennis/all."""
+    """Discover Tennis matches date-by-date across all and tour scoreboards.
+
+    ESPN can expose only part of a Grand Slam draw on one scoreboard surface. We
+    therefore merge tennis/all with ATP and WTA date-scoped boards and deduplicate
+    by ESPN competition id. The all-board result wins when the same match appears
+    more than once because its explicit draw metadata is the safest tour label.
+    """
     client = http or base.session()
-    matches: dict[str, dict[str, Any]] = {}
+    matches_by_competition: dict[str, dict[str, Any]] = {}
     warnings: list[str] = []
     cursor = start.date()
     final_date = end.date()
@@ -234,29 +254,32 @@ def discover_matches_results(
     while cursor <= final_date:
         date_text = cursor.strftime("%Y%m%d")
         all_url = ESPN_ALL_SCOREBOARD.format(date=date_text)
-        all_matches: list[dict[str, Any]] = []
         try:
             payload = base.fetch_json(all_url, timeout, client)
-            all_matches = flatten_scoreboard_results(payload, all_url)
-            for match in all_matches:
-                matches[str(match.get("matchKey") or "")] = match
+            for match in flatten_scoreboard_results(payload, all_url):
+                competition_id = str(match.get("competitionId") or match.get("matchKey") or "")
+                if competition_id:
+                    matches_by_competition[competition_id] = match
         except Exception as exc:  # noqa: BLE001
             warnings.append(f"all scoreboard {date_text}: {type(exc).__name__}: {exc}")
 
-        if not all_matches:
-            for tour in tours:
-                tour_text = str(tour or "").lower()
-                url = ESPN_TOUR_SCOREBOARD.format(tour=tour_text, date=date_text)
-                try:
-                    payload = base.fetch_json(url, timeout, client)
-                    for match in flatten_scoreboard_results(payload, url, default_tour=tour_text):
-                        matches[str(match.get("matchKey") or "")] = match
-                except Exception as exc:  # noqa: BLE001
-                    warnings.append(f"{tour_text} scoreboard {date_text}: {type(exc).__name__}: {exc}")
+        for tour in tours:
+            tour_text = str(tour or "").lower()
+            url = ESPN_TOUR_SCOREBOARD.format(tour=tour_text, date=date_text)
+            try:
+                payload = base.fetch_json(url, timeout, client)
+                for match in flatten_scoreboard_results(payload, url, default_tour=tour_text):
+                    competition_id = str(match.get("competitionId") or match.get("matchKey") or "")
+                    if competition_id:
+                        matches_by_competition.setdefault(competition_id, match)
+            except Exception as exc:  # noqa: BLE001
+                warnings.append(f"{tour_text} scoreboard {date_text}: {type(exc).__name__}: {exc}")
         cursor += timedelta(days=1)
 
-    clean = [match for key, match in matches.items() if key]
-    return sorted(clean, key=lambda item: str(item.get("startedAt") or "")), warnings
+    return sorted(
+        matches_by_competition.values(),
+        key=lambda item: str(item.get("startedAt") or ""),
+    ), warnings
 
 
 base.tennis_match_move = tennis_match_move_results
