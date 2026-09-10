@@ -30,6 +30,32 @@ class SpecializedUncappedResultTests(unittest.TestCase):
         self.assertGreater(move, 0)
         self.assertLess(move, 0.5)
 
+    def test_shelton_alcaraz_major_qf_prices_as_breakthrough(self) -> None:
+        move = tennis_match_move_results(
+            winner=True,
+            round_name="Quarterfinal",
+            major=True,
+            sets_for=3,
+            sets_against=2,
+            player_record={"sourceRank": 8},
+            opponent_record={"sourceRank": 3},
+        )
+        self.assertGreaterEqual(move, 4.0)
+        self.assertLessEqual(move, 5.0)
+
+    def test_major_top_three_upset_loss_registers_meaningfully(self) -> None:
+        move = tennis_match_move_results(
+            winner=False,
+            round_name="Quarterfinal",
+            major=True,
+            sets_for=2,
+            sets_against=3,
+            player_record={"sourceRank": 3},
+            opponent_record={"sourceRank": 8},
+        )
+        self.assertLess(move, -1.5)
+        self.assertGreater(move, -3.0)
+
     def test_major_tennis_upset_can_exceed_old_cap_when_result_warrants_it(self) -> None:
         move = tennis_match_move_results(
             winner=True,
@@ -185,6 +211,7 @@ class SpecializedUncappedResultTests(unittest.TestCase):
         self.assertEqual(touched, 2)
         self.assertEqual(added, 2)
         self.assertGreater(updated[0]["marketPrice"], official["marketPrice"])
+        self.assertGreaterEqual(updated[0]["priceEvents"][-1]["movePct"], 4.0)
         self.assertEqual(updated[1]["marketPrice"], prototype["marketPrice"])
         self.assertEqual(updated[0]["lastPriceEvent"], "US Open · Quarterfinal · vs Carlos Alcaraz")
 
