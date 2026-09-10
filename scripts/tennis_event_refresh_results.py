@@ -42,29 +42,71 @@ def tennis_match_move_results(
     opponent_record=None,
     max_move_pct: float = 2.5,
 ) -> float:
-    """Price a verified Tennis result without a fixed percentage ceiling."""
+    """Price verified Tennis results by stage, opponent quality and surprise.
+
+    The model intentionally has no hard percentage ceiling. Routine results stay
+    modest, while late-round Grand Slam wins and genuine ranking upsets receive
+    progressively stronger moves. Established favorites receive a smaller loss
+    penalty than the winner's breakthrough reward when an upset occurs.
+    """
     del max_move_pct
     importance = base.round_importance(round_name)
-    move = 0.06 + importance * 1.65 if winner else -(0.07 + importance * 0.22)
 
-    if major:
-        move *= 1.75 if winner else 1.30
+    if winner:
+        move = 0.06 + importance * 1.65
 
-    if sets_for or sets_against:
-        if winner and sets_against == 0:
-            move += 0.04
-        elif not winner and sets_for == 0:
-            move -= 0.03
+        # Grand Slam significance grows non-linearly by round: early major wins
+        # matter, but quarterfinals, semifinals and finals should separate
+        # meaningfully from ordinary tour results.
+        if major:
+            move = move * 1.40 + 0.20 + 8.0 * (importance ** 1.5)
 
-    own_rank = base.player_rank(player_record)
-    opponent_rank = base.player_rank(opponent_record)
-    if own_rank and opponent_rank:
-        if winner and own_rank > opponent_rank:
-            move += 0.22 * math.log1p((own_rank - opponent_rank) / 20.0)
-        elif not winner and own_rank < opponent_rank:
-            move -= 0.18 * math.log1p((opponent_rank - own_rank) / 20.0)
-        elif winner and own_rank < opponent_rank:
-            move -= 0.02 * math.log1p((opponent_rank - own_rank) / 100.0)
+        if sets_for or sets_against:
+            if sets_against == 0:
+                move += 0.04
+
+        own_rank = base.player_rank(player_record)
+        opponent_rank = base.player_rank(opponent_record)
+        if own_rank and opponent_rank:
+            # Beating an elite opponent is meaningful even when rankings are
+            # close; a true upset then adds a separate surprise component.
+            if opponent_rank <= 3:
+                move += 0.90
+            elif opponent_rank <= 10:
+                move += 0.35
+
+            if own_rank > opponent_rank:
+                ranking_gap = (own_rank - opponent_rank) / max(float(opponent_rank), 3.0)
+                move += 0.75 * math.log1p(ranking_gap)
+                if opponent_rank <= 3:
+                    move += 0.40
+            elif own_rank < opponent_rank:
+                move -= 0.02 * math.log1p((opponent_rank - own_rank) / 100.0)
+    else:
+        move = -(0.07 + importance * 0.22)
+
+        if major:
+            move *= 1.30
+
+        if sets_for or sets_against:
+            if sets_for == 0:
+                move -= 0.03
+
+        own_rank = base.player_rank(player_record)
+        opponent_rank = base.player_rank(opponent_record)
+        if own_rank and opponent_rank:
+            if own_rank < opponent_rank:
+                # An established favorite losing to a lower-ranked player should
+                # register clearly, especially late in a major, but the downside
+                # remains smaller than the challenger's breakthrough reward.
+                ranking_gap = (opponent_rank - own_rank) / max(float(own_rank), 3.0)
+                move -= 0.55 * math.log1p(ranking_gap)
+                if own_rank <= 3:
+                    move -= 0.70
+                if major:
+                    move -= 4.0 * (importance ** 1.5)
+            elif own_rank > opponent_rank:
+                move += 0.02 * math.log1p((own_rank - opponent_rank) / 100.0)
 
     if abs(move) < 0.03:
         move = 0.03 if winner else -0.03
