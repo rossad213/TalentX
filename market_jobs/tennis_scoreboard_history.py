@@ -22,6 +22,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from merge_historical_event_overlay import history_from_events, reconstruct_chain  # noqa: E402
+import tennis_event_refresh_results  # noqa: E402,F401  # patches shared live/history Tennis policy
 from tennis_event_refresh import (  # noqa: E402
     MAX_EVENTS_PER_RECORD,
     apply_live_matches,
