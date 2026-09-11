@@ -9,7 +9,11 @@ on:
       - "scripts/repair_non_athlete_award_timeline.py"
       - "scripts/music_release_coverage_sweep.py"
       - "scripts/non_athlete_outcome_refresh.py"
+      - "scripts/non_athlete_outcome_refresh_calibrated.py"
+      - "scripts/market_outcome_calibration_v2.py"
+      - "scripts/reprice_category_outcomes_v2.py"
       - "scripts/billboard_chart_refresh.py"
+      - "scripts/billboard_chart_refresh_calibrated.py"
       - "scripts/sync_billboard_outcome_manifest.py"
       - "scripts/repair_non_athlete_outcome_manifest.py"
       - "scripts/restore_hourly_event_market_state.py"
@@ -23,6 +27,7 @@ on:
       - "tests/test_repair_non_athlete_award_timeline.py"
       - "tests/test_non_athlete_outcome_refresh.py"
       - "tests/test_billboard_chart_refresh.py"
+      - "tests/test_category_breakout_calibration.py"
       - "tests/test_sync_billboard_outcome_manifest.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
@@ -95,6 +100,7 @@ jobs:
           tests/test_repair_non_athlete_award_timeline.py
           tests/test_non_athlete_outcome_refresh.py
           tests/test_billboard_chart_refresh.py
+          tests/test_category_breakout_calibration.py
           tests/test_sync_billboard_outcome_manifest.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
@@ -130,9 +136,9 @@ jobs:
           --max-checks 700
           --retry-unmatched-days 7
           --allow-source-errors
-      - name: Refresh Music outcome evidence broadly
+      - name: Refresh calibrated Music outcome evidence broadly
         run: >-
-          python scripts/non_athlete_outcome_refresh.py
+          python scripts/non_athlete_outcome_refresh_calibrated.py
           --catalog data/current_catalog.json
           --manifest data/music_outcome_manifest.json
           --lookback-days 60
@@ -141,9 +147,9 @@ jobs:
           --max-pageview-checks 400
           --max-events 800
           --allow-source-errors
-      - name: Refresh direct Billboard chart movement
+      - name: Refresh calibrated direct Billboard chart movement
         run: >-
-          python scripts/billboard_chart_refresh.py
+          python scripts/billboard_chart_refresh_calibrated.py
           --catalog data/current_catalog.json
           --request-timeout 18
           --allow-source-errors
@@ -154,6 +160,8 @@ jobs:
           --manifest data/music_outcome_manifest.json
       - name: Keep incomplete Music outcome checks retryable
         run: python scripts/repair_non_athlete_outcome_manifest.py --manifest data/music_outcome_manifest.json
+      - name: Migrate existing Music outcomes to breakout calibration v2
+        run: python scripts/reprice_category_outcomes_v2.py --catalog data/current_catalog.json --category music
       - name: Save authoritative Music market state
         run: cp data/current_catalog.json data/music_event_market_state.json
       - name: Recalculate Music fair values
