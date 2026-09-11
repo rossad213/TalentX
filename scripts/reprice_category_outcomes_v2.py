@@ -1,23 +1,28 @@
 #!/usr/bin/env python3
 """One-time/idempotent repricing of existing verified category outcome events.
 
-The live adapters now create events with the v2 calibration directly. This script
-migrates older durable outcome events in place, rescales later event prices, and
-updates matching chart points. Events are stamped so reruns cannot reprice them.
+Music and Actor outcomes retain the v2 market-wide calibration. Creator YouTube
+outcomes use the scale-aware Creator v2.1 policy so a tiny comparison-growth
+baseline cannot by itself create a huge move. Existing event keys are preserved,
+later prices are rescaled, and matching chart points are updated in place.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import statistics
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from market_outcome_calibration_v2 import (
+    CREATOR_MODEL_VERSION,
     MODEL_VERSION,
     actor_box_office_target,
     amplify_legacy_direct_actor_target,
+    creator_effective_ratio,
+    creator_performance_target,
     music_chart_target,
     music_movement_target,
 )
@@ -54,7 +59,70 @@ def category_event(category: str, event_type: str) -> bool:
     return False
 
 
-def calibrated_target(event: dict[str, Any], now: datetime) -> float | None:
+def category_model_version(category: str) -> str:
+    return CREATOR_MODEL_VERSION if category == "creators" else MODEL_VERSION
+
+
+def creator_snapshot_index(manifest: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Index the newest stored YouTube snapshots by verified channel."""
+    raw = manifest.get("videoSnapshots") if isinstance(manifest.get("videoSnapshots"), dict) else {}
+    channels: dict[str, list[dict[str, Any]]] = {}
+    for video_id, snapshot in raw.items():
+        if not isinstance(snapshot, dict):
+            continue
+        channel_id = str(snapshot.get("channelId") or "").strip()
+        views = number(snapshot.get("views"), 0)
+        if not channel_id or views <= 0:
+            continue
+        channels.setdefault(channel_id, []).append(
+            {
+                "videoId": str(video_id),
+                "views": views,
+                "publishedAt": str(snapshot.get("publishedAt") or ""),
+            }
+        )
+    for channel_id, rows in channels.items():
+        rows.sort(key=lambda row: str(row.get("publishedAt") or ""), reverse=True)
+        channels[channel_id] = rows[:8]
+    return channels
+
+
+def creator_scale_details(event: dict[str, Any], snapshots: dict[str, list[dict[str, Any]]]) -> tuple[float, float, float]:
+    raw_ratio = max(0.01, number(event.get("viewGrowthRatio"), 1.0))
+    stored_scale = number(event.get("viewScaleRatio"), 0)
+    stored_median = number(event.get("comparisonMedianViews"), 0)
+    if stored_scale > 0:
+        effective = creator_effective_ratio(raw_ratio, stored_scale)
+        return stored_scale, stored_median, effective
+
+    channel_id = str(event.get("youtubeChannelId") or "").strip()
+    focus_id = str(event.get("youtubeVideoId") or "").strip()
+    focus_views = number(event.get("youtubeViews"), 0)
+    rows = snapshots.get(channel_id, []) if channel_id else []
+    comparison_views = [
+        number(row.get("views"), 0)
+        for row in rows
+        if str(row.get("videoId") or "") != focus_id and number(row.get("views"), 0) > 0
+    ]
+    if len(comparison_views) >= 2 and focus_views > 0:
+        comparison_median = statistics.median(comparison_views)
+        scale_ratio = focus_views / comparison_median if comparison_median > 0 else 1.0
+    else:
+        comparison_median = 0.0
+        scale_ratio = 1.0
+    effective = creator_effective_ratio(raw_ratio, scale_ratio)
+    event["viewScaleRatio"] = round(scale_ratio, 4)
+    event["comparisonMedianViews"] = round(comparison_median, 2)
+    event["effectivePerformanceRatio"] = round(effective, 4)
+    event["evidenceMethod"] = "YouTube snapshot velocity blended with same-channel total-view scale"
+    return scale_ratio, comparison_median, effective
+
+
+def calibrated_target(
+    event: dict[str, Any],
+    now: datetime,
+    creator_snapshots: dict[str, list[dict[str, Any]]] | None = None,
+) -> float | None:
     event_type = str(event.get("eventType") or "")
     old_target = number(event.get("targetOutcomeMovePct"), 0.0)
 
@@ -82,33 +150,68 @@ def calibrated_target(event: dict[str, Any], now: datetime) -> float | None:
         return amplify_legacy_direct_actor_target(old_target)
 
     if event_type == "creator-youtube-outcome":
-        if old_target > 0:
-            return old_target * 2.0
-        if old_target < 0:
-            return old_target * 1.5
-        return None
+        raw_ratio = number(event.get("viewGrowthRatio"), 0.0)
+        if raw_ratio <= 0:
+            return None
+        scale_ratio, _, effective = creator_scale_details(event, creator_snapshots or {})
+        event["effectivePerformanceRatio"] = round(effective, 4)
+        result = creator_performance_target(raw_ratio, scale_ratio)
+        # If the old event was a velocity-only false positive, neutralize it.
+        return result[1] if result else 0.0
 
     return None
 
 
-def reprice_record(record: dict[str, Any], category: str, now: datetime) -> tuple[dict[str, Any], int]:
+def creator_explanation(event: dict[str, Any], price: float) -> dict[str, Any]:
+    move = number(event.get("movePct"), 0)
+    raw_ratio = number(event.get("viewGrowthRatio"), 0)
+    scale_ratio = number(event.get("viewScaleRatio"), 0)
+    effective = number(event.get("effectivePerformanceRatio"), 0)
+    median_views = number(event.get("comparisonMedianViews"), 0)
+    return {
+        "version": CREATOR_MODEL_VERSION,
+        "eventId": event.get("eventKey") or event.get("eventId"),
+        "event": event.get("name"),
+        "eventAt": event.get("startedAt"),
+        "headline": "Direct YouTube performance outcome",
+        "summary": [
+            f"Recent verified view growth was {raw_ratio:.2f}× the same-channel growth baseline.",
+            f"The video had {scale_ratio:.2f}× the median total views of recent same-channel comparison videos ({median_views:,.0f} median views).",
+            f"TalentX blended velocity and scale into a {effective:.2f}× effective performance ratio so a tiny baseline cannot dominate the move.",
+        ],
+        "direction": "increased" if move > 0 else "decreased" if move < 0 else "held steady",
+        "finalMovePct": round(move, 2),
+        "recordedMarketPrice": round(price, 2),
+        "pricingMode": "Verified direct Creator outcome; scale-aware event pricing",
+        "source": event.get("provider"),
+        "sourceUrl": event.get("sourceUrl"),
+    }
+
+
+def reprice_record(
+    record: dict[str, Any],
+    category: str,
+    now: datetime,
+    creator_snapshots: dict[str, list[dict[str, Any]]] | None = None,
+) -> tuple[dict[str, Any], int]:
     result = dict(record)
     raw_events = result.get("priceEvents") if isinstance(result.get("priceEvents"), list) else []
     events = [dict(item) for item in raw_events if isinstance(item, dict)]
     if not events:
         return result, 0
 
+    version = category_model_version(category)
     migrated: set[str] = set()
     desired_moves: dict[str, float] = {}
     for event in events:
         event_type = str(event.get("eventType") or "")
         if not category_event(category, event_type):
             continue
-        if str(event.get("pricingCalibrationVersion") or "") == MODEL_VERSION:
+        if str(event.get("pricingCalibrationVersion") or "") == version:
             continue
         if event.get("verified") is False:
             continue
-        target = calibrated_target(event, now)
+        target = calibrated_target(event, now, creator_snapshots)
         if target is None:
             continue
         old_target = number(event.get("targetOutcomeMovePct"), 0.0)
@@ -122,7 +225,7 @@ def reprice_record(record: dict[str, Any], category: str, now: datetime) -> tupl
         desired_moves[key] = desired
         migrated.add(key)
         event["targetOutcomeMovePct"] = round(target, 4)
-        event["pricingCalibrationVersion"] = MODEL_VERSION
+        event["pricingCalibrationVersion"] = version
 
     if not migrated:
         return result, 0
@@ -153,7 +256,7 @@ def reprice_record(record: dict[str, Any], category: str, now: datetime) -> tupl
     result["priceEvents"] = indexed
     old_market = number(result.get("marketPrice"), 0.01)
     result["marketPrice"] = max(0.01, round(old_market * scale, 2))
-    result["pricingCalibrationVersion"] = MODEL_VERSION
+    result["pricingCalibrationVersion"] = version
 
     event_map = {
         str(event.get("eventKey") or event.get("eventId") or ""): event
@@ -180,6 +283,8 @@ def reprice_record(record: dict[str, Any], category: str, now: datetime) -> tupl
         result["lastPriceEventId"] = latest.get("eventKey") or latest.get("eventId") or result.get("lastPriceEventId")
         result["hourlyChangePct"] = round(number(latest.get("movePct"), result.get("hourlyChangePct", 0)), 3)
         result["dailyChange"] = round(number(latest.get("movePct"), result.get("dailyChange", 0)), 3)
+        if category == "creators" and str(latest.get("eventType") or "") == "creator-youtube-outcome":
+            result["priceExplanation"] = creator_explanation(latest, result["marketPrice"])
 
     return result, len(migrated)
 
@@ -188,11 +293,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--category", choices=("music", "actors", "creators"), required=True)
+    parser.add_argument("--youtube-manifest", type=Path)
     args = parser.parse_args()
 
     payload = json.loads(args.catalog.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise SystemExit(f"{args.catalog} must contain a JSON array")
+
+    creator_snapshots: dict[str, list[dict[str, Any]]] = {}
+    if args.category == "creators" and args.youtube_manifest and args.youtube_manifest.exists():
+        manifest = json.loads(args.youtube_manifest.read_text(encoding="utf-8"))
+        if isinstance(manifest, dict):
+            creator_snapshots = creator_snapshot_index(manifest)
 
     now = datetime.now(timezone.utc)
     output: list[dict[str, Any]] = []
@@ -201,7 +313,7 @@ def main() -> int:
     for raw in payload:
         if not isinstance(raw, dict):
             continue
-        record, changed = reprice_record(raw, args.category, now)
+        record, changed = reprice_record(raw, args.category, now, creator_snapshots)
         output.append(record)
         if changed:
             records_changed += 1
@@ -209,7 +321,7 @@ def main() -> int:
 
     args.catalog.write_text(json.dumps(output, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(
-        f"Category calibration {MODEL_VERSION}: repriced {events_changed:,} existing verified "
+        f"Category calibration {category_model_version(args.category)}: repriced {events_changed:,} existing verified "
         f"outcome events across {records_changed:,} {args.category} records."
     )
     return 0
