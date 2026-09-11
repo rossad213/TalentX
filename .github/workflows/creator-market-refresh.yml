@@ -90,6 +90,7 @@ jobs:
           tests/test_creator_attention_refresh.py
           tests/test_creator_youtube_refresh.py
           tests/test_category_breakout_calibration.py
+          tests/test_discover_creators_only.py
           tests/test_category_market_store.py -v
       - name: Expand Creator coverage toward 1,000
         run: >-
@@ -116,7 +117,7 @@ jobs:
           --lookback-days 45
           --request-timeout 12
           --max-records 100
-      - name: Refresh calibrated direct Creator YouTube performance
+      - name: Refresh scale-aware direct Creator YouTube performance
         run: >-
           python scripts/creator_youtube_rss_refresh_calibrated.py
           --catalog data/market/creators.json
@@ -127,8 +128,12 @@ jobs:
           --max-records 500
           --max-videos-per-record 8
           --allow-source-errors
-      - name: Migrate existing Creator YouTube outcomes to breakout calibration v2
-        run: python scripts/reprice_category_outcomes_v2.py --catalog data/market/creators.json --category creators
+      - name: Migrate existing Creator YouTube outcomes to scale-aware calibration v2.1
+        run: >-
+          python scripts/reprice_category_outcomes_v2.py
+          --catalog data/market/creators.json
+          --category creators
+          --youtube-manifest data/creator_youtube_manifest.json
       - name: Append durable Creator events
         run: python scripts/append_game_event_history.py --catalog data/market/creators.json
       - name: Append dated Creator history
