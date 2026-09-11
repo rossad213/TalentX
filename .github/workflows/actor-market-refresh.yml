@@ -8,7 +8,11 @@ on:
       - "scripts/non_athlete_event_refresh.py"
       - "scripts/repair_non_athlete_award_timeline.py"
       - "scripts/non_athlete_outcome_refresh.py"
+      - "scripts/non_athlete_outcome_refresh_calibrated.py"
       - "scripts/actor_direct_outcome_refresh.py"
+      - "scripts/actor_direct_outcome_refresh_calibrated.py"
+      - "scripts/market_outcome_calibration_v2.py"
+      - "scripts/reprice_category_outcomes_v2.py"
       - "scripts/repair_non_athlete_outcome_manifest.py"
       - "scripts/normalize_non_athlete_event_timestamps.py"
       - "scripts/restore_hourly_event_market_state.py"
@@ -22,6 +26,7 @@ on:
       - "tests/test_repair_non_athlete_award_timeline.py"
       - "tests/test_non_athlete_outcome_refresh.py"
       - "tests/test_actor_direct_outcome_refresh.py"
+      - "tests/test_category_breakout_calibration.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
   workflow_run:
@@ -93,6 +98,7 @@ jobs:
           tests/test_repair_non_athlete_award_timeline.py
           tests/test_non_athlete_outcome_refresh.py
           tests/test_actor_direct_outcome_refresh.py
+          tests/test_category_breakout_calibration.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
       - name: Refresh verified Actor career events with broad coverage
@@ -118,9 +124,9 @@ jobs:
           --allow-source-errors
       - name: Timestamp newly verified upcoming Actor projects
         run: python scripts/normalize_non_athlete_event_timestamps.py --catalog data/current_catalog.json
-      - name: Refresh Actor outcome evidence broadly
+      - name: Refresh calibrated Actor outcome evidence broadly
         run: >-
-          python scripts/non_athlete_outcome_refresh.py
+          python scripts/non_athlete_outcome_refresh_calibrated.py
           --catalog data/current_catalog.json
           --manifest data/actor_outcome_manifest.json
           --lookback-days 60
@@ -129,9 +135,9 @@ jobs:
           --max-pageview-checks 300
           --max-events 800
           --allow-source-errors
-      - name: Refresh direct Actor box office and Netflix outcomes
+      - name: Refresh calibrated direct Actor box office and Netflix outcomes
         run: >-
-          python scripts/actor_direct_outcome_refresh.py
+          python scripts/actor_direct_outcome_refresh_calibrated.py
           --catalog data/current_catalog.json
           --manifest data/actor_direct_outcome_manifest.json
           --outcome-manifest data/actor_outcome_manifest.json
@@ -141,6 +147,8 @@ jobs:
           --allow-source-errors
       - name: Keep incomplete Actor outcome checks retryable
         run: python scripts/repair_non_athlete_outcome_manifest.py --manifest data/actor_outcome_manifest.json
+      - name: Migrate existing Actor outcomes to breakout calibration v2
+        run: python scripts/reprice_category_outcomes_v2.py --catalog data/current_catalog.json --category actors
       - name: Save authoritative Actor market state
         run: cp data/current_catalog.json data/actor_event_market_state.json
       - name: Recalculate Actor fair values
