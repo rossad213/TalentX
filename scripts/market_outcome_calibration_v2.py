@@ -12,6 +12,7 @@ from statistics import median
 from typing import Any
 
 MODEL_VERSION = "2.0-market-wide-breakout-calibration"
+CREATOR_MODEL_VERSION = "2.1-creator-scale-aware-breakout-calibration"
 
 
 def number(value: Any, default: float = 0.0) -> float:
@@ -112,15 +113,28 @@ def actor_netflix_target(
     return rank_component + scale_component + momentum_component + persistence
 
 
-def creator_performance_target(ratio: float) -> tuple[str, float] | None:
-    """Direct YouTube growth surprise; ordinary wins stay small, virality scales."""
-    ratio = number(ratio)
-    if ratio >= 1.60:
-        bucket = "breakout" if ratio >= 5.0 else "hot" if ratio >= 2.5 else "warm"
-        return bucket, 1.10 * math.log2(ratio)
-    if 0 < ratio <= 0.50:
-        bucket = "cold" if ratio <= 0.25 else "cool"
-        return bucket, -0.75 * math.log2(1.0 / ratio)
+def creator_effective_ratio(growth_ratio: float, scale_ratio: float | None = None) -> float:
+    """Blend short-window velocity with same-channel absolute scale.
+
+    Snapshot growth is intentionally only 25% of the log signal because a tiny
+    dormant-video denominator can otherwise create a huge ratio.  Same-channel
+    total-view scale carries 75%.  The blend is continuous and uncapped: truly
+    extreme velocity *and* scale can still create arbitrarily large moves.
+    """
+    velocity = max(0.01, number(growth_ratio, 1.0))
+    scale = max(0.01, number(scale_ratio, 1.0)) if scale_ratio is not None else 1.0
+    return math.exp(0.25 * math.log(velocity) + 0.75 * math.log(scale))
+
+
+def creator_performance_target(ratio: float, scale_ratio: float | None = None) -> tuple[str, float] | None:
+    """Price Creator YouTube outcomes from both velocity and channel-relative scale."""
+    effective = creator_effective_ratio(ratio, scale_ratio)
+    if effective >= 1.60:
+        bucket = "breakout" if effective >= 5.0 else "hot" if effective >= 2.5 else "warm"
+        return bucket, 1.10 * math.log2(effective)
+    if 0 < effective <= 0.50:
+        bucket = "cold" if effective <= 0.25 else "cool"
+        return bucket, -0.75 * math.log2(1.0 / effective)
     return None
 
 
