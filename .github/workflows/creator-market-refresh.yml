@@ -8,6 +8,9 @@ on:
       - "scripts/creator_attention_refresh.py"
       - "scripts/creator_youtube_refresh.py"
       - "scripts/creator_youtube_rss_refresh.py"
+      - "scripts/creator_youtube_rss_refresh_calibrated.py"
+      - "scripts/market_outcome_calibration_v2.py"
+      - "scripts/reprice_category_outcomes_v2.py"
       - "scripts/prepare_creator_wikipedia_identities.py"
       - "scripts/discover_creators_only.py"
       - "scripts/expand_creator_market.py"
@@ -16,6 +19,7 @@ on:
       - "scripts/category_market_store.py"
       - "tests/test_creator_attention_refresh.py"
       - "tests/test_creator_youtube_refresh.py"
+      - "tests/test_category_breakout_calibration.py"
       - "tests/test_discover_creators_only.py"
       - "tests/test_category_market_store.py"
   workflow_run:
@@ -85,6 +89,7 @@ jobs:
           tests/test_discover_creators_only.py
           tests/test_creator_attention_refresh.py
           tests/test_creator_youtube_refresh.py
+          tests/test_category_breakout_calibration.py
           tests/test_category_market_store.py -v
       - name: Expand Creator coverage toward 1,000
         run: >-
@@ -111,9 +116,9 @@ jobs:
           --lookback-days 45
           --request-timeout 12
           --max-records 100
-      - name: Refresh direct Creator YouTube performance
+      - name: Refresh calibrated direct Creator YouTube performance
         run: >-
-          python scripts/creator_youtube_rss_refresh.py
+          python scripts/creator_youtube_rss_refresh_calibrated.py
           --catalog data/market/creators.json
           --attention-manifest data/creator_attention_manifest.json
           --manifest data/creator_youtube_manifest.json
@@ -122,6 +127,8 @@ jobs:
           --max-records 500
           --max-videos-per-record 8
           --allow-source-errors
+      - name: Migrate existing Creator YouTube outcomes to breakout calibration v2
+        run: python scripts/reprice_category_outcomes_v2.py --catalog data/market/creators.json --category creators
       - name: Append durable Creator events
         run: python scripts/append_game_event_history.py --catalog data/market/creators.json
       - name: Append dated Creator history
