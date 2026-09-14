@@ -12,7 +12,7 @@
     resolveAuthReady?.(status);
   }
 
-  async function waitForAuthAdapter(timeoutMs=12000){
+  async function waitForAuthAdapter(timeoutMs=8000){
     if(window.talentxAuthAdapter) return true;
     let timer=null;
     try{
@@ -29,6 +29,27 @@
   function authMode(){
     try{return route==='signup'?'signup':'login';}catch{return 'login';}
   }
+
+  // Permanent client-side routing guard. Any control that identifies itself as
+  // Home/dashboard must ask for dashboard, never Welcome. account-home-routing
+  // owns the primary invariant; this is an independent safety net so a future
+  // mobile/control wrapper cannot silently repurpose Home.
+  function homeControl(target){
+    return target?.closest?.('button[data-route="dashboard"],button[data-mobile-route="dashboard"]');
+  }
+  function forceHomeDashboard(event){
+    const control=homeControl(event.target);
+    if(!control) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    window.__talentxDashboardIntent=true;
+    if(typeof window.talentxGoDashboard==='function') window.talentxGoDashboard();
+    else if(typeof go==='function') go('dashboard');
+  }
+  document.addEventListener('click',forceHomeDashboard,true);
+  document.addEventListener('keydown',event=>{
+    if(event.key==='Enter'||event.key===' ') forceHomeDashboard(event);
+  },true);
 
   // The public auth form can render before the asynchronously loaded Supabase
   // adapter is ready. Intercept an early submit instead of letting the temporary
@@ -87,8 +108,6 @@
     try{
       if(typeof currentRecords==='undefined'||!Array.isArray(currentRecords)||!currentRecords.length) return false;
 
-      // Final safety net for stale published overlays. The authoritative curated
-      // Rosalía listing is ROIA; an older Music overlay can still contain ROSA.
       const rules=[
         {category:'Music',name:'rosalia',ticker:'ROIA',id:'cur-rosal-a'}
       ];
@@ -110,7 +129,6 @@
         currentRecords=currentRecords.filter(record=>!staleIds.has(String(record?.id||'')));
         if(typeof selectedId!=='undefined'&&staleIds.has(String(selectedId||''))) selectedId=canonical.id;
 
-        // Preserve watchlist intent without altering holdings or account balances.
         if(typeof state==='object'&&state&&Array.isArray(state.watchlist)){
           const hadStale=state.watchlist.some(id=>staleIds.has(String(id||'')));
           if(hadStale){
@@ -185,16 +203,31 @@
   async function bootstrapAccounts(){
     try{
       loadStylesheet('./assets/mobile-auth-fixes.css?v=20260903-3');
-      await loadScript('./assets/mobile-auth-fixes.js?v=20260903-2');
-      if(typeof route!=='undefined'&&(route==='login'||route==='signup')&&typeof render==='function'){
-        try{render();}catch{}
-      }
-      await loadScript('./assets/auth-confirmation-recovery.js?v=20260901-1');
+
+      // Start optional auth UI/recovery work in parallel. None of it should delay
+      // the actual authentication adapter from becoming usable.
+      const mobileUiReady=loadScript('./assets/mobile-auth-fixes.js?v=20260903-2')
+        .then(()=>{
+          if(typeof route!=='undefined'&&(route==='login'||route==='signup')&&typeof render==='function'){
+            try{render();}catch{}
+          }
+        })
+        .catch(error=>console.warn('TalentX mobile auth UI enhancement skipped',error));
+      const recoveryReady=loadScript('./assets/auth-confirmation-recovery.js?v=20260901-1')
+        .catch(error=>console.warn('TalentX auth recovery enhancement skipped',error));
+
+      // Authentication is the critical path: load Supabase first, then the auth
+      // adapter immediately. This removes unrelated UI scripts from login wait.
       if(!window.supabase?.createClient){
         await loadScript('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.4/dist/umd/supabase.min.js');
       }
-      await loadScript('./assets/supabase-auth-sync.js?v=20260903-2');
+      await loadScript('./assets/supabase-auth-sync.js?v=20260914-fast-login-1');
       settleAuthReady('ready');
+
+      await Promise.allSettled([mobileUiReady,recoveryReady]);
+
+      // Everything below is useful account chrome, but it is deliberately after
+      // auth readiness so it can never hold up a Log in click.
       await loadScript('./assets/password-requirements.js?v=20260901-1');
       await loadScript('./assets/neon-brand-assets.js?v=20260903-1');
       loadStylesheet('./assets/account-ui.css?v=20260901-3');
