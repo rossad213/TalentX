@@ -65,8 +65,6 @@
         time:Date.parse(row.created_at)||Date.now(),
         clientEventId:row.client_event_id||null
       }));
-      // Signed-in cash, holdings and trades are authoritative in Supabase.
-      // Market prices remain catalog-driven rather than writable per-account overrides.
       state.prices={};
       if(typeof saveState==='function') saveState();
       if(typeof render==='function') render();
@@ -105,7 +103,14 @@
       const {data,error}=await client.auth.signInWithPassword({email,password});
       if(error) throw error;
       window.__talentxAuthUser=data.user||null;
-      if(data.user) await loadCloudState(data.user.id);
+      // Authentication success should unlock the app immediately. Cloud account
+      // state hydrates in the background and re-renders when it arrives instead
+      // of blocking the Log in button on four additional database queries.
+      if(data.user){
+        loadCloudState(data.user.id).catch(err=>{
+          console.warn('TalentX post-login account sync failed',err);
+        });
+      }
       return data;
     },
     async signup({email,password,name}){
@@ -179,8 +184,11 @@
       if(mode==='signup'&&!result.session){
         notify('Account created. Check your email to confirm your TalentX account.');
       }else{
+        // Successful authentication goes straight to Home/dashboard. Do not wait
+        // for portfolio/watchlist/transaction hydration before showing the app.
+        if(typeof window.talentxGoDashboard==='function') window.talentxGoDashboard();
+        else if(typeof go==='function') go('dashboard');
         notify(mode==='signup'?'Welcome to TalentX.':'Welcome back to TalentX.');
-        if(typeof go==='function') go('market');
       }
     }catch(err){
       console.warn('TalentX auth error',err);
