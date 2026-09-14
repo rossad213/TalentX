@@ -16,6 +16,7 @@ on:
       - 'data/current_catalog.json'
       - 'data/current_seed.json'
       - 'scripts/build_client_catalog.py'
+      - 'scripts/validate_navigation_auth_invariants.py'
       - '.github/workflows/deploy-lightweight-client.yml'
   workflow_run:
     workflows: ["Publish unified TalentX market"]
@@ -73,6 +74,13 @@ jobs:
 
       - name: Verify current market exists
         run: test -s data/current_catalog.json
+
+      - name: Validate navigation and login invariants
+        run: |
+          python scripts/validate_navigation_auth_invariants.py
+          node --check assets/account-home-routing.js
+          node --check assets/client-stability.js
+          node --check assets/supabase-auth-sync.js
 
       - name: Build compact catalog and on-demand profile shards
         run: |
