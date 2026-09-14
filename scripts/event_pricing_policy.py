@@ -16,7 +16,7 @@ from typing import Any
 
 from results_event_pricing import result_move_from_delta, result_sensitivity
 
-POLICY_VERSION = "2.0-explainable-results-proportional-uncapped"
+POLICY_VERSION = "2.1-cause-only-explanations"
 
 
 def clamp(value: Any, low: float, high: float) -> float:
@@ -102,7 +102,7 @@ def explainable_event_move(record: dict[str, Any]) -> tuple[float, dict[str, Any
         "event": str(record.get("lastPriceEvent") or "Completed game"),
         "eventAt": record.get("lastPriceEventAt"),
         "headline": headline,
-        "summary": [performance_text, outcome_label, "No fixed event-movement cap is applied."],
+        "summary": [performance_text, outcome_label],
         "direction": "increased" if final_move > 0 else "decreased" if final_move < 0 else "held steady",
         "finalMovePct": final_move,
         "confidence": round(clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.5)), 0, 1), 2),
