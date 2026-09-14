@@ -1,18 +1,15 @@
 #!/usr/bin/env python3
-"""NFL expectation/calibration layer for the TalentX hourly Sports refresh.
+"""NFL expectation layer for the TalentX hourly Sports refresh.
 
-This is intentionally a narrow extension of the existing Sports engine. It keeps
-verified event discovery, durable price history, result-proportional movement and
-uncapped pricing intact while fixing one NFL-specific problem: season/career
-production must be converted to a true one-game expectation before a completed
-box score is graded.
+This is intentionally a narrow extension of the existing Sports engine. Verified
+event discovery, durable history, result-proportional movement, and uncapped
+pricing stay intact. The NFL-specific layer makes completed games compare with a
+true pre-game per-game baseline instead of ESPN projected season totals.
 
-Early in an NFL season, career per-game production is used as the stable baseline
-when available so Week 1/2/3 results are not compared mostly with themselves.
-As the current season becomes established, the baseline blends toward current-
-season per-game production. The layer also gives verified NFL regular-season and
-postseason surprises a slightly stronger sensitivity so clearly exceptional games
-can create meaningful low-single-digit market moves without a hard ceiling.
+For established players early in a season, the most recent completed season is
+the primary expectation. As the current season accumulates games, the baseline
+blends toward current-season per-game production. ESPN's season-history endpoint
+is used because it supplies explicit Games Played values for each season.
 """
 from __future__ import annotations
 
@@ -26,29 +23,23 @@ from category_market_store import load_records, write_records
 from results_event_pricing import MODEL_VERSION as RESULTS_MODEL_VERSION
 from results_event_pricing import result_move_from_delta, result_sensitivity
 
-NFL_EXPECTATION_MODEL_VERSION = "1.0-nfl-true-per-game-expectation"
+NFL_EXPECTATION_MODEL_VERSION = "1.1-nfl-season-history-expectation"
 NFL_RESULT_SCALE = 1.45
 NFL_MIGRATION_LOOKBACK_DAYS = 14
+NFL_STATS_HISTORY = (
+    "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
+    "athletes/{athlete_id}/stats?season={season}"
+)
 
 _original_expected_game_signal = refresh.expected_game_signal
+_original_fetch_hourly_evidence = refresh.fetch_hourly_evidence
 _original_reliable_results_move = None
 
 _GAME_COUNT_KEYS = {"gamesplayed", "games", "appearances", "gp"}
 _RATE_HINTS = (
-    "avg",
-    "average",
-    "pct",
-    "percentage",
-    "rate",
-    "rating",
-    "qbr",
-    "perattempt",
-    "percarry",
-    "perreception",
-    "pergame",
-    "yardsper",
-    "longest",
-    "long",
+    "avg", "average", "pct", "percentage", "rate", "rating", "qbr",
+    "perattempt", "percarry", "perreception", "pergame", "yardsper",
+    "longest", "long",
 )
 
 
@@ -86,13 +77,7 @@ def _is_rate_stat(key: str) -> bool:
 
 
 def nfl_per_game_stats(stats: dict[str, Any], games: float) -> dict[str, float]:
-    """Convert an NFL cumulative stat map into one-game values.
-
-    Rate/percentage/rating fields stay unchanged. Counting statistics are divided
-    by games. Keys are normalized to the same representation used by the existing
-    Sports signal engine. An unrelated AVG field can therefore never cause all
-    season totals to be mistaken for one-game values.
-    """
+    """Convert cumulative NFL season stats into one-game values."""
     output: dict[str, float] = {}
     if games <= 0:
         return output
@@ -107,51 +92,180 @@ def nfl_per_game_stats(stats: dict[str, Any], games: float) -> dict[str, float]:
     return output
 
 
-def nfl_per_game_production(record: dict[str, Any], stats: dict[str, Any], games: float | None) -> float | None:
-    if not isinstance(stats, dict) or not stats or games is None or games <= 0:
-        return None
-    per_game = nfl_per_game_stats(stats, games)
-    if not per_game:
-        return None
-    signals = refresh.signal_bundle(record, per_game, {}, 0)
-    score = _finite(signals.get("recentProduction"))
-    return score if score is not None and score > 0 else None
+def parse_nfl_season_history(payload: dict[str, Any]) -> dict[int, dict[str, float]]:
+    """Merge ESPN category rows into one stat map per NFL season."""
+    seasons: dict[int, dict[str, float]] = {}
+    categories = payload.get("categories") if isinstance(payload.get("categories"), list) else []
+    for category in categories:
+        if not isinstance(category, dict):
+            continue
+        names = category.get("names") if isinstance(category.get("names"), list) else []
+        rows = category.get("statistics") if isinstance(category.get("statistics"), list) else []
+        if not names:
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            season = row.get("season") if isinstance(row.get("season"), dict) else {}
+            try:
+                year = int(season.get("year") or season.get("displayName") or 0)
+            except (TypeError, ValueError):
+                year = 0
+            values = row.get("stats") if isinstance(row.get("stats"), list) else []
+            if year <= 0 or not values:
+                continue
+            target = seasons.setdefault(year, {})
+            for name, raw in zip(names, values):
+                value = refresh.numeric_box_value(raw)
+                key = refresh.norm_key(name)
+                if value is None or not key:
+                    continue
+                # Games Played appears in multiple categories; it should represent
+                # the season's game count, not be added across passing/rushing.
+                if key == "gamesplayed":
+                    target[key] = max(value, target.get(key, 0.0))
+                else:
+                    target[key] = value
+    return seasons
 
 
-def nfl_aware_expected_game_signal(record: dict[str, Any], item: dict[str, Any]) -> float:
-    """Return a true one-game NFL production expectation.
+def _season_history_games(history: dict[int, dict[str, float]]) -> int:
+    total = 0
+    for stats in history.values():
+        games = _game_count(stats)
+        if games is not None:
+            total += int(round(games))
+    return total
 
-    Weeks 1-3 prefer career per-game production when available. Weeks 4-7 blend
-    current season and career 50/50; from Week 8 onward current-season form gets
-    70% weight. Rookies/players without usable career evidence fall back to their
-    available current-season per-game evidence and then to the legacy behavior.
-    """
-    if str(record.get("leagueOrMedium") or "") != "NFL":
-        return _original_expected_game_signal(record, item)
 
+def nfl_aware_fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, Any]:
+    """Keep normal evidence collection, then replace NFL projections with actual season history."""
+    item = _original_fetch_hourly_evidence(record, timeout)
+    if (
+        str(record.get("leagueOrMedium") or "") != "NFL"
+        or str(record.get("sourceNamespace") or "") != "espn"
+        or not isinstance(item, dict)
+        or not item.get("ok")
+    ):
+        return item
+
+    athlete_id = str(record.get("sourceRecordId") or "").strip()
+    if not athlete_id:
+        return item
+    season = datetime.now(timezone.utc).year
+    url = NFL_STATS_HISTORY.format(athlete_id=athlete_id, season=season)
+    try:
+        payload = refresh.fetch_json(url, timeout)
+        history = parse_nfl_season_history(payload)
+    except Exception as exc:  # noqa: BLE001
+        warnings = list(item.get("errors") or [])
+        warnings.append(f"NFL season history {type(exc).__name__}")
+        item["errors"] = warnings
+        return item
+
+    if not history:
+        return item
+
+    years = sorted(history)
+    current_year = years[-1]
+    current_stats = history[current_year]
+    prior_signals = item.get("signals") if isinstance(item.get("signals"), dict) else {}
+    award_points = float(prior_signals.get("awardPoints") or 0.0)
+    record_copy = dict(item.get("record") or record)
+    total_games = _season_history_games(history)
+    if total_games > 0:
+        record_copy["professionalGames"] = total_games
+        item["professionalGames"] = total_games
+    item["record"] = record_copy
+    item["recent"] = current_stats
+    item["signals"] = refresh.signal_bundle(record_copy, current_stats, item.get("career") or {}, award_points)
+    item["nflSeasonStats"] = history
+    item["nflSeasonHistorySource"] = url
+    evidence_urls = list(item.get("evidenceUrls") or [])
+    if url not in evidence_urls:
+        evidence_urls.append(url)
+    item["evidenceUrls"] = evidence_urls
+    return item
+
+
+def _blend_stat_maps(first: dict[str, float], second: dict[str, float], first_weight: float) -> dict[str, float]:
+    output: dict[str, float] = {}
+    second_weight = 1.0 - first_weight
+    for key in set(first) | set(second):
+        a = _finite(first.get(key))
+        b = _finite(second.get(key))
+        if a is not None and b is not None:
+            output[key] = a * first_weight + b * second_weight
+        elif a is not None:
+            output[key] = a
+        elif b is not None:
+            output[key] = b
+    return output
+
+
+def nfl_expected_baseline_stats(record: dict[str, Any], item: dict[str, Any]) -> dict[str, float]:
+    """Return the per-game stat map representing the NFL pre-game expectation."""
+    history = item.get("nflSeasonStats") if isinstance(item.get("nflSeasonStats"), dict) else {}
+    normalized_history: dict[int, dict[str, float]] = {}
+    for raw_year, raw_stats in history.items():
+        if not isinstance(raw_stats, dict):
+            continue
+        try:
+            year = int(raw_year)
+        except (TypeError, ValueError):
+            continue
+        normalized_history[year] = raw_stats
+
+    if normalized_history:
+        years = sorted(normalized_history)
+        current_year = years[-1]
+        current_raw = normalized_history[current_year]
+        current_games = _game_count(current_raw)
+        current_pg = nfl_per_game_stats(current_raw, current_games) if current_games else {}
+        prior_years = [year for year in years if year < current_year]
+        prior_pg: dict[str, float] = {}
+        if prior_years:
+            prior_raw = normalized_history[max(prior_years)]
+            prior_games = _game_count(prior_raw)
+            if prior_games:
+                prior_pg = nfl_per_game_stats(prior_raw, prior_games)
+
+        # Weeks 1-3 should not grade a game mostly against itself. Use the last
+        # completed season when available, then gradually blend in current form.
+        if prior_pg:
+            if current_pg and current_games is not None and current_games >= 8:
+                return _blend_stat_maps(current_pg, prior_pg, 0.70)
+            if current_pg and current_games is not None and current_games >= 4:
+                return _blend_stat_maps(current_pg, prior_pg, 0.50)
+            return prior_pg
+        if current_pg:
+            return current_pg
+
+    # Compatibility fallback for records where season history is temporarily
+    # unavailable. This never treats an arbitrary AVG field as proof that season
+    # counting totals are already one-game values.
     recent = item.get("recent") if isinstance(item.get("recent"), dict) else {}
     career = item.get("career") if isinstance(item.get("career"), dict) else {}
     recent_games = _game_count(recent)
     career_games = _game_count(career, record.get("professionalGames"))
-    recent_score = nfl_per_game_production(record, recent, recent_games)
-    career_score = nfl_per_game_production(record, career, career_games)
+    recent_pg = nfl_per_game_stats(recent, recent_games) if recent_games else {}
+    career_pg = nfl_per_game_stats(career, career_games) if career_games else {}
+    return career_pg or recent_pg
 
-    if career_score is not None:
-        if recent_score is not None and recent_games is not None and recent_games >= 8:
-            return recent_score * 0.70 + career_score * 0.30
-        if recent_score is not None and recent_games is not None and recent_games >= 4:
-            return recent_score * 0.50 + career_score * 0.50
-        return career_score
-    if recent_score is not None:
-        return recent_score
 
-    # Last-resort compatibility path for unusual ESPN payloads with no usable
-    # game counts. The base function remains authoritative outside the NFL.
+def nfl_aware_expected_game_signal(record: dict[str, Any], item: dict[str, Any]) -> float:
+    if str(record.get("leagueOrMedium") or "") != "NFL":
+        return _original_expected_game_signal(record, item)
+    baseline = nfl_expected_baseline_stats(record, item)
+    if baseline:
+        signals = refresh.signal_bundle(record, baseline, {}, 0)
+        score = _finite(signals.get("recentProduction"))
+        if score is not None and score > 0:
+            return score
     return _original_expected_game_signal(record, item)
 
 
 def _nfl_game_evidence(record: dict[str, Any], item: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
-    """Calculate the same performance evidence as the base engine using the corrected NFL denominator."""
     stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
     normalized_stats: dict[str, float] = {}
     for key, value in stats.items():
@@ -159,30 +273,45 @@ def _nfl_game_evidence(record: dict[str, Any], item: dict[str, Any], event: dict
         if parsed is not None:
             normalized_stats[refresh.norm_key(key)] = parsed
 
+    # Older ESPN box normalization called passing AVG "battingAverage". Preserve
+    # the verified value as yards per pass attempt for any still-stored event.
+    if "yardsperpassattempt" not in normalized_stats and "battingaverage" in normalized_stats:
+        normalized_stats["yardsperpassattempt"] = normalized_stats["battingaverage"]
+    # On ESPN football box scores RTG is passer rating and QBR is adjusted QBR.
+    # The shared NFL signal uses QBRating as its passer-rating field, so prefer
+    # the explicitly stored passerRating when both are present.
+    if "passerrating" in normalized_stats:
+        normalized_stats["qbrating"] = normalized_stats["passerrating"]
+
     actual_signals = refresh.signal_bundle(record, normalized_stats, {}, 0)
     actual_production = float(actual_signals.get("recentProduction") or 0)
-    expected_production = nfl_aware_expected_game_signal(record, item)
-    expected_signals = item.get("signals") if isinstance(item.get("signals"), dict) else {}
-    actual_efficiency = float(actual_signals.get("efficiency") or 0)
-    expected_efficiency = float(expected_signals.get("efficiency") or 0)
+    baseline_stats = nfl_expected_baseline_stats(record, item)
+    expected_signals = refresh.signal_bundle(record, baseline_stats, {}, 0) if baseline_stats else {}
+    expected_production = float(expected_signals.get("recentProduction") or 0)
 
     if expected_production <= 0:
         return {
             "comparable": False,
-            "reason": "No one-game NFL baseline was available for this box score",
+            "reason": "No source-backed one-game NFL baseline was available for this box score",
             "actualPerformanceScore": round(actual_production, 3),
             "expectedPerformanceScore": 0.0,
         }
 
     production_delta = (actual_production / expected_production - 1.0) * 100.0
     efficiency_delta: float | None = None
-    if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
-        efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0
-    performance_delta = (
-        production_delta
-        if efficiency_delta is None
-        else production_delta * 0.80 + efficiency_delta * 0.20
-    )
+    role = str(record.get("role") or "").lower()
+    if "quarterback" in role or role.strip() == "qb":
+        actual_rating = refresh.stat_value(normalized_stats, "passerRating", "QBRating")
+        expected_rating = refresh.stat_value(baseline_stats, "QBRating", "passerRating")
+        if actual_rating is not None and expected_rating is not None and actual_rating > 0 and expected_rating > 0:
+            efficiency_delta = (actual_rating / expected_rating - 1.0) * 100.0
+    else:
+        actual_efficiency = float(actual_signals.get("efficiency") or 0)
+        expected_efficiency = float(expected_signals.get("efficiency") or 0)
+        if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
+            efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0
+
+    performance_delta = production_delta if efficiency_delta is None else production_delta * 0.80 + efficiency_delta * 0.20
     return {
         "comparable": True,
         "actualPerformanceScore": round(actual_production, 3),
@@ -190,6 +319,7 @@ def _nfl_game_evidence(record: dict[str, Any], item: dict[str, Any], event: dict
         "performanceDeltaPct": round(performance_delta, 2),
         "productionDeltaPct": round(production_delta, 2),
         "efficiencyDeltaPct": round(efficiency_delta, 2) if efficiency_delta is not None else None,
+        "expectationSource": "ESPN prior/current season history per game",
     }
 
 
@@ -203,14 +333,15 @@ def nfl_results_based_game_event_move(record, item, event, legacy_max_game_move_
     evidence = _nfl_game_evidence(record, item, event)
     started = _parse_time(event.get("startedAt"))
     if not evidence.get("comparable"):
-        # When installed in production, preserve the existing conservative rookie
-        # preseason fallback for players who truly have no statistical baseline.
         if started is not None and started.month in {7, 8} and _original_reliable_results_move is not None:
             return _original_reliable_results_move(record, item, event, legacy_max_game_move_pct)
         return 0.0, evidence
 
     delta = float(evidence.get("performanceDeltaPct") or 0.0)
-    tier, sensitivity = result_sensitivity(record)
+    sensitivity_record = dict(record)
+    if item.get("professionalGames"):
+        sensitivity_record["professionalGames"] = item["professionalGames"]
+    tier, sensitivity = result_sensitivity(sensitivity_record)
     scale = 0.80 if started is not None and started.month in {7, 8} else NFL_RESULT_SCALE
     performance_move = result_move_from_delta(delta, scale=scale) * sensitivity
     outcome_move = 0.06 if event.get("teamWon") is True else -0.05 if event.get("teamWon") is False else 0.0
@@ -231,9 +362,7 @@ def _latest_nfl_game_event(record: dict[str, Any]) -> tuple[int, dict[str, Any]]
     events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
     candidates: list[tuple[int, dict[str, Any]]] = []
     for index, event in enumerate(events):
-        if not isinstance(event, dict):
-            continue
-        if str(event.get("eventType") or "").lower() != "game":
+        if not isinstance(event, dict) or str(event.get("eventType") or "").lower() != "game":
             continue
         league = str(event.get("league") or record.get("leagueOrMedium") or "").lower()
         if league not in {"nfl", ""}:
@@ -241,24 +370,15 @@ def _latest_nfl_game_event(record: dict[str, Any]) -> tuple[int, dict[str, Any]]
         if not isinstance(event.get("stats"), dict) or not event.get("stats"):
             continue
         candidates.append((index, event))
-    if not candidates:
-        return None
-    return max(candidates, key=lambda pair: str(pair[1].get("startedAt") or ""))
+    return max(candidates, key=lambda pair: str(pair[1].get("startedAt") or "")) if candidates else None
 
 
 def migrate_latest_nfl_expectations(
     catalog_path: Path = Path("data/current_catalog.json"),
-    *,
-    timeout: float = 10.0,
+    *, timeout: float = 10.0,
     now: datetime | None = None,
 ) -> int:
-    """Reprice the latest recent NFL game once under the corrected expectation.
-
-    Only a record whose latest price event is that NFL game is migrated. This
-    avoids rewriting a chain that has a newer signing/trade/result after it. The
-    event key is preserved, chart open/close points are updated in place, and a
-    model-version stamp makes the migration idempotent.
-    """
+    """Reprice the latest recent NFL game once under the corrected expectation."""
     if not catalog_path.exists():
         return 0
     current = now or datetime.now(timezone.utc)
@@ -296,8 +416,7 @@ def migrate_latest_nfl_expectations(
         new_after = max(0.01, round(before * (1.0 + new_move / 100.0), 2))
         actual_move = round((new_after / before - 1.0) * 100.0, 3)
         updated_event = {
-            **old_event,
-            **evidence,
+            **old_event, **evidence,
             "movePct": actual_move,
             "modelMovePct": round(new_move, 3),
             "priceBefore": round(before, 2),
@@ -320,7 +439,6 @@ def migrate_latest_nfl_expectations(
         if trend:
             trend[-1] = new_after
             record["trend"] = [round(value, 2) for value in trend]
-
         history = [dict(value) for value in record.get("priceHistory", []) if isinstance(value, dict)]
         for point in history:
             if str(point.get("eventId") or "") != event_key:
@@ -336,14 +454,15 @@ def migrate_latest_nfl_expectations(
 
     if changed:
         write_records(catalog_path, records)
-        print(f"Repriced {changed:,} recent NFL latest-game event(s) with true per-game expectations.")
+        print(f"Repriced {changed:,} recent NFL latest-game event(s) with season-history expectations.")
     return changed
 
 
 def install_nfl_layer():
-    """Install the NFL-only hooks after loading the existing reliability wrapper."""
+    """Install NFL-only hooks after loading the existing reliability wrapper."""
     global _original_reliable_results_move
     refresh.expected_game_signal = nfl_aware_expected_game_signal
+    refresh.fetch_hourly_evidence = nfl_aware_fetch_hourly_evidence
     import hourly_price_refresh_reliable as reliable
 
     _original_reliable_results_move = reliable.results_based_game_event_move
