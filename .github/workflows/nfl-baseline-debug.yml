@@ -19,36 +19,40 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install --upgrade -r requirements.txt
-      - name: Print Caleb ESPN stat maps
+      - name: Inspect Caleb ESPN split metadata
         run: |
           PYTHONPATH=scripts python - <<'PY'
           import json
-          from enrich_current_catalog import ESPN_OVERVIEW, extract_stat_maps, fetch_json, signal_bundle, professional_games_from_stats
-          from hourly_price_refresh_nfl import nfl_aware_expected_game_signal, nfl_per_game_stats, _game_count
+          from enrich_current_catalog import ESPN_OVERVIEW, extract_stat_maps, fetch_json, norm_key
 
-          record = {
-              "id": "live-espn-americanfootball-4431611",
-              "name": "Caleb Williams",
-              "leagueOrMedium": "NFL",
-              "discipline": "American Football",
-              "role": "Quarterback",
-              "sourceNamespace": "espn",
-              "sourceLeagueSlug": "nfl",
-              "sourceRecordId": "4431611",
-              "professionalGames": 0,
-          }
           url = ESPN_OVERVIEW.format(sport="football", league="nfl", athlete_id="4431611")
           payload = fetch_json(url, 20)
           recent, career = extract_stat_maps(payload)
-          signals = signal_bundle(record, recent, career, 0)
-          item = {"recent": recent, "career": career, "signals": signals}
-          print("RECENT", json.dumps(recent, sort_keys=True))
-          print("CAREER", json.dumps(career, sort_keys=True))
-          print("RECENT_GAMES", _game_count(recent))
-          print("CAREER_GAMES", _game_count(career, record.get("professionalGames")))
-          print("PRO_GAMES", professional_games_from_stats(recent, career))
-          print("SIGNALS", json.dumps(signals, sort_keys=True))
-          if _game_count(recent): print("RECENT_PER_GAME", json.dumps(nfl_per_game_stats(recent, _game_count(recent)), sort_keys=True))
-          if _game_count(career, record.get("professionalGames")): print("CAREER_PER_GAME", json.dumps(nfl_per_game_stats(career, _game_count(career, record.get("professionalGames"))), sort_keys=True))
-          print("EXPECTED", nfl_aware_expected_game_signal(record, item))
+          print("SELECTED_RECENT", json.dumps(recent, sort_keys=True))
+          print("SELECTED_CAREER", json.dumps(career, sort_keys=True))
+
+          def walk(node, path="root"):
+              if isinstance(node, dict):
+                  names = node.get("names") or node.get("labels") or node.get("displayNames")
+                  splits = node.get("splits")
+                  if isinstance(names, list) and isinstance(splits, list):
+                      low_names = [str(x).lower() for x in names]
+                      if any("game" in x or x in {"gp", "g"} for x in low_names) or any("pass" in x or "rush" in x for x in low_names):
+                          print("BLOCK", path, "NAMES", json.dumps(names))
+                          for split in splits:
+                              if not isinstance(split, dict):
+                                  continue
+                              meta = {k: split.get(k) for k in ("displayName","name","abbreviation","type","season","seasonId","year") if split.get(k) is not None}
+                              vals = split.get("stats") or split.get("values")
+                              print(" SPLIT_META", json.dumps(meta, sort_keys=True), "VALUES", json.dumps(vals))
+                  for key, value in node.items():
+                      nk = norm_key(key)
+                      if any(token in nk for token in ("game", "season", "start")) and not isinstance(value, (dict, list)):
+                          print("SCALAR", f"{path}.{key}", repr(value))
+                      walk(value, f"{path}.{key}")
+              elif isinstance(node, list):
+                  for i, value in enumerate(node):
+                      walk(value, f"{path}[{i}]")
+
+          walk(payload)
           PY
