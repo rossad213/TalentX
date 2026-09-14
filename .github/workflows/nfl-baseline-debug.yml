@@ -1,0 +1,54 @@
+name: NFL baseline diagnostic
+
+on:
+  push:
+    branches: [fix/nfl-per-game-expectations]
+    paths:
+      - ".github/workflows/nfl-baseline-debug.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Print Caleb ESPN stat maps
+        run: |
+          PYTHONPATH=scripts python - <<'PY'
+          import json
+          from enrich_current_catalog import ESPN_OVERVIEW, extract_stat_maps, fetch_json, signal_bundle, professional_games_from_stats
+          from hourly_price_refresh_nfl import nfl_aware_expected_game_signal, nfl_per_game_stats, _game_count
+
+          record = {
+              "id": "live-espn-americanfootball-4431611",
+              "name": "Caleb Williams",
+              "leagueOrMedium": "NFL",
+              "discipline": "American Football",
+              "role": "Quarterback",
+              "sourceNamespace": "espn",
+              "sourceLeagueSlug": "nfl",
+              "sourceRecordId": "4431611",
+              "professionalGames": 0,
+          }
+          url = ESPN_OVERVIEW.format(sport="football", league="nfl", athlete_id="4431611")
+          payload = fetch_json(url, 20)
+          recent, career = extract_stat_maps(payload)
+          signals = signal_bundle(record, recent, career, 0)
+          item = {"recent": recent, "career": career, "signals": signals}
+          print("RECENT", json.dumps(recent, sort_keys=True))
+          print("CAREER", json.dumps(career, sort_keys=True))
+          print("RECENT_GAMES", _game_count(recent))
+          print("CAREER_GAMES", _game_count(career, record.get("professionalGames")))
+          print("PRO_GAMES", professional_games_from_stats(recent, career))
+          print("SIGNALS", json.dumps(signals, sort_keys=True))
+          if _game_count(recent): print("RECENT_PER_GAME", json.dumps(nfl_per_game_stats(recent, _game_count(recent)), sort_keys=True))
+          if _game_count(career, record.get("professionalGames")): print("CAREER_PER_GAME", json.dumps(nfl_per_game_stats(career, _game_count(career, record.get("professionalGames"))), sort_keys=True))
+          print("EXPECTED", nfl_aware_expected_game_signal(record, item))
+          PY
