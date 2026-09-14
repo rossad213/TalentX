@@ -19,40 +19,27 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install --upgrade -r requirements.txt
-      - name: Inspect Caleb ESPN split metadata
+      - name: Test Caleb prior-season ESPN baseline
         run: |
           PYTHONPATH=scripts python - <<'PY'
           import json
-          from enrich_current_catalog import ESPN_OVERVIEW, extract_stat_maps, fetch_json, norm_key
+          from enrich_current_catalog import ESPN_OVERVIEW, fetch_json
 
-          url = ESPN_OVERVIEW.format(sport="football", league="nfl", athlete_id="4431611")
-          payload = fetch_json(url, 20)
-          recent, career = extract_stat_maps(payload)
-          print("SELECTED_RECENT", json.dumps(recent, sort_keys=True))
-          print("SELECTED_CAREER", json.dumps(career, sort_keys=True))
+          def summarize(payload, label):
+              print("===", label, "===")
+              stats = payload.get("statistics") if isinstance(payload.get("statistics"), dict) else {}
+              names = stats.get("names") or stats.get("labels") or stats.get("displayNames") or []
+              for split in stats.get("splits") or []:
+                  if not isinstance(split, dict):
+                      continue
+                  print("SPLIT", split.get("displayName"), json.dumps(dict(zip(names, split.get("stats") or split.get("values") or [])), sort_keys=True))
+              game_log = payload.get("gameLog") if isinstance(payload.get("gameLog"), dict) else {}
+              events = game_log.get("events") if isinstance(game_log.get("events"), dict) else {}
+              print("GAME_LOG_COUNT", len(events))
+              print("GAME_LOG_KEYS", list(events.keys())[:25])
 
-          def walk(node, path="root"):
-              if isinstance(node, dict):
-                  names = node.get("names") or node.get("labels") or node.get("displayNames")
-                  splits = node.get("splits")
-                  if isinstance(names, list) and isinstance(splits, list):
-                      low_names = [str(x).lower() for x in names]
-                      if any("game" in x or x in {"gp", "g"} for x in low_names) or any("pass" in x or "rush" in x for x in low_names):
-                          print("BLOCK", path, "NAMES", json.dumps(names))
-                          for split in splits:
-                              if not isinstance(split, dict):
-                                  continue
-                              meta = {k: split.get(k) for k in ("displayName","name","abbreviation","type","season","seasonId","year") if split.get(k) is not None}
-                              vals = split.get("stats") or split.get("values")
-                              print(" SPLIT_META", json.dumps(meta, sort_keys=True), "VALUES", json.dumps(vals))
-                  for key, value in node.items():
-                      nk = norm_key(key)
-                      if any(token in nk for token in ("game", "season", "start")) and not isinstance(value, (dict, list)):
-                          print("SCALAR", f"{path}.{key}", repr(value))
-                      walk(value, f"{path}.{key}")
-              elif isinstance(node, list):
-                  for i, value in enumerate(node):
-                      walk(value, f"{path}[{i}]")
-
-          walk(payload)
+          base = ESPN_OVERVIEW.format(sport="football", league="nfl", athlete_id="4431611")
+          summarize(fetch_json(base, 20), "default")
+          summarize(fetch_json(base + "?season=2025", 20), "season=2025")
+          summarize(fetch_json(base + "?season=2024", 20), "season=2024")
           PY
