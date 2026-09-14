@@ -23,7 +23,7 @@ from category_market_store import load_records, write_records
 from results_event_pricing import MODEL_VERSION as RESULTS_MODEL_VERSION
 from results_event_pricing import result_move_from_delta, result_sensitivity
 
-NFL_EXPECTATION_MODEL_VERSION = "1.1-nfl-season-history-expectation"
+NFL_EXPECTATION_MODEL_VERSION = "1.2-nfl-season-history-category-safe"
 NFL_RESULT_SCALE = 1.45
 NFL_MIGRATION_LOOKBACK_DAYS = 14
 NFL_STATS_HISTORY = (
@@ -92,13 +92,41 @@ def nfl_per_game_stats(stats: dict[str, Any], games: float) -> dict[str, float]:
     return output
 
 
+def _category_stat_priority(category_name: str, key: str) -> int:
+    """Prefer the ESPN category that owns an ambiguous stat name.
+
+    ESPN reuses names such as ``interceptions`` for passes thrown and defensive
+    interceptions. A QB's passing INT total must not be overwritten by a later
+    defensive category containing zero interceptions.
+    """
+    category = refresh.norm_key(category_name)
+    if key == "interceptions":
+        if "pass" in category:
+            return 100
+        if "def" in category:
+            return 40
+    if "pass" in category:
+        return 80
+    if "rush" in category:
+        return 80
+    if "receiv" in category:
+        return 80
+    if "def" in category:
+        return 60
+    if "general" in category:
+        return 20
+    return 10
+
+
 def parse_nfl_season_history(payload: dict[str, Any]) -> dict[int, dict[str, float]]:
-    """Merge ESPN category rows into one stat map per NFL season."""
+    """Merge ESPN category rows into one collision-safe stat map per season."""
     seasons: dict[int, dict[str, float]] = {}
+    priorities: dict[tuple[int, str], int] = {}
     categories = payload.get("categories") if isinstance(payload.get("categories"), list) else []
     for category in categories:
         if not isinstance(category, dict):
             continue
+        category_name = str(category.get("name") or category.get("displayName") or "")
         names = category.get("names") if isinstance(category.get("names"), list) else []
         rows = category.get("statistics") if isinstance(category.get("statistics"), list) else []
         if not names:
@@ -120,12 +148,14 @@ def parse_nfl_season_history(payload: dict[str, Any]) -> dict[int, dict[str, flo
                 key = refresh.norm_key(name)
                 if value is None or not key:
                     continue
-                # Games Played appears in multiple categories; it should represent
-                # the season's game count, not be added across passing/rushing.
                 if key == "gamesplayed":
                     target[key] = max(value, target.get(key, 0.0))
-                else:
+                    continue
+                priority = _category_stat_priority(category_name, key)
+                prior_priority = priorities.get((year, key), -1)
+                if priority >= prior_priority:
                     target[key] = value
+                    priorities[(year, key)] = priority
     return seasons
 
 
@@ -230,8 +260,6 @@ def nfl_expected_baseline_stats(record: dict[str, Any], item: dict[str, Any]) ->
             if prior_games:
                 prior_pg = nfl_per_game_stats(prior_raw, prior_games)
 
-        # Weeks 1-3 should not grade a game mostly against itself. Use the last
-        # completed season when available, then gradually blend in current form.
         if prior_pg:
             if current_pg and current_games is not None and current_games >= 8:
                 return _blend_stat_maps(current_pg, prior_pg, 0.70)
@@ -241,9 +269,6 @@ def nfl_expected_baseline_stats(record: dict[str, Any], item: dict[str, Any]) ->
         if current_pg:
             return current_pg
 
-    # Compatibility fallback for records where season history is temporarily
-    # unavailable. This never treats an arbitrary AVG field as proof that season
-    # counting totals are already one-game values.
     recent = item.get("recent") if isinstance(item.get("recent"), dict) else {}
     career = item.get("career") if isinstance(item.get("career"), dict) else {}
     recent_games = _game_count(recent)
@@ -273,13 +298,8 @@ def _nfl_game_evidence(record: dict[str, Any], item: dict[str, Any], event: dict
         if parsed is not None:
             normalized_stats[refresh.norm_key(key)] = parsed
 
-    # Older ESPN box normalization called passing AVG "battingAverage". Preserve
-    # the verified value as yards per pass attempt for any still-stored event.
     if "yardsperpassattempt" not in normalized_stats and "battingaverage" in normalized_stats:
         normalized_stats["yardsperpassattempt"] = normalized_stats["battingaverage"]
-    # On ESPN football box scores RTG is passer rating and QBR is adjusted QBR.
-    # The shared NFL signal uses QBRating as its passer-rating field, so prefer
-    # the explicitly stored passerRating when both are present.
     if "passerrating" in normalized_stats:
         normalized_stats["qbrating"] = normalized_stats["passerrating"]
 
@@ -454,7 +474,7 @@ def migrate_latest_nfl_expectations(
 
     if changed:
         write_records(catalog_path, records)
-        print(f"Repriced {changed:,} recent NFL latest-game event(s) with season-history expectations.")
+        print(f"Repriced {changed:,} recent NFL latest-game event(s) with collision-safe season expectations.")
     return changed
 
 
