@@ -8,6 +8,7 @@ on:
       - "scripts/hourly_price_refresh.py"
       - "scripts/hourly_price_refresh_reliable.py"
       - "scripts/hourly_price_refresh_nfl.py"
+      - "scripts/hourly_price_refresh_nfl_rb.py"
       - "scripts/results_event_pricing.py"
       - "scripts/event_pricing_policy.py"
       - "scripts/game_event_history.py"
@@ -26,6 +27,7 @@ on:
       - "data/verified_athlete_events.json"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_nfl_per_game_expectations.py"
+      - "tests/test_nfl_rb_receiving_td_credit.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -101,6 +103,7 @@ jobs:
           python -m unittest
           tests/test_hourly_price_refresh.py
           tests/test_nfl_per_game_expectations.py
+          tests/test_nfl_rb_receiving_td_credit.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
@@ -112,7 +115,7 @@ jobs:
           tests/test_category_market_store.py -v
       - name: Refresh completed-game evidence
         run: >-
-          python scripts/hourly_price_refresh_nfl.py
+          python scripts/hourly_price_refresh_nfl_rb.py
           --workers 20
           --request-timeout 10
           --lookback-hours 96
