@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any
 
 import hourly_price_refresh as refresh
-import hourly_price_refresh_reliable as reliable
 from category_market_store import load_records, write_records
 from results_event_pricing import MODEL_VERSION as RESULTS_MODEL_VERSION
 from results_event_pricing import result_move_from_delta, result_sensitivity
@@ -32,7 +31,7 @@ NFL_RESULT_SCALE = 1.45
 NFL_MIGRATION_LOOKBACK_DAYS = 14
 
 _original_expected_game_signal = refresh.expected_game_signal
-_original_results_based_game_event_move = reliable.results_based_game_event_move
+_original_reliable_results_move = None
 
 _GAME_COUNT_KEYS = {"gamesplayed", "games", "appearances", "gp"}
 _RATE_HINTS = (
@@ -90,8 +89,9 @@ def nfl_per_game_stats(stats: dict[str, Any], games: float) -> dict[str, float]:
     """Convert an NFL cumulative stat map into one-game values.
 
     Rate/percentage/rating fields stay unchanged. Counting statistics are divided
-    by games. An unrelated AVG field can therefore never cause all season totals
-    to be mistaken for one-game values.
+    by games. Keys are normalized to the same representation used by the existing
+    Sports signal engine. An unrelated AVG field can therefore never cause all
+    season totals to be mistaken for one-game values.
     """
     output: dict[str, float] = {}
     if games <= 0:
@@ -101,9 +101,9 @@ def nfl_per_game_stats(stats: dict[str, Any], games: float) -> dict[str, float]:
         if value is None:
             continue
         normalized = refresh.norm_key(key)
-        if normalized in _GAME_COUNT_KEYS:
+        if not normalized or normalized in _GAME_COUNT_KEYS:
             continue
-        output[key] = value if _is_rate_stat(key) else value / games
+        output[normalized] = value if _is_rate_stat(key) else value / games
     return output
 
 
@@ -150,24 +150,69 @@ def nfl_aware_expected_game_signal(record: dict[str, Any], item: dict[str, Any])
     return _original_expected_game_signal(record, item)
 
 
-def nfl_results_based_game_event_move(record, item, event, legacy_max_game_move_pct):
-    """Use the shared engine, with stronger NFL regular/postseason sensitivity."""
-    move, evidence = _original_results_based_game_event_move(
-        record, item, event, legacy_max_game_move_pct
-    )
-    if str(record.get("leagueOrMedium") or "") != "NFL":
-        return move, evidence
-    if not evidence.get("comparable") or evidence.get("rookiePreseason"):
-        return move, evidence
+def _nfl_game_evidence(record: dict[str, Any], item: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    """Calculate the same performance evidence as the base engine using the corrected NFL denominator."""
+    stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
+    normalized_stats: dict[str, float] = {}
+    for key, value in stats.items():
+        parsed = refresh.numeric_box_value(value)
+        if parsed is not None:
+            normalized_stats[refresh.norm_key(key)] = parsed
 
+    actual_signals = refresh.signal_bundle(record, normalized_stats, {}, 0)
+    actual_production = float(actual_signals.get("recentProduction") or 0)
+    expected_production = nfl_aware_expected_game_signal(record, item)
+    expected_signals = item.get("signals") if isinstance(item.get("signals"), dict) else {}
+    actual_efficiency = float(actual_signals.get("efficiency") or 0)
+    expected_efficiency = float(expected_signals.get("efficiency") or 0)
+
+    if expected_production <= 0:
+        return {
+            "comparable": False,
+            "reason": "No one-game NFL baseline was available for this box score",
+            "actualPerformanceScore": round(actual_production, 3),
+            "expectedPerformanceScore": 0.0,
+        }
+
+    production_delta = (actual_production / expected_production - 1.0) * 100.0
+    efficiency_delta: float | None = None
+    if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
+        efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0
+    performance_delta = (
+        production_delta
+        if efficiency_delta is None
+        else production_delta * 0.80 + efficiency_delta * 0.20
+    )
+    return {
+        "comparable": True,
+        "actualPerformanceScore": round(actual_production, 3),
+        "expectedPerformanceScore": round(expected_production, 3),
+        "performanceDeltaPct": round(performance_delta, 2),
+        "productionDeltaPct": round(production_delta, 2),
+        "efficiencyDeltaPct": round(efficiency_delta, 2) if efficiency_delta is not None else None,
+    }
+
+
+def nfl_results_based_game_event_move(record, item, event, legacy_max_game_move_pct):
+    """Keep shared Sports behavior, with corrected NFL expectations and sensitivity."""
+    if str(record.get("leagueOrMedium") or "") != "NFL":
+        if _original_reliable_results_move is None:
+            return refresh.game_event_move(record, item, event, legacy_max_game_move_pct)
+        return _original_reliable_results_move(record, item, event, legacy_max_game_move_pct)
+
+    evidence = _nfl_game_evidence(record, item, event)
     started = _parse_time(event.get("startedAt"))
-    if started is not None and started.month in {7, 8}:
-        # Preserve the dedicated conservative preseason treatment.
-        return move, evidence
+    if not evidence.get("comparable"):
+        # When installed in production, preserve the existing conservative rookie
+        # preseason fallback for players who truly have no statistical baseline.
+        if started is not None and started.month in {7, 8} and _original_reliable_results_move is not None:
+            return _original_reliable_results_move(record, item, event, legacy_max_game_move_pct)
+        return 0.0, evidence
 
     delta = float(evidence.get("performanceDeltaPct") or 0.0)
     tier, sensitivity = result_sensitivity(record)
-    performance_move = result_move_from_delta(delta, scale=NFL_RESULT_SCALE) * sensitivity
+    scale = 0.80 if started is not None and started.month in {7, 8} else NFL_RESULT_SCALE
+    performance_move = result_move_from_delta(delta, scale=scale) * sensitivity
     outcome_move = 0.06 if event.get("teamWon") is True else -0.05 if event.get("teamWon") is False else 0.0
     tuned_move = performance_move + outcome_move
     return round(tuned_move, 3), {
@@ -259,7 +304,7 @@ def migrate_latest_nfl_expectations(
             "priceAfter": new_after,
             "nflExpectationModelVersion": NFL_EXPECTATION_MODEL_VERSION,
         }
-        events = [dict(item) if isinstance(item, dict) else item for item in record.get("priceEvents", [])]
+        events = [dict(value) if isinstance(value, dict) else value for value in record.get("priceEvents", [])]
         events[index] = updated_event
         record["priceEvents"] = events
         record["previousMarketPrice"] = round(before, 2)
@@ -276,7 +321,7 @@ def migrate_latest_nfl_expectations(
             trend[-1] = new_after
             record["trend"] = [round(value, 2) for value in trend]
 
-        history = [dict(item) for item in record.get("priceHistory", []) if isinstance(item, dict)]
+        history = [dict(value) for value in record.get("priceHistory", []) if isinstance(value, dict)]
         for point in history:
             if str(point.get("eventId") or "") != event_key:
                 continue
@@ -295,16 +340,22 @@ def migrate_latest_nfl_expectations(
     return changed
 
 
-# Patch only the two NFL-sensitive hooks. All discovery, persistence, history and
-# non-NFL result behavior remain owned by the existing reliable Sports wrapper.
-refresh.expected_game_signal = nfl_aware_expected_game_signal
-reliable.results_based_game_event_move = nfl_results_based_game_event_move
-refresh.game_event_move = nfl_results_based_game_event_move
+def install_nfl_layer():
+    """Install the NFL-only hooks after loading the existing reliability wrapper."""
+    global _original_reliable_results_move
+    refresh.expected_game_signal = nfl_aware_expected_game_signal
+    import hourly_price_refresh_reliable as reliable
+
+    _original_reliable_results_move = reliable.results_based_game_event_move
+    reliable.results_based_game_event_move = nfl_results_based_game_event_move
+    refresh.game_event_move = nfl_results_based_game_event_move
+    return reliable
 
 
 if __name__ == "__main__":
-    reliable.normalize_sports_tickers()
-    reliable.repair_sports_price_integrity()
-    reliable.seed_rookie_ipo_history()
+    reliability = install_nfl_layer()
+    reliability.normalize_sports_tickers()
+    reliability.repair_sports_price_integrity()
+    reliability.seed_rookie_ipo_history()
     migrate_latest_nfl_expectations()
     raise SystemExit(refresh.main())
