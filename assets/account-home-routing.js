@@ -1,7 +1,9 @@
 /* TalentX account-aware Home routing.
- * Preserve the original app dashboard. The public landing page remains an
- * explicit welcome route, while clicking Home always opens the dashboard.
- * Every TalentX brand/logo target routes back to the welcome page.
+ * ROUTING INVARIANT:
+ *   - Home/dashboard controls ALWAYS open the app dashboard.
+ *   - TalentX brand/logo controls ALWAYS open the public welcome page.
+ * The dashboard route must never silently render Welcome after a user explicitly
+ * asks for Home, even while authentication is still bootstrapping.
  */
 (() => {
   const appDashboard = typeof dashboard === 'function' ? dashboard : null;
@@ -9,6 +11,8 @@
 
   let authUser = window.__talentxAuthUser || null;
   let explicitDashboard = false;
+  window.__talentxDashboardIntent = false;
+
   try {
     Object.defineProperty(window,'__talentxAuthUser',{
       configurable:true,
@@ -24,11 +28,21 @@
   } catch {}
 
   function brandTarget(target){
-    return target?.closest?.('.brand,.public-brand,.auth-back-brand,.public-footer-brand');
+    return target?.closest?.('.brand,.public-brand,.auth-back-brand,.public-footer-brand,.mobile-brand');
   }
 
   function homeTarget(target){
-    return target?.closest?.('button[data-route="dashboard"]');
+    return target?.closest?.('button[data-route="dashboard"],button[data-mobile-route="dashboard"]');
+  }
+
+  function markDashboardIntent(){
+    explicitDashboard=true;
+    window.__talentxDashboardIntent=true;
+  }
+
+  function clearDashboardIntent(){
+    explicitDashboard=false;
+    window.__talentxDashboardIntent=false;
   }
 
   function goWelcomeFromBrand(event){
@@ -36,7 +50,7 @@
     if(!brand) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    explicitDashboard=false;
+    clearDashboardIntent();
     if(typeof window.talentxGoWelcome==='function') window.talentxGoWelcome();
     else if(typeof go==='function') go('welcome');
   }
@@ -46,12 +60,12 @@
     if(!home) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    explicitDashboard=true;
+    markDashboardIntent();
     if(typeof go==='function') go('dashboard');
   }
 
-  // Capture navigation before any legacy inline onclick handler can swap the
-  // intended behavior. Brand/logo is always Welcome; Home is always Dashboard.
+  // Capture navigation before any inline or legacy handler. This catches both
+  // static desktop/mobile Home buttons and dynamically generated mobile Home.
   document.addEventListener('click',event=>{
     if(brandTarget(event.target)) return goWelcomeFromBrand(event);
     if(homeTarget(event.target)) return goDashboardFromHome(event);
@@ -65,8 +79,12 @@
   setTimeout(() => {
     if (typeof publicHome !== 'function') return;
 
+    // Initial signed-out boot may still use the public front door, but an
+    // explicit dashboard intent can never resolve to publicHome().
     dashboard = function(){
-      return (explicitDashboard || window.__talentxAuthUser) ? appDashboard() : publicHome();
+      return (explicitDashboard || window.__talentxDashboardIntent || window.__talentxAuthUser)
+        ? appDashboard()
+        : publicHome();
     };
 
     const routedRender = typeof render === 'function' ? render : null;
@@ -81,7 +99,8 @@
         }
         const result = routedRender.apply(this,arguments);
         if(route==='dashboard'){
-          document.body.classList.toggle('public-site-route',!(explicitDashboard || window.__talentxAuthUser));
+          const wantsDashboard=explicitDashboard || window.__talentxDashboardIntent || window.__talentxAuthUser;
+          document.body.classList.toggle('public-site-route',!wantsDashboard);
         }
         return result;
       };
@@ -91,7 +110,7 @@
     if(routedGo){
       go=function(next){
         if(next==='welcome'){
-          explicitDashboard=false;
+          clearDashboardIntent();
           route='welcome';
           selectedId=null;
           profileTab='overview';
@@ -99,18 +118,20 @@
           render();
           return;
         }
-        if(next==='dashboard') explicitDashboard=true;
+        // Hard invariant: any explicit dashboard navigation marks dashboard
+        // intent before downstream wrappers get control.
+        if(next==='dashboard') markDashboardIntent();
         return routedGo(next);
       };
     }
 
     window.talentxGoWelcome=function(){
-      explicitDashboard=false;
+      clearDashboardIntent();
       if(typeof go==='function') go('welcome');
     };
 
     window.talentxGoDashboard=function(){
-      explicitDashboard=true;
+      markDashboardIntent();
       if(typeof go==='function') go('dashboard');
     };
 
@@ -120,7 +141,7 @@
       }
     };
 
-    window.talentxAccountAwareHome='locked-logo-welcome-home-dashboard-v5';
+    window.talentxAccountAwareHome='locked-logo-welcome-home-dashboard-v6';
     window.talentxRefreshAccountHome();
   },0);
 })();
