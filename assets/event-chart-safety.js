@@ -1,12 +1,14 @@
 /* TalentX event-chart safety layer.
- * Durable priceEvents are the only source allowed to create event-driven steps.
- * Legacy priceHistory may come from an older pricing scale and is never allowed
- * to manufacture a current chart move. Verified event percentages may be
- * rebased onto the current valuation scale after a pricing-model migration.
+ * Durable priceEvents are preferred for event-driven steps. When a listing has
+ * no usable durable event chain (for example MLB after invalid game events were
+ * deliberately removed), the already-verified dated priceHistory adapter is
+ * allowed to render that safe history instead of forcing a flat chart.
+ * Legacy/synthetic history remains excluded by chart-history.js.
  */
 (function(){
   if(typeof chartSeries!=='function') return;
   const priorChartSeries=chartSeries;
+  const priorDisplayChange=typeof displayChange==='function'?displayChange:null;
   const DAY=24*60*60*1000;
   const EVENT_CATEGORIES=new Set(['Athlete','Music','Actor','Creator']);
 
@@ -151,12 +153,39 @@
   chartSeries=function(record,range=chartRange){
     if(EVENT_CATEGORIES.has(String(record?.primaryCategory||''))){
       const info=coverage(record,range);
+      // MLB intentionally removes invalid game events. More generally, any
+      // listing with no safe durable event chain should fall back to the verified
+      // timestamped history adapter instead of being rendered as a fake flat line.
+      if(!info.points.length) return priorChartSeries(record,range);
       return stepSeries(record,range,info);
     }
     return priorChartSeries(record,range);
   };
 
+  // app.js historically preferred lastGameMovePct whenever lastPriceEventId was
+  // present. That hides a valid non-game/daily move after an MLB repair because
+  // lastGameMovePct is intentionally zero. Prefer the nonzero recorded move and,
+  // when no event pointer survives, derive the visible change from the persisted
+  // previousMarketPrice. Local virtual trades still compound from the same prior.
+  if(priorDisplayChange){
+    displayChange=function(record){
+      const listed=Number(record?.marketPrice||0);
+      const current=Number(localPrice(record));
+      const gameMove=Number(record?.lastGameMovePct);
+      const dailyMove=Number(record?.dailyChange);
+      let recorded=Number.isFinite(gameMove)&&Math.abs(gameMove)>.0005?gameMove:(Number.isFinite(dailyMove)?dailyMove:0);
+      const previous=Number(record?.previousMarketPrice);
+      if(Math.abs(recorded)<=.0005&&Number.isFinite(previous)&&previous>0&&Number.isFinite(listed)&&listed>0&&Math.abs(listed-previous)>=.005){
+        recorded=((listed/previous)-1)*100;
+      }
+      if(!Number.isFinite(listed)||listed<=0||!Number.isFinite(current)) return recorded;
+      if(Math.abs(current-listed)<.005) return recorded;
+      const prior=Number.isFinite(previous)&&previous>0?previous:(listed/(1+recorded/100));
+      return Number.isFinite(prior)&&prior>0?((current/prior)-1)*100:recorded;
+    };
+  }
+
   window.talentxEventCoverage=coverage;
   window.talentxDurablePriceEvents=durableEvents;
-  window.talentxEventChartSafety='durable-price-events-coverage-aware-v5-no-catalog-snap';
+  window.talentxEventChartSafety='durable-events-with-verified-history-fallback-v6';
 })();
