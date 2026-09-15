@@ -1,6 +1,6 @@
 /* TalentX client stability + account bootstrap. */
 (() => {
-  const CATALOG_PRICING_REVISION='20260831-1';
+  const CATALOG_PRICING_REVISION='20260914-mlb-repair-v1';
   const STORAGE_KEY='talentx_v2_state';
   let authBootstrapState='loading';
   let resolveAuthReady=null;
