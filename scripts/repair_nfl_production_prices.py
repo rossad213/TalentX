@@ -16,9 +16,9 @@ from typing import Any
 
 from category_market_store import load_records, write_records
 from enrich_current_catalog import percentile
-from nfl_production_pricing import MODEL_VERSION, production_fair_value
+from nfl_production_pricing import MODEL_VERSION, nfl_position_group, production_fair_value
 
-REPAIR_VERSION = "1.0-nfl-production-primary-position-rebase"
+REPAIR_VERSION = "1.1-nfl-production-primary-position-value-rebase"
 SIGNAL_KEYS = (
     "recentProduction",
     "careerProduction",
@@ -49,31 +49,8 @@ def _is_nfl(record: dict[str, Any]) -> bool:
 
 
 def pricing_role_group(record: dict[str, Any]) -> str:
-    role = str(record.get("role") or "").lower().strip()
-    compact = f" {role} "
-    if "quarterback" in role or role == "qb":
-        return "QB"
-    if "running back" in role or "fullback" in role or role in {"rb", "fb"}:
-        return "RB"
-    if "tight end" in role or role == "te":
-        return "TE"
-    if "wide receiver" in role or role == "wr" or ("receiver" in role and "tight" not in role):
-        return "WR"
-    if any(token in role for token in ("offensive tackle", "offensive guard", "guard", "center", "offensive line")):
-        return "OL"
-    if any(token in role for token in ("kicker", "punter", "long snapper")):
-        return "ST"
-    if "cornerback" in role or role == "cb":
-        return "CB"
-    if "safety" in role or role in {"fs", "ss"}:
-        return "S"
-    if "linebacker" in role or role in {"lb", "ilb", "olb", "mlb"} or " lb " in compact:
-        return "LB"
-    if any(token in role for token in ("defensive end", "edge rusher")) or role in {"de", "edge"}:
-        return "EDGE"
-    if any(token in role for token in ("defensive tackle", "nose tackle")) or role in {"dt", "nt"}:
-        return "IDL"
-    return "DEF"
+    """Backward-compatible alias used by tests and older repair callers."""
+    return nfl_position_group(record)
 
 
 def _raw_signals(record: dict[str, Any]) -> dict[str, float] | None:
@@ -176,6 +153,14 @@ def _recent_overlay_pct(record: dict[str, Any]) -> float:
     return 0.0
 
 
+def _pure_rookie_ipo(record: dict[str, Any]) -> bool:
+    """Keep a true pre-production draft IPO on its existing event-driven path."""
+    status = str(record.get("pricingDataStatus") or "")
+    pricing = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else {}
+    influence = _number(pricing.get("draftInfluencePct")) or 0.0
+    return status.startswith("Rookie IPO") and influence >= 75.0
+
+
 def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, int]:
     if not path.exists():
         return 0, 0
@@ -202,9 +187,10 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["modelTargetPrice"] = round(fair, 2)
         synchronized += 1
 
-        # Do not replace a pure draft IPO before professional production exists.
-        games = _number(record.get("professionalGames")) or 0.0
-        if not has_ranked_evidence or games <= 0:
+        # professionalGames is missing/zero on some established ESPN records, so
+        # ranked production—not that field—is the rebase gate. Only a true draft
+        # IPO that is still overwhelmingly draft-anchored is excluded.
+        if not has_ranked_evidence or _pure_rookie_ipo(record):
             continue
         if str(record.get("nflProductionRebaseVersion") or "") == REPAIR_VERSION:
             continue
