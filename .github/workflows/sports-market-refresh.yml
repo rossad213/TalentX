@@ -11,6 +11,7 @@ on:
       - "scripts/hourly_price_refresh_nfl.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
+      - "scripts/repair_nfl_persisted_opportunity_prices.py"
       - "scripts/repair_mlb_market_prices.py"
       - "scripts/tennis_event_refresh.py"
       - "scripts/tennis_event_refresh_results.py"
