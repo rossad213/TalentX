@@ -152,10 +152,14 @@
 
   chartSeries=function(record,range=chartRange){
     if(EVENT_CATEGORIES.has(String(record?.primaryCategory||''))){
+      // While MLB game repricing is intentionally protected, its verified dated
+      // priceHistory is the authoritative chart source. Preserved non-game events
+      // (draft/signing/team change) must not override that history and make recent
+      // ranges look flat.
+      if(String(record?.leagueOrMedium||'').toUpperCase()==='MLB'&&record?.priceHistoryStatus==='verified'){
+        return priorChartSeries(record,range);
+      }
       const info=coverage(record,range);
-      // MLB intentionally removes invalid game events. More generally, any
-      // listing with no safe durable event chain should fall back to the verified
-      // timestamped history adapter instead of being rendered as a fake flat line.
       if(!info.points.length) return priorChartSeries(record,range);
       return stepSeries(record,range,info);
     }
@@ -187,5 +191,5 @@
 
   window.talentxEventCoverage=coverage;
   window.talentxDurablePriceEvents=durableEvents;
-  window.talentxEventChartSafety='durable-events-with-verified-history-fallback-v6';
+  window.talentxEventChartSafety='durable-events-with-verified-mlb-history-v7';
 })();
