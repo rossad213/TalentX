@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""NFL production-first pricing layer for the TalentX Sports refresh.
+"""NFL production-only pricing layer for the TalentX Sports refresh.
 
-The NFL market is event-driven, but verified football production owns the price
-level. Each completed game refreshes a position-normalized production target;
-the verified game surprise then moves from that target. This prevents stale
-absolute prices, audience, age, or veteran status from outranking production.
+Verified football production owns the NFL price level. Every NFL player is
+ranked on one universal production scale after football statistics are translated
+into common production signals. Position is used only upstream to interpret
+unlike football stats; it does not create a price premium, valuation category,
+or starter/reserve tier.
+
+Each completed game then changes price from the production anchor according to
+actual production versus that individual player's expected production.
 """
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ import nfl_production_pricing as production_pricing
 import repair_nfl_persisted_opportunity_prices as persisted_opportunity
 from game_event_history import attach_price_events
 
-NFL_RB_MODEL_VERSION = "1.5-nfl-production-primary-opportunity-floor"
+NFL_RB_MODEL_VERSION = "1.6-nfl-production-only-universal-opportunity-floor"
 RB_RECEIVING_TD_RECENT_WEIGHT = 8.0
 RB_RECEIVING_TD_CAREER_WEIGHT = 4.0
 
@@ -30,6 +34,7 @@ _reliability = None
 
 
 def is_nfl_running_back(record: dict[str, Any]) -> bool:
+    """Stat-translation helper only; this does not alter price by position."""
     if str(record.get("leagueOrMedium") or "") != "NFL":
         return False
     role = str(record.get("role") or "").lower().strip()
@@ -48,7 +53,7 @@ def signal_bundle_with_rb_receiving_td_credit(
     career: dict[str, float],
     awards: float,
 ) -> dict[str, float]:
-    """Return the normal signal bundle plus missing RB receiving-TD credit."""
+    """Return common production signals with missing RB receiving-TD credit."""
     signals = dict(_original_signal_bundle(record, recent, career, awards))
     if not is_nfl_running_back(record):
         return signals
@@ -64,46 +69,11 @@ def signal_bundle_with_rb_receiving_td_credit(
     return signals
 
 
-def nfl_pricing_role_group(record: dict[str, Any]) -> str:
-    """Use true NFL position peer groups for pricing percentiles.
-
-    The production formulas may remain shared across related roles, but a tight
-    end should not be percentile-ranked against wide receivers and a linebacker
-    should not be ranked against every defensive position.
-    """
-    if str(record.get("leagueOrMedium") or "").upper() != "NFL":
-        return _original_cohort_key(record)[1]
-    role = str(record.get("role") or "").lower().strip()
-    compact = f" {role} "
-    if "quarterback" in role or role == "qb":
-        return "QB"
-    if "running back" in role or "fullback" in role or role in {"rb", "fb"}:
-        return "RB"
-    if "tight end" in role or role == "te":
-        return "TE"
-    if "wide receiver" in role or role == "wr" or ("receiver" in role and "tight" not in role):
-        return "WR"
-    if any(token in role for token in ("offensive tackle", "offensive guard", "guard", "center", "offensive line")):
-        return "OL"
-    if any(token in role for token in ("kicker", "punter", "long snapper")):
-        return "ST"
-    if "cornerback" in role or role == "cb":
-        return "CB"
-    if "safety" in role or role in {"fs", "ss"}:
-        return "S"
-    if "linebacker" in role or role in {"lb", "ilb", "olb", "mlb"} or " lb " in compact:
-        return "LB"
-    if any(token in role for token in ("defensive end", "edge rusher")) or role in {"de", "edge"}:
-        return "EDGE"
-    if any(token in role for token in ("defensive tackle", "nose tackle")) or role in {"dt", "nt"}:
-        return "IDL"
-    return "DEF"
-
-
-def nfl_pricing_cohort_key(record: dict[str, Any]) -> tuple[str, str]:
+def nfl_universal_cohort_key(record: dict[str, Any]) -> tuple[str, str]:
+    """Put every NFL player in the same production-pricing comparison pool."""
     if str(record.get("leagueOrMedium") or "").upper() != "NFL":
         return _original_cohort_key(record)
-    return ("NFL", nfl_pricing_role_group(record))
+    return ("NFL", "UNIVERSAL")
 
 
 def _finite(value: Any) -> float | None:
@@ -122,7 +92,7 @@ def production_first_apply_game_market_moves(
     _legacy_max_game_move_pct,
     refreshed_at,
 ):
-    """Re-anchor NFL price to current production when a verified game occurs."""
+    """Anchor NFL price to production, then move it by production vs expectation."""
     if str(old_record.get("leagueOrMedium") or new_record.get("leagueOrMedium") or "").upper() != "NFL":
         return _original_apply_moves(
             old_record, new_record, item, events, _legacy_max_game_move_pct, refreshed_at
@@ -212,7 +182,7 @@ def install_rb_receiving_td_credit():
     global _original_apply_moves, _reliability
     nfl.NFL_EXPECTATION_MODEL_VERSION = NFL_RB_MODEL_VERSION
     refresh.signal_bundle = signal_bundle_with_rb_receiving_td_credit
-    refresh.cohort_key = nfl_pricing_cohort_key
+    refresh.cohort_key = nfl_universal_cohort_key
     opportunity.install_opportunity_protection()
     reliability = nfl.install_nfl_layer()
     _reliability = reliability
@@ -228,8 +198,8 @@ if __name__ == "__main__":
     reliability.repair_sports_price_integrity()
     reliability.seed_rookie_ipo_history()
     nfl.migrate_latest_nfl_expectations()
-    # First clean up any historical reserve-opportunity distortion, then apply
-    # the production-first market rebase before processing the next live game.
+    # First clean historical opportunity distortion, then put the entire NFL on
+    # the same production-only price scale before processing the next live game.
     persisted_opportunity.repair_catalog(Path("data/current_catalog.json"))
     from repair_nfl_production_prices import repair_catalog as repair_nfl_production_catalog
     repair_nfl_production_catalog(Path("data/current_catalog.json"))
