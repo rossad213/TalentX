@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -139,6 +141,81 @@ class NflOpportunityProtectionTests(unittest.TestCase):
         self.assertFalse(opportunity._needs_opportunity_repair(
             record, now=datetime(2026, 9, 14, 20, tzinfo=timezone.utc)
         ))
+
+    def test_earlier_backup_spike_is_repaired_and_later_move_is_replayed(self) -> None:
+        record = {
+            "id": "reserve-qb",
+            "leagueOrMedium": "NFL",
+            "role": "Quarterback",
+            "professionalGames": 12,
+            "marketPrice": 142.80,
+            "previousMarketPrice": 140.00,
+            "lastPriceEventId": "espn:game-2",
+            "dailyChange": 2.0,
+            "priceEvents": [
+                {
+                    "eventKey": "espn:game-1",
+                    "eventId": "game-1",
+                    "eventType": "game",
+                    "league": "nfl",
+                    "startedAt": "2026-09-08T17:00:00Z",
+                    "expectedPerformanceScore": 0.05,
+                    "performanceDeltaPct": 9000.0,
+                    "movePct": 40.0,
+                    "priceBefore": 100.0,
+                    "priceAfter": 140.0,
+                    "stats": {"passingYards": 180},
+                },
+                {
+                    "eventKey": "espn:game-2",
+                    "eventId": "game-2",
+                    "eventType": "game",
+                    "league": "nfl",
+                    "startedAt": "2026-09-13T17:00:00Z",
+                    "expectedPerformanceScore": 6.0,
+                    "performanceDeltaPct": 10.0,
+                    "movePct": 2.0,
+                    "priceBefore": 140.0,
+                    "priceAfter": 142.8,
+                    "stats": {"passingYards": 210},
+                },
+            ],
+            "priceHistory": [
+                {"time": "2026-09-08T17:00:00Z", "eventId": "espn:game-1", "phase": "open", "price": 100.0},
+                {"time": "2026-09-08T20:00:00Z", "eventId": "espn:game-1", "phase": "close", "price": 140.0},
+                {"time": "2026-09-13T17:00:00Z", "eventId": "espn:game-2", "phase": "open", "price": 140.0},
+                {"time": "2026-09-13T20:00:00Z", "eventId": "espn:game-2", "phase": "close", "price": 142.8},
+            ],
+        }
+        evidence = {
+            "comparable": True,
+            "expectedPerformanceScore": 5.0,
+            "actualPerformanceScore": 5.2,
+            "performanceDeltaPct": 4.0,
+            "opportunityFloorApplied": True,
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "catalog.json"
+            path.write_text(json.dumps([record]), encoding="utf-8")
+            with patch.object(opportunity.refresh, "fetch_hourly_evidence", return_value={"ok": True}), patch.object(
+                opportunity.nfl, "nfl_results_based_game_event_move", return_value=(1.0, evidence)
+            ):
+                changed = opportunity.migrate_latest_opportunity_events(
+                    path, timeout=1, now=datetime(2026, 9, 14, 20, tzinfo=timezone.utc)
+                )
+            repaired = json.loads(path.read_text(encoding="utf-8"))[0]
+
+        self.assertEqual(changed, 1)
+        first, second = repaired["priceEvents"]
+        self.assertEqual(first["priceBefore"], 100.0)
+        self.assertEqual(first["priceAfter"], 101.0)
+        self.assertAlmostEqual(first["movePct"], 1.0, places=3)
+        self.assertEqual(second["priceBefore"], 101.0)
+        self.assertEqual(second["priceAfter"], 103.02)
+        self.assertAlmostEqual(second["movePct"], 2.0, places=3)
+        self.assertEqual(repaired["marketPrice"], 103.02)
+        self.assertAlmostEqual(repaired["dailyChange"], 2.0, places=3)
+        self.assertEqual(repaired["priceHistory"][-1]["price"], 103.02)
 
 
 if __name__ == "__main__":
