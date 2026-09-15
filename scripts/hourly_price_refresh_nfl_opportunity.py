@@ -195,8 +195,8 @@ def _needs_opportunity_repair(record: dict[str, Any], *, now: datetime) -> bool:
         return False
 
     expected = _finite(event.get("expectedPerformanceScore"))
-    if expected is not None and expected > 0 and expected < replacement_baseline_score(record):
-        return True
+    if expected is not None and expected > 0:
+        return expected < replacement_baseline_score(record)
 
     # Some compacted events retain the excessive delta but not the detailed
     # expected score. Restrict that fallback to low-sample players so a genuine
