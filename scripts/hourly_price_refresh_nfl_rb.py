@@ -13,6 +13,7 @@ from typing import Any
 import hourly_price_refresh as refresh
 import hourly_price_refresh_nfl as nfl
 import hourly_price_refresh_nfl_opportunity as opportunity
+import repair_nfl_persisted_opportunity_prices as persisted_opportunity
 
 NFL_RB_MODEL_VERSION = "1.4-nfl-opportunity-floor-rb-receiving-td-credit"
 RB_RECEIVING_TD_RECENT_WEIGHT = 8.0
@@ -72,4 +73,8 @@ if __name__ == "__main__":
     reliability.repair_sports_price_integrity()
     reliability.seed_rookie_ipo_history()
     nfl.migrate_latest_nfl_expectations()
+    # A prior protection pass may have fixed an event's evidence without rebasing
+    # later prices that had already compounded from the inflated number. Rebase
+    # only those marked reserve/opportunity events before the next live refresh.
+    persisted_opportunity.repair_catalog(refresh.Path("data/current_catalog.json"))
     raise SystemExit(refresh.main())
