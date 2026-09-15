@@ -1,41 +1,81 @@
 #!/usr/bin/env python3
-"""Production-only NFL fair-value model for TalentX.
+"""Production-led NFL fair-value model for TalentX.
 
-NFL price level is based on verified production only. Position, starter/reserve
-status, age, fame, awards, potential, availability, and narrative context do not
-change the valuation. Position can still be used upstream to translate unlike
-football statistics into a common production signal, but every NFL player is
-then valued on the same production scale.
+NFL valuation remains driven primarily by verified football production, but the
+price level also carries a modest amount of proven achievement, remaining career
+runway, and availability. Position, starter/reserve status, and fame do not
+create price premiums. Every NFL player is ultimately valued on one universal
+TalentX NFL scale after unlike football statistics have been translated into the
+common production signal.
 
-Game-to-game market movement is handled separately by the NFL event engine and
-is based on actual production versus that individual player's expected
-production.
+Drafted rookies keep the existing Rookie IPO anchor while professional evidence
+accumulates. That anchor fades smoothly with games played instead of disappearing
+as soon as the first ranked NFL statistic appears.
+
+Game-to-game movement remains separate: the event engine moves price from actual
+production versus that individual player's expected production.
 """
 from __future__ import annotations
 
 import math
 from typing import Any
 
-MODEL_VERSION = "1.2-nfl-production-only-universal"
-PRICE_CURVE = 0.020
-PRICE_FLOOR = 4.0
-PRICE_CEILING = 250.0
+MODEL_VERSION = "2.0-nfl-production-led-career-stage-rookie-ipo"
 
-# Price level is production only: current/recent output matters most, durable
-# career output provides the long-run anchor, and efficiency distinguishes the
-# quality of otherwise similar production.
+PRICE_FLOOR = 4.0
+PRICE_SCALE = 310.0
+PRICE_EXPONENT = 4.4
+PRICE_CEILING = 300.0
+ROOKIE_IPO_SCALE = 135.0
+
+# Production is still the dominant input. These three inputs are themselves
+# production measurements, not role or positional premiums.
 NFL_PRODUCTION_WEIGHTS = {
     "recentProduction": 0.55,
     "careerProduction": 0.30,
     "efficiency": 0.15,
 }
 
-# Older/partial records that do not yet have ranked raw production may still use
-# these two production-derived metrics. No achievements, audience, potential,
-# availability, role, or position premium enters the fallback.
+# Final NFL value is production-led rather than production-only. Age/career stage
+# appears only inside the small runway component, so an older productive player
+# is discounted modestly rather than erased.
+NFL_VALUE_WEIGHTS = {
+    "production": 0.70,
+    "achievements": 0.15,
+    "careerRunway": 0.10,
+    "availability": 0.05,
+}
+
 NFL_FALLBACK_WEIGHTS = {
     "performance": 0.70,
     "consistency": 0.30,
+}
+
+# Smooth Rookie IPO decay. These are deliberately close to the original TalentX
+# rookie policy: draft/pre-pro evidence matters most before games exist, then
+# professional production gradually replaces it.
+NFL_ROOKIE_GAME_BANDS = (
+    (0.0, 1.00),
+    (4.0, 0.75),
+    (10.0, 0.50),
+    (17.0, 0.25),
+    (24.0, 0.10),
+    (34.0, 0.00),
+)
+
+STAGE_RUNWAY = {
+    "prospect": 98.0,
+    "pre-draft": 97.0,
+    "drafted": 96.0,
+    "rookie ipo": 95.0,
+    "active rookie": 94.0,
+    "rookie": 93.0,
+    "early career": 86.0,
+    "established": 70.0,
+    "veteran": 45.0,
+    "late veteran": 35.0,
+    "retired": 15.0,
+    "retired — legacy": 10.0,
 }
 
 
@@ -64,7 +104,7 @@ def _percentiles(record: dict[str, Any]) -> dict[str, float]:
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     raw = summary.get("percentiles") if isinstance(summary.get("percentiles"), dict) else {}
     output: dict[str, float] = {}
-    for key in ("recentProduction", "careerProduction", "efficiency"):
+    for key in ("recentProduction", "careerProduction", "efficiency", "awardPoints"):
         value = _number(raw.get(key))
         if value is not None:
             output[key] = max(0.0, min(1.0, value)) * 100.0
@@ -72,7 +112,7 @@ def _percentiles(record: dict[str, Any]) -> dict[str, float]:
 
 
 def production_components(record: dict[str, Any]) -> dict[str, Any] | None:
-    """Return the production inputs used for NFL valuation."""
+    """Return the verified-production inputs used for the dominant NFL component."""
     if not is_nfl(record):
         return None
 
@@ -108,8 +148,6 @@ def production_components(record: dict[str, Any]) -> dict[str, Any] | None:
         "weights": dict(weights),
         "inputs": {key: round(float(value), 2) for key, value in values.items()},
         "productionScore": round(score, 2),
-        "adjustedScore": round(score, 2),
-        "pricingPrinciple": "production-only; no position, role, fame, age, awards, potential, or availability premium",
     }
 
 
@@ -118,47 +156,172 @@ def production_score(record: dict[str, Any]) -> float | None:
     return None if components is None else float(components["productionScore"])
 
 
+def achievement_score(record: dict[str, Any]) -> float:
+    """Use verified NFL-wide achievement evidence without introducing fame."""
+    percentiles = _percentiles(record)
+    if "awardPoints" in percentiles:
+        return round(_clamp(percentiles["awardPoints"]), 2)
+    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    return round(_clamp(metrics.get("achievements", 35.0)), 2)
+
+
+def _age_runway(age: float | None) -> float | None:
+    if age is None or age <= 0:
+        return None
+    if age <= 23:
+        return 95.0
+    if age <= 27:
+        return 95.0 - (age - 23.0) * 4.0
+    if age <= 31:
+        return 79.0 - (age - 27.0) * 5.0
+    return max(30.0, 59.0 - (age - 31.0) * 5.0)
+
+
+def _stage_runway(record: dict[str, Any]) -> float | None:
+    stage = str(record.get("careerStage") or record.get("career_stage") or "").strip().lower()
+    if not stage:
+        return None
+    if stage in STAGE_RUNWAY:
+        return STAGE_RUNWAY[stage]
+    for key, value in STAGE_RUNWAY.items():
+        if key in stage:
+            return value
+    return None
+
+
+def career_runway_score(record: dict[str, Any]) -> float:
+    """Small age/stage input representing remaining expected career runway.
+
+    This does not use position-specific aging curves. A veteran is discounted
+    enough to distinguish remaining runway, but production still dominates.
+    """
+    age_score = _age_runway(_number(record.get("age")))
+    stage_score = _stage_runway(record)
+    if age_score is not None and stage_score is not None:
+        return round(_clamp(age_score * 0.70 + stage_score * 0.30), 2)
+    if age_score is not None:
+        return round(_clamp(age_score), 2)
+    if stage_score is not None:
+        return round(_clamp(stage_score), 2)
+    experience = _number(record.get("experienceYears"))
+    if experience is not None:
+        return round(_clamp(92.0 - max(0.0, experience) * 5.5, 35.0, 92.0), 2)
+    return 65.0
+
+
+def availability_score(record: dict[str, Any]) -> float:
+    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    explicit = _number(metrics.get("availability"))
+    if explicit is not None:
+        return round(_clamp(explicit), 2)
+    status = str(record.get("careerStatus") or "").lower()
+    if "injured" in status:
+        return 45.0
+    if "suspended" in status:
+        return 40.0
+    return 75.0 if status in {"", "active"} else 60.0
+
+
+def price_from_score(score: float) -> float:
+    """Map the universal NFL value score onto TalentX dollars.
+
+    The steeper-than-quadratic curve keeps ordinary contributors well below
+    cross-market stars while still giving genuinely elite producers room to be
+    worth $200-$300.
+    """
+    normalized = _clamp(score) / 100.0
+    value = PRICE_FLOOR + PRICE_SCALE * (normalized ** PRICE_EXPONENT)
+    return round(max(PRICE_FLOOR, min(PRICE_CEILING, value)), 2)
+
+
 def _rookie_anchor(record: dict[str, Any]) -> tuple[float | None, float]:
-    """Return a temporary IPO anchor only when real NFL production is unavailable."""
+    """Return the saved Rookie IPO anchor and saved maximum influence."""
     pricing = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else {}
-    influence = _number(pricing.get("draftInfluencePct"))
-    if influence is None or influence <= 0:
-        return None, 0.0
+    saved_influence = _number(pricing.get("draftInfluencePct"))
+
     anchor = _number(pricing.get("calibratedIpoPrice"))
     if anchor is None or anchor <= 0:
         anchor = _number(pricing.get("ipoPrice"))
     if anchor is None or anchor <= 0:
+        rookie_score = _number(pricing.get("rookieScore"))
+        if rookie_score is not None and rookie_score >= 0:
+            anchor = PRICE_FLOOR + ROOKIE_IPO_SCALE * (_clamp(rookie_score) / 100.0) ** 2
+
+    if anchor is None or anchor <= 0:
         return None, 0.0
-    return anchor, max(0.0, min(1.0, influence / 100.0))
+
+    if saved_influence is None:
+        saved_influence = 100.0
+    return round(anchor, 2), max(0.0, min(1.0, saved_influence / 100.0))
+
+
+def _game_decay(games: float) -> float:
+    games = max(0.0, games)
+    for index, (start_games, start_influence) in enumerate(NFL_ROOKIE_GAME_BANDS):
+        if index == len(NFL_ROOKIE_GAME_BANDS) - 1:
+            return start_influence
+        end_games, end_influence = NFL_ROOKIE_GAME_BANDS[index + 1]
+        if games <= end_games:
+            width = max(1e-9, end_games - start_games)
+            progress = (games - start_games) / width
+            return start_influence + (end_influence - start_influence) * progress
+    return 0.0
+
+
+def rookie_influence(record: dict[str, Any], saved_max: float) -> float:
+    """Fade Rookie IPO evidence with games instead of switching it off."""
+    if saved_max <= 0:
+        return 0.0
+    pricing = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else {}
+    if not pricing:
+        return 0.0
+    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
+    decayed = _game_decay(games)
+    return round(max(0.0, min(saved_max, decayed)), 4)
 
 
 def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float | None, dict[str, Any] | None]:
-    """Return NFL production score, fair value, and an explainable breakdown."""
+    """Return NFL value score, fair value, and an explainable breakdown."""
     components = production_components(record)
     if components is None:
         return None, None, None
 
-    score = float(components["productionScore"])
-    fair = PRICE_FLOOR + PRICE_CURVE * score * score
-    fair = max(PRICE_FLOOR, min(PRICE_CEILING, fair))
+    production = float(components["productionScore"])
+    achievements = achievement_score(record)
+    runway = career_runway_score(record)
+    availability = availability_score(record)
 
-    # A pre-production rookie needs an IPO so the listing can exist. Once ranked
-    # NFL production is present, the draft anchor disappears and production alone
-    # determines the price.
-    ranked = components["source"] == "NFL-wide production percentiles"
-    rookie_anchor, rookie_influence = _rookie_anchor(record)
-    if ranked:
-        rookie_influence = 0.0
-    elif rookie_anchor is not None and rookie_influence > 0:
-        fair = rookie_anchor * rookie_influence + fair * (1.0 - rookie_influence)
+    inputs = {
+        "production": production,
+        "achievements": achievements,
+        "careerRunway": runway,
+        "availability": availability,
+    }
+    score = sum(inputs[key] * weight for key, weight in NFL_VALUE_WEIGHTS.items())
+    score = _clamp(score)
+    career_fair = price_from_score(score)
+
+    rookie_anchor, saved_rookie_max = _rookie_anchor(record)
+    ipo_influence = rookie_influence(record, saved_rookie_max)
+    fair = career_fair
+    if rookie_anchor is not None and ipo_influence > 0:
+        fair = rookie_anchor * ipo_influence + career_fair * (1.0 - ipo_influence)
     fair = max(PRICE_FLOOR, min(PRICE_CEILING, fair))
 
     explanation = {
         **components,
-        "productionOnlyFairValue": round(fair, 2),
+        "valueWeights": dict(NFL_VALUE_WEIGHTS),
+        "valueInputs": {key: round(value, 2) for key, value in inputs.items()},
+        "valuationScore": round(score, 2),
+        "careerFairValue": round(career_fair, 2),
         "rookieIpoAnchor": round(rookie_anchor, 2) if rookie_anchor is not None else None,
-        "rookieInfluence": round(rookie_influence, 4),
+        "rookieInfluence": round(ipo_influence, 4),
         "fairValue": round(fair, 2),
+        "pricingPrinciple": (
+            "production-led universal NFL value; modest achievement, career-runway, "
+            "and availability context; no position, starter/reserve, or fame premium; "
+            "Rookie IPO fades gradually with professional games"
+        ),
         "modelVersion": MODEL_VERSION,
     }
     return round(score, 2), round(fair, 2), explanation
