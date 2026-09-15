@@ -8,6 +8,7 @@ prevent tiny reserve baselines from creating outsized injury-replacement moves.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import hourly_price_refresh as refresh
@@ -76,5 +77,5 @@ if __name__ == "__main__":
     # A prior protection pass may have fixed an event's evidence without rebasing
     # later prices that had already compounded from the inflated number. Rebase
     # only those marked reserve/opportunity events before the next live refresh.
-    persisted_opportunity.repair_catalog(refresh.Path("data/current_catalog.json"))
+    persisted_opportunity.repair_catalog(Path("data/current_catalog.json"))
     raise SystemExit(refresh.main())
