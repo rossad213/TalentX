@@ -58,7 +58,8 @@ def signal_bundle_with_rb_receiving_td_credit(
 
 def install_rb_receiving_td_credit():
     # Bump the NFL model version so the targeted opportunity migration can mark
-    # repaired events once while leaving normal NFL listings untouched.
+    # repaired events once while leaving normal NFL listings untouched. The
+    # opportunity module owns the denominator guard and zero-game-gap behavior.
     nfl.NFL_EXPECTATION_MODEL_VERSION = NFL_RB_MODEL_VERSION
     refresh.signal_bundle = signal_bundle_with_rb_receiving_td_credit
     opportunity.install_opportunity_protection()
