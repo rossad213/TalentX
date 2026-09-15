@@ -1,6 +1,6 @@
 /* TalentX client stability + account bootstrap. */
 (() => {
-  const CATALOG_PRICING_REVISION='20260914-mlb-repair-v1';
+  const CATALOG_PRICING_REVISION='20260914-sports-history-v2';
   const STORAGE_KEY='talentx_v2_state';
   let authBootstrapState='loading';
   let resolveAuthReady=null;
@@ -92,6 +92,48 @@
       return true;
     }catch(error){
       console.warn('TalentX client pricing-state migration skipped',error);
+      return false;
+    }
+  }
+
+  // app.js historically preferred lastGameMovePct whenever a record had any
+  // lastPriceEventId. That hides a valid signing/team-change/award move when the
+  // most recent event is not a game (and MLB intentionally has game movement
+  // disabled pending a baseball-specific model). Resolve the percentage from the
+  // actual latest event type while preserving the browser's virtual-trade math.
+  function installEventAwareMovement(){
+    try{
+      if(typeof displayChange!=='function') return false;
+      displayChange=function(record){
+        const listed=Number(record?.marketPrice||0);
+        const current=Number(typeof localPrice==='function'?localPrice(record):listed);
+        const eventType=String(record?.lastEventType||'').trim().toLowerCase();
+        const explicitEventMove=Number(record?.lastEventMovePct);
+        const gameMove=Number(record?.lastGameMovePct);
+        const daily=Number(record?.dailyChange||0);
+        let recorded=daily;
+
+        if(record?.lastPriceEventId){
+          if(eventType==='game'){
+            recorded=Number.isFinite(explicitEventMove)?explicitEventMove:(Number.isFinite(gameMove)?gameMove:daily);
+          }else if(eventType){
+            recorded=Number.isFinite(explicitEventMove)?explicitEventMove:daily;
+          }else{
+            // Legacy game events predate lastEventType. Prefer a non-zero generic
+            // event move when present; otherwise retain the prior game fallback.
+            recorded=Number.isFinite(explicitEventMove)?explicitEventMove:(Number.isFinite(gameMove)?gameMove:daily);
+          }
+        }
+        if(!Number.isFinite(recorded)) recorded=0;
+        if(!Number.isFinite(listed)||listed<=0||!Number.isFinite(current)) return recorded;
+        if(Math.abs(current-listed)<.005) return recorded;
+        const prior=listed/(1+recorded/100);
+        return Number.isFinite(prior)&&prior>0?((current/prior)-1)*100:recorded;
+      };
+      window.displayChange=displayChange;
+      return true;
+    }catch(error){
+      console.warn('TalentX event-aware movement display skipped',error);
       return false;
     }
   }
@@ -250,6 +292,7 @@
     };
   }
 
+  installEventAwareMovement();
   const migrated=migrateLocalPriceState();
   syncMobileNav();
   startCanonicalListingGuard();
