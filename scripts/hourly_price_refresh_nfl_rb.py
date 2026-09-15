@@ -2,9 +2,9 @@
 """NFL running-back scoring correction layered onto the existing NFL refresh.
 
 This keeps the existing NFL season-history expectation model, result-surprise
-curve, team-result effect, and uncapped pricing intact. It only fixes one role
-scoring omission: running backs must receive production credit for receiving
-TDs as well as rushing TDs.
+curve, team-result effect, and uncapped pricing intact. It fixes the RB receiving
+TD omission and installs the narrow role-adjusted opportunity protection used to
+prevent tiny reserve baselines from creating outsized injury-replacement moves.
 """
 from __future__ import annotations
 
@@ -12,8 +12,9 @@ from typing import Any
 
 import hourly_price_refresh as refresh
 import hourly_price_refresh_nfl as nfl
+import hourly_price_refresh_nfl_opportunity as opportunity
 
-NFL_RB_MODEL_VERSION = "1.3-nfl-rb-receiving-td-credit"
+NFL_RB_MODEL_VERSION = "1.4-nfl-opportunity-floor-rb-receiving-td-credit"
 RB_RECEIVING_TD_RECENT_WEIGHT = 8.0
 RB_RECEIVING_TD_CAREER_WEIGHT = 4.0
 
@@ -56,10 +57,11 @@ def signal_bundle_with_rb_receiving_td_credit(
 
 
 def install_rb_receiving_td_credit():
-    # Bump the NFL model version so recent already-priced NFL games are migrated
-    # exactly once under the corrected RB production definition.
+    # Bump the NFL model version so the targeted opportunity migration can mark
+    # repaired events once while leaving normal NFL listings untouched.
     nfl.NFL_EXPECTATION_MODEL_VERSION = NFL_RB_MODEL_VERSION
     refresh.signal_bundle = signal_bundle_with_rb_receiving_td_credit
+    opportunity.install_opportunity_protection()
     return nfl.install_nfl_layer()
 
 
