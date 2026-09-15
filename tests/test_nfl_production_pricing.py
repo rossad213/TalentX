@@ -10,7 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from nfl_production_pricing import production_fair_value
+from nfl_production_pricing import (
+    career_runway_score,
+    price_from_score,
+    production_fair_value,
+)
 from repair_nfl_production_prices import REPAIR_VERSION, repair_catalog
 
 
@@ -24,6 +28,7 @@ class NFLProductionPricingTests(unittest.TestCase):
             "role": "Wide Receiver",
             "careerStatus": "Active",
             "careerStage": "Established",
+            "age": 28,
             "pricingDataStatus": "Evidence enriched — recent statistics, career statistics",
             "pricingConfidence": 0.86,
             "professionalGames": 60,
@@ -60,13 +65,14 @@ class NFLProductionPricingTests(unittest.TestCase):
         base.update(updates)
         return base
 
-    def test_recent_and_career_production_drive_value(self):
+    def test_recent_and_career_production_remain_dominant(self):
         productive = self.record(
             id="productive",
             pricingEvidenceSummary={"percentiles": {
                 "recentProduction": 0.95,
                 "efficiency": 0.90,
-                "careerProduction": 0.75,
+                "careerProduction": 0.85,
+                "awardPoints": 0.40,
             }},
         )
         lower = self.record(
@@ -75,12 +81,13 @@ class NFLProductionPricingTests(unittest.TestCase):
                 "recentProduction": 0.50,
                 "efficiency": 0.55,
                 "careerProduction": 0.65,
+                "awardPoints": 0.80,
             }},
         )
         self.assertGreater(production_fair_value(productive)[0], production_fair_value(lower)[0])
         self.assertGreater(production_fair_value(productive)[1], production_fair_value(lower)[1])
 
-    def test_role_and_position_do_not_change_price(self):
+    def test_role_and_position_do_not_create_price_premium(self):
         prices = {
             production_fair_value(self.record(role=role))[1]
             for role in (
@@ -95,41 +102,64 @@ class NFLProductionPricingTests(unittest.TestCase):
         reserve = self.record(starter=False, roleStatus="reserve")
         self.assertEqual(production_fair_value(starter)[1], production_fair_value(reserve)[1])
 
-    def test_nonproduction_fields_do_not_drive_nfl_fair_value(self):
+    def test_audience_or_fame_does_not_change_nfl_fair_value(self):
         low = self.record(
-            pricingConfidence=0.40,
-            careerStatus="Injured",
             activeMetrics={
-                "performance": 80, "achievements": 5, "consistency": 76,
-                "potential": 5, "availability": 5, "audience": 5,
+                "performance": 80, "achievements": 70, "consistency": 76,
+                "potential": 5, "availability": 75, "audience": 5,
             },
         )
         high = self.record(
-            pricingConfidence=0.99,
-            careerStatus="Active",
             activeMetrics={
-                "performance": 80, "achievements": 100, "consistency": 76,
-                "potential": 100, "availability": 100, "audience": 100,
+                "performance": 80, "achievements": 70, "consistency": 76,
+                "potential": 100, "availability": 75, "audience": 100,
             },
         )
         self.assertEqual(production_fair_value(low)[1], production_fair_value(high)[1])
 
-    def test_price_curve_preserves_clear_production_separation(self):
-        elite = self.record(pricingEvidenceSummary={"percentiles": {
-            "recentProduction": 0.97, "efficiency": 0.93,
-            "careerProduction": 0.90,
-        }})
-        average = self.record(pricingEvidenceSummary={"percentiles": {
-            "recentProduction": 0.50, "efficiency": 0.50,
-            "careerProduction": 0.50,
-        }})
-        elite_price = production_fair_value(elite)[1]
-        average_price = production_fair_value(average)[1]
-        self.assertGreater(elite_price, average_price * 1.8)
+    def test_age_and_career_stage_apply_modest_not_crushing_discount(self):
+        young = self.record(age=25, careerStage="Early Career")
+        veteran = self.record(age=34, careerStage="Veteran")
+        young_price = production_fair_value(young)[1]
+        veteran_price = production_fair_value(veteran)[1]
+        self.assertGreater(young_price, veteran_price)
+        self.assertGreater(veteran_price, young_price * 0.70)
+        self.assertGreater(career_runway_score(young), career_runway_score(veteran))
 
-    def test_rookie_ipo_anchor_is_only_for_preproduction_player(self):
+    def test_elite_veteran_production_still_beats_young_mediocre_production(self):
+        elite_veteran = self.record(
+            age=34,
+            careerStage="Veteran",
+            activeMetrics={"availability": 75},
+            pricingEvidenceSummary={"percentiles": {
+                "recentProduction": 0.93,
+                "careerProduction": 0.98,
+                "efficiency": 0.90,
+                "awardPoints": 0.90,
+            }},
+        )
+        young_mediocre = self.record(
+            age=23,
+            careerStage="Early Career",
+            activeMetrics={"availability": 90},
+            pricingEvidenceSummary={"percentiles": {
+                "recentProduction": 0.55,
+                "careerProduction": 0.45,
+                "efficiency": 0.55,
+                "awardPoints": 0.10,
+            }},
+        )
+        self.assertGreater(production_fair_value(elite_veteran)[1], production_fair_value(young_mediocre)[1])
+
+    def test_price_curve_keeps_midlevel_players_well_below_elite_stars(self):
+        self.assertLess(price_from_score(70), 75)
+        self.assertGreater(price_from_score(93), 225)
+        self.assertGreater(price_from_score(95), 245)
+
+    def test_rookie_ipo_anchor_is_preserved_before_production(self):
         rookie = self.record(
             careerStage="Active Rookie",
+            age=22,
             pricingDataStatus="Rookie IPO — verified draft position; awaiting professional statistics",
             professionalGames=0,
             pricingEvidenceSummary={},
@@ -139,13 +169,72 @@ class NFLProductionPricingTests(unittest.TestCase):
         self.assertAlmostEqual(fair, 51.31, places=2)
         self.assertEqual(explanation["rookieInfluence"], 1.0)
 
+    def test_rookie_ipo_fades_instead_of_disappearing_after_first_stats(self):
         produced = self.record(
             careerStage="Active Rookie",
+            age=22,
+            professionalGames=4,
             rookiePricing={"draftInfluencePct": 100, "calibratedIpoPrice": 51.31},
         )
-        _, produced_fair, produced_explanation = production_fair_value(produced)
-        self.assertNotAlmostEqual(produced_fair, 51.31, places=2)
-        self.assertEqual(produced_explanation["rookieInfluence"], 0.0)
+        _, fair, explanation = production_fair_value(produced)
+        self.assertEqual(explanation["rookieInfluence"], 0.75)
+        self.assertNotAlmostEqual(fair, explanation["careerFairValue"], places=2)
+        self.assertNotAlmostEqual(fair, 51.31, places=2)
+
+        later = self.record(
+            careerStage="Early Career",
+            age=23,
+            professionalGames=24,
+            rookiePricing={"draftInfluencePct": 100, "calibratedIpoPrice": 51.31},
+        )
+        _, _, later_explanation = production_fair_value(later)
+        self.assertEqual(later_explanation["rookieInfluence"], 0.10)
+
+    def test_rookie_score_can_reconstruct_missing_ipo_anchor(self):
+        rookie = self.record(
+            careerStage="Rookie IPO",
+            age=22,
+            professionalGames=0,
+            pricingEvidenceSummary={},
+            rookiePricing={"draftInfluencePct": 100, "rookieScore": 90},
+        )
+        _, fair, explanation = production_fair_value(rookie)
+        self.assertGreater(fair, 110)
+        self.assertLess(fair, 116)
+        self.assertEqual(fair, explanation["rookieIpoAnchor"])
+
+    def test_josh_allen_shape_prices_well_above_late_career_veteran_shape(self):
+        elite_prime = self.record(
+            name="Elite Prime QB",
+            role="Quarterback",
+            age=30,
+            careerStage="Established",
+            activeMetrics={"availability": 90},
+            pricingEvidenceSummary={"percentiles": {
+                "recentProduction": 0.98,
+                "careerProduction": 0.96,
+                "efficiency": 0.95,
+                "awardPoints": 0.95,
+            }},
+        )
+        late_veteran = self.record(
+            name="Accomplished Late Veteran",
+            role="Defensive End",
+            age=34,
+            careerStage="Veteran",
+            activeMetrics={"availability": 75},
+            pricingEvidenceSummary={"percentiles": {
+                "recentProduction": 0.70,
+                "careerProduction": 0.90,
+                "efficiency": 0.75,
+                "awardPoints": 0.75,
+            }},
+        )
+        elite_price = production_fair_value(elite_prime)[1]
+        veteran_price = production_fair_value(late_veteran)[1]
+        self.assertGreater(elite_price, 225)
+        self.assertLess(veteran_price, 100)
+        self.assertGreater(elite_price, veteran_price * 2)
 
     def test_repair_uses_one_universal_nfl_production_cohort(self):
         low = self.record(
@@ -159,7 +248,7 @@ class NFLProductionPricingTests(unittest.TestCase):
             id="high-lb", name="High LB", role="Linebacker", marketPrice=100,
             pricingEvidenceSummary={"rawSignals": {
                 "recentProduction": 100, "careerProduction": 200, "efficiency": 80,
-                "usage": 15, "careerUsage": 40, "awardPoints": 0,
+                "usage": 15, "careerUsage": 40, "awardPoints": 8,
             }},
         )
         with tempfile.TemporaryDirectory() as directory:
@@ -170,19 +259,22 @@ class NFLProductionPricingTests(unittest.TestCase):
         self.assertEqual(synchronized, 2)
         self.assertEqual(repriced, 2)
         by_id = {record["id"]: record for record in updated}
-        self.assertEqual(by_id["low-wr"]["pricingEvidenceSummary"]["cohort"], "NFL · universal production")
-        self.assertEqual(by_id["high-lb"]["pricingEvidenceSummary"]["cohort"], "NFL · universal production")
+        self.assertEqual(by_id["low-wr"]["pricingEvidenceSummary"]["cohort"], "NFL · universal production-led")
+        self.assertEqual(by_id["high-lb"]["pricingEvidenceSummary"]["cohort"], "NFL · universal production-led")
         self.assertGreater(by_id["high-lb"]["marketPrice"], by_id["low-wr"]["marketPrice"])
+        self.assertEqual(by_id["high-lb"]["nflProductionRebaseVersion"], REPAIR_VERSION)
 
-    def test_pure_rookie_ipo_without_production_is_not_force_rebased(self):
+    def test_pure_rookie_ipo_is_rebased_to_ipo_value_instead_of_left_at_seven_dollars(self):
         rookie = self.record(
             id="rookie-ipo",
             careerStage="Active Rookie",
+            age=22,
             pricingDataStatus="Rookie IPO — verified draft position; awaiting professional statistics",
             professionalGames=0,
-            marketPrice=45.0,
+            marketPrice=7.0,
+            previousMarketPrice=7.0,
             pricingEvidenceSummary={},
-            rookiePricing={"draftInfluencePct": 100, "calibratedIpoPrice": 51.31},
+            rookiePricing={"draftInfluencePct": 100, "calibratedIpoPrice": 42.0},
         )
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sports.json"
@@ -190,9 +282,9 @@ class NFLProductionPricingTests(unittest.TestCase):
             repriced, synchronized = repair_catalog(path, repaired_at="2026-09-15T00:00:00Z")
             updated = json.loads(path.read_text(encoding="utf-8"))[0]
         self.assertEqual(synchronized, 1)
-        self.assertEqual(repriced, 0)
-        self.assertEqual(updated["marketPrice"], 45.0)
-        self.assertNotIn("nflProductionRebaseVersion", updated)
+        self.assertEqual(repriced, 1)
+        self.assertAlmostEqual(updated["marketPrice"], 42.0, places=2)
+        self.assertEqual(updated["nflProductionRebaseVersion"], REPAIR_VERSION)
 
 
 if __name__ == "__main__":
