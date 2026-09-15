@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Rebase NFL prices onto one production-only valuation scale.
+"""Rebase NFL prices onto the production-led TalentX valuation scale.
 
-The migration is intentionally NFL-only. Every NFL player is ranked in the same
-production pool after football statistics have been translated into the common
-TalentX production signals. Position, starter/reserve status, fame, age,
-achievements, potential, and availability do not affect the price level.
+The migration is intentionally NFL-only. Every NFL player remains in one
+universal NFL production pool after football statistics have been translated
+into common TalentX production signals. Production is the dominant input, while
+verified achievements, remaining career runway, and availability are modest
+secondary inputs. Position, starter/reserve labels, and fame do not create price
+premiums.
 
-Verified chart/event percentage moves are preserved while stale absolute prices
-are rebased onto the production-only fair value.
+Drafted rookies retain their existing Rookie IPO anchor and transition toward
+professional value as games accumulate. Verified chart/event percentage moves are
+preserved while stale absolute prices are rebased onto the new fair value.
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ from category_market_store import load_records, write_records
 from enrich_current_catalog import percentile
 from nfl_production_pricing import MODEL_VERSION, production_fair_value
 
-REPAIR_VERSION = "1.2-nfl-production-only-universal-rebase"
+REPAIR_VERSION = "2.0-nfl-production-led-career-stage-rookie-ipo-rebase"
 SIGNAL_KEYS = (
     "recentProduction",
     "careerProduction",
@@ -78,13 +81,10 @@ def _refresh_nfl_percentiles(record: dict[str, Any], pool: list[dict[str, float]
         for key in SIGNAL_KEYS
     }
     summary = dict(record.get("pricingEvidenceSummary") or {})
-    summary["cohort"] = "NFL · universal production"
+    summary["cohort"] = "NFL · universal production-led"
     summary["percentiles"] = {key: round(value, 4) for key, value in pcts.items()}
     record["pricingEvidenceSummary"] = summary
 
-    # Keep generic active metrics synchronized for UI/backward compatibility,
-    # but NFL fair value reads only production-derived performance/consistency
-    # when a full ranked production record is not available.
     metrics = dict(record.get("activeMetrics") or {})
     recent_pct = pcts["recentProduction"]
     career_pct = pcts["careerProduction"]
@@ -139,21 +139,11 @@ def _scale_price_state(record: dict[str, Any], ratio: float) -> None:
 
 
 def _recent_overlay_pct(record: dict[str, Any]) -> float:
-    # Preserve the verified latest production-vs-expectation move. Old absolute
-    # drift is intentionally discarded by this migration.
     for key in ("lastGameSurpriseMovePct", "lastGameMovePct"):
         value = _number(record.get(key))
         if value is not None and -8.0 <= value <= 8.0:
             return value
     return 0.0
-
-
-def _pure_rookie_ipo(record: dict[str, Any]) -> bool:
-    """Keep a true pre-production draft IPO until NFL production exists."""
-    status = str(record.get("pricingDataStatus") or "")
-    pricing = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else {}
-    influence = _number(pricing.get("draftInfluencePct")) or 0.0
-    return status.startswith("Rookie IPO") and influence >= 75.0 and _raw_signals(record) is None
 
 
 def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, int]:
@@ -168,12 +158,15 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
     for record in records:
         if not _is_nfl(record):
             continue
+
         has_ranked_evidence = _refresh_nfl_percentiles(record, pool)
-        score, fair, explanation = production_fair_value(record)
-        if score is None or fair is None or explanation is None:
+        valuation_score, fair, explanation = production_fair_value(record)
+        if valuation_score is None or fair is None or explanation is None:
             continue
 
-        record["nflProductionScore"] = score
+        production_score = _number(explanation.get("productionScore"))
+        record["nflProductionScore"] = round(production_score, 2) if production_score is not None else None
+        record["nflValuationScore"] = round(valuation_score, 2)
         record["nflProductionPricing"] = explanation
         record["nflProductionPriceModelVersion"] = MODEL_VERSION
         record["fairValue"] = round(fair, 2)
@@ -181,7 +174,9 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["modelTargetPrice"] = round(fair, 2)
         synchronized += 1
 
-        if not has_ranked_evidence or _pure_rookie_ipo(record):
+        rookie_influence = _number(explanation.get("rookieInfluence")) or 0.0
+        can_reprice = has_ranked_evidence or rookie_influence > 0.0
+        if not can_reprice:
             continue
         if str(record.get("nflProductionRebaseVersion") or "") == REPAIR_VERSION:
             continue
@@ -200,7 +195,10 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["nflProductionRebasedAt"] = stamp
         record["nflProductionRebase"] = {
             "oldPrice": round(current, 2),
-            "productionFairValue": round(fair, 2),
+            "productionLedFairValue": round(fair, 2),
+            "valuationScore": round(valuation_score, 2),
+            "productionScore": round(production_score, 2) if production_score is not None else None,
+            "rookieInfluence": round(rookie_influence, 4),
             "latestGameOverlayPct": round(overlay, 3),
             "rebasedPrice": target,
             "productionCohort": "NFL universal",
@@ -219,8 +217,8 @@ def main() -> int:
     args = parser.parse_args()
     repriced, synchronized = repair_catalog(args.catalog)
     print(
-        f"Synchronized {synchronized:,} NFL production valuation(s); "
-        f"rebased {repriced:,} stale market price(s) on the universal production scale."
+        f"Synchronized {synchronized:,} NFL production-led valuation(s); "
+        f"rebased {repriced:,} market price(s) with Rookie IPO and career-stage context."
     )
     return 0
 
