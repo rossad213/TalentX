@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build browser-friendly TalentX data from the authoritative current catalog.
 
-The full current_catalog.json remains untouched as the source of truth and
-fallback. This script creates:
+The deploy copy of current_catalog.json is normalized for known safe publication
+repairs before client data is generated. This script creates:
   * catalog_index.json: compact fields needed for Dashboard/Market/search.
   * profile_shards/*.json: full records split across a fixed number of shards.
 
@@ -15,6 +15,8 @@ import argparse
 import json
 from pathlib import Path
 from typing import Any
+
+from repair_mlb_market_prices import repair_catalog as repair_mlb_catalog
 
 SHARD_COUNT = 128
 
@@ -54,8 +56,7 @@ def browser_compatible_record(record: dict[str, Any]) -> dict[str, Any]:
     Some browser components still read ``lastGameMovePct`` because that field
     predates non-sports event pricing. Music/Actor/Creator pipelines store the
     same latest-event concept in ``lastEventMovePct``. Mirror it only in the
-    generated client data when the legacy field is absent; the authoritative
-    current_catalog.json is never changed.
+    generated client data when the legacy field is absent.
     """
     item = dict(record)
     if item.get("lastGameMovePct") is None and item.get("lastEventMovePct") is not None:
@@ -101,6 +102,14 @@ def patch_manifest(manifest_path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def build(catalog_path: Path, index_path: Path, shards_dir: Path, manifest_path: Path) -> None:
+    # Category overlays run immediately before this step in Pages deployment.
+    # An older Sports artifact can therefore reintroduce the corrupted MLB game
+    # prices even after the unified market was repaired. Normalize the deploy
+    # copy again here so both the compact index and profile shards are safe.
+    mlb_repairs = repair_mlb_catalog(catalog_path)
+    if mlb_repairs:
+        print(f"Deploy safety repair restored {mlb_repairs:,} MLB listing(s) before client catalog build.")
+
     records = [browser_compatible_record(record) for record in load_catalog(catalog_path)]
     index = [compact_record(record) for record in records]
 
