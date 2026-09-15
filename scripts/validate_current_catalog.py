@@ -9,6 +9,7 @@ from collections import Counter
 from pathlib import Path
 
 from category_market_store import CSV_FIELDS
+from repair_mlb_market_prices import repair_catalog as repair_mlb_catalog
 from same_category_identity_dedupe import dedupe_same_category_identities
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +24,16 @@ def write_csv(records: list[dict], path: Path) -> None:
         writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(records)
+
+
+def write_sports_market(records: list[dict]) -> None:
+    market_dir = DATA / "market"
+    market_dir.mkdir(parents=True, exist_ok=True)
+    sports = [record for record in records if record.get("primaryCategory") == "Athlete"]
+    (market_dir / "sports.json").write_text(
+        json.dumps(sports, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
 
 
 def repair_same_category_duplicates(records: list[dict], catalog_path: Path, csv_path: Path, manifest_path: Path) -> tuple[list[dict], int]:
@@ -90,6 +101,16 @@ def main() -> int:
         records = []
     else:
         records, _ = repair_same_category_duplicates(records, catalog_path, csv_path, manifest_path)
+
+        # MLB game-event pricing used a generic per-game comparison that is not
+        # valid for baseball's mixed cumulative/rate stat payloads. Recover the
+        # preserved pre-corruption v1 market prices before anything is published.
+        mlb_repairs = repair_mlb_catalog(catalog_path)
+        if mlb_repairs:
+            records = json.loads(catalog_path.read_text(encoding="utf-8"))
+            write_csv(records, csv_path)
+            write_sports_market(records)
+            print(f"MLB publication safety repair restored {mlb_repairs:,} listing(s).")
 
     if len(records) < args.minimum:
         errors.append(f"Catalog has {len(records):,} records; expected at least {args.minimum:,}")
