@@ -1,0 +1,14 @@
+{
+  "version": "2026-09-16-nfl-draft-metadata-fallback",
+  "description": "Factual NFL draft metadata fallback used only when roster/stat feeds omit draft fields. This file does not contain manual prices.",
+  "records": [
+    {
+      "name": "Will Howard",
+      "league": "NFL",
+      "draftYear": 2025,
+      "draftRound": 6,
+      "draftPick": 185
+    }
+  ],
+  "source": "https://www.nfl.com/draft/tracker/2025/teams/pittsburgh-steelers"
+}
