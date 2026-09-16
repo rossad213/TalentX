@@ -119,6 +119,7 @@ MEANINGFUL_PRODUCTION_KEYS = (
     "recentProduction",
     "careerProduction",
 )
+MEANINGFUL_PRODUCTION_MIN = 1.0
 
 # Optional explicit volume fields let future collectors provide a cleaner handoff
 # than aggregate production scores without changing this model again.
@@ -169,13 +170,17 @@ def _percentiles(record: dict[str, Any]) -> dict[str, float]:
 def _has_meaningful_professional_evidence(record: dict[str, Any]) -> bool:
     """Return whether the record contains real NFL role production evidence.
 
-    ``professionalGames`` and generic usage are intentionally excluded. A player
-    can dress or appear on special teams without earning the offensive/defensive
-    role evidence that should replace a draft/pre-pro IPO anchor.
+    ``professionalGames`` and generic usage are intentionally excluded as role
+    signals. Zero-game records are never treated as having established NFL role
+    evidence, and tiny provider/preseason production noise does not end IPO support.
     """
+    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
+    if games <= 0:
+        return False
+
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     raw = summary.get("rawSignals") if isinstance(summary.get("rawSignals"), dict) else {}
-    if any(abs(_number(raw.get(key)) or 0.0) > 1e-9 for key in MEANINGFUL_PRODUCTION_KEYS):
+    if any(abs(_number(raw.get(key)) or 0.0) >= MEANINGFUL_PRODUCTION_MIN for key in MEANINGFUL_PRODUCTION_KEYS):
         return True
     if any((_number(record.get(key)) or 0.0) > 0.0 for key in MEANINGFUL_VOLUME_FIELDS):
         return True
