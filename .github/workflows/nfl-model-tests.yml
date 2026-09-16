@@ -5,8 +5,10 @@ on:
     paths:
       - "scripts/nfl_production_pricing.py"
       - "scripts/repair_nfl_production_prices.py"
+      - "scripts/repair_nfl_production_prices_safe.py"
       - "tests/test_nfl_production_pricing.py"
       - "tests/test_nfl_fundamental_stability.py"
+      - "tests/test_nfl_safe_rebase.py"
       - "tests/test_nfl_rb_receiving_td_credit.py"
       - ".github/workflows/sports-market-refresh.yml"
       - ".github/workflows/nfl-model-tests.yml"
@@ -31,6 +33,7 @@ jobs:
           python -m unittest
           tests/test_nfl_production_pricing.py
           tests/test_nfl_fundamental_stability.py
+          tests/test_nfl_safe_rebase.py
           tests/test_nfl_rb_receiving_td_credit.py
           tests/test_nfl_opportunity_protection.py
           tests/test_nfl_per_game_expectations.py -v
