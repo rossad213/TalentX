@@ -6,10 +6,10 @@ wrapper also repairs state from the earlier broad v4 rebase: unaffected listings
 are restored to their pre-v4 market state, while evidence-backed corrections are
 preserved.
 
-Running backs with verified current-season games receive an additional narrow
-repair: every active RB is compared on the same current-season event window,
-early-season evidence is shrunk consistently, and sparse award counts cannot
-create a near-binary achievement premium.
+Verified current-season box-score games now outrank the generic NFL ``usage``
+signal for every position, not just running backs. This prevents one actual game
+from being misread as a 7-9 game sample early in the season. Running backs also
+receive the same-window cohort calibration introduced in v4.3.
 """
 from __future__ import annotations
 
@@ -28,12 +28,12 @@ from nfl_production_pricing import (
 )
 
 UNSAFE_REPAIR_VERSION = base.REPAIR_VERSION
-SAFE_REPAIR_VERSION = "4.3-nfl-selective-rb-cohort-rebase"
+SAFE_REPAIR_VERSION = "4.4-nfl-wide-verified-current-season-sample"
 EARLY_SEASON_FULL_WEIGHT_GAMES = base.EARLY_SEASON_FULL_WEIGHT_GAMES
 
 
 def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None = None) -> int | None:
-    """Count verified current-season regular-season game events only."""
+    """Count current-season regular-season game events that contain box-score stats."""
     events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
     current = now or datetime.now(timezone.utc)
     season_year = current.year if current.month >= 7 else current.year - 1
@@ -46,26 +46,30 @@ def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None 
         started = base._parse_event_time(event.get("startedAt") or event.get("eventDate") or event.get("date"))
         if started is None or not (regular_start <= started < regular_end):
             continue
+        stats = event.get("stats") if isinstance(event.get("stats"), dict) else {}
+        if not stats:
+            continue
         key = str(event.get("eventKey") or event.get("eventId") or started.isoformat())
         keys.add(key)
     return min(18, len(keys)) if keys else None
 
 
 def _recent_sample_games(record: dict[str, Any]) -> int | None:
-    """Use verified RB box scores before generic usage; preserve legacy priority elsewhere."""
+    """Use verified current-season box scores before generic usage for every NFL role."""
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     for key in ("recentSeasonGames", "recentGames", "seasonGames"):
         direct = base._number(summary.get(key))
         if direct is not None and direct >= 0:
             return min(18, int(round(direct)))
 
-    # Generic NFL usage includes games played and can turn one RB game into a
-    # fake multi-game sample. Only a verified RB event containing box-score stats
-    # is allowed to outrank provider usage; empty event shells keep legacy logic.
-    if rb_calibration.is_nfl_running_back(record):
-        verified_rb_events = rb_calibration.current_regular_events(record)
-        if verified_rb_events:
-            return min(18, len(verified_rb_events))
+    # The generic usage signal includes starts/games and is not itself a game
+    # count. A verified regular-season box score is the authoritative early-
+    # season sample-size signal across QB/RB/REC/DEF/ST. Empty event shells do
+    # not override usage, preserving legacy fallback behavior when no box score
+    # exists.
+    event_games = _regular_season_event_games(record)
+    if event_games is not None:
+        return event_games
 
     signals = base._raw_signals(record)
     if signals is not None:
@@ -74,7 +78,7 @@ def _recent_sample_games(record: dict[str, Any]) -> int | None:
             divisor = 4.0 if bool(record.get("starter")) else 2.0
             return min(18, max(1, int(math.ceil(usage / divisor))))
 
-    return _regular_season_event_games(record)
+    return None
 
 
 def _uses_event_fallback(record: dict[str, Any]) -> bool:
@@ -83,13 +87,6 @@ def _uses_event_fallback(record: dict[str, Any]) -> bool:
         direct = base._number(summary.get(key))
         if direct is not None and direct >= 0:
             return False
-
-    if rb_calibration.is_nfl_running_back(record) and rb_calibration.current_regular_events(record):
-        return True
-
-    signals = base._raw_signals(record)
-    if signals is not None and max(0.0, float(signals.get("usage", 0.0))) > 0:
-        return False
     return _regular_season_event_games(record) is not None
 
 
@@ -228,8 +225,6 @@ def repair_catalog(
         rookie_influence = base._number(explanation.get("rookieInfluence")) or 0.0
         handoff_repaired = _needs_meaningful_usage_handoff_repair(record, prior_model_version, explanation)
 
-        # If broad v4 already made exactly a still-valid correction, keep that
-        # price. A new RB cohort repair must still be allowed to reprice once.
         if (
             preserve_unsafe
             and not sample_repaired
@@ -275,11 +270,11 @@ def repair_catalog(
         elif handoff_repaired:
             reason = "meaningful-usage-rookie-ipo-restored"
         elif sample_repaired:
-            reason = "missing-sample-recovered"
+            reason = "verified-current-season-sample-recovered"
         else:
             reason = "missing-draft-metadata-recovered"
         if sample_repaired and draft_recovered and not rb_cohort_repaired:
-            reason = "missing-sample-and-draft-metadata-recovered"
+            reason = "verified-sample-and-draft-metadata-recovered"
         record["nflProductionRebase"] = {
             "reason": reason,
             "oldPrice": round(current, 2),
@@ -312,8 +307,8 @@ def main() -> int:
     repriced, synchronized, sample_repairs, draft_repairs = repair_catalog(args.catalog)
     print(
         f"Synchronized {synchronized:,} NFL valuation(s); selectively rebased {repriced:,} price(s) "
-        f"from {sample_repairs:,} repaired live-sample input(s), {draft_repairs:,} recovered draft record(s), "
-        f"and current-season RB cohort calibration where verified games were available."
+        f"from {sample_repairs:,} repaired verified current-season sample input(s), "
+        f"{draft_repairs:,} recovered draft record(s), and RB cohort calibration where available."
     )
     return 0
 
