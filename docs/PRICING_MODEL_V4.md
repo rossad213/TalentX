@@ -34,11 +34,20 @@ Audience demand is not part of the athlete fundamental score. It is limited to t
 
 ### Creator
 
-- 25% audience reach
-- 25% engagement quality
-- 20% audience growth
-- 15% consistency and retention
-- 15% commercial and brand strength
+Creator fundamentals use demonstrated production first and a modest career-runway component:
+
+- 30% verified audience / reach production
+- 25% recent engagement / view production
+- 20% sustained career production
+- 10% growth / momentum
+- 10% consistency / output
+- 5% career runway / stage
+
+Wikidata is used only for identity, creator-type discovery, rough career tenure, and platform-resolution hints. Sitelinks are not treated as audience, views, engagement, achievements, or production. A Creator with no verified platform production remains a low-confidence provisional listing rather than receiving a high-confidence synthetic valuation.
+
+For verified YouTube identities, the Creator market uses official YouTube channel RSS `media:statistics` view totals. Recent view scale is normalized against other verified Creators, growth is measured from saved snapshots against the creator's own same-channel baseline, consistency uses recent view dispersion and upload cadence, and age is used only for the 5% career-runway component.
+
+Legitimate ties are allowed. TalentX does not add random pennies or artificial noise just to make every Creator price unique.
 
 ## Cross-category calibration
 
@@ -69,6 +78,7 @@ Evidence tier controls the maximum unsupported career score and the confidence a
 - Curated benchmark prior: maximum 95
 - Under review: maximum 82
 - Roster-only provisional record: fundamental value capped at $62 and market price capped at $65
+- Wikidata-only Creator listing: pricing confidence is deliberately kept at 50% or below until direct platform production exists
 
 The ordered current-seed list is used as a temporary benchmark prior only for curated prototype records. Once profession-specific evidence is available, verified evidence replaces the benchmark prior.
 
@@ -81,6 +91,8 @@ Market price is separated from fundamental value.
 - Availability/risk adjustment
 
 These adjustments are calculated directly from saved evidence and contain no random price jitter. The combined fundamental-model adjustment is bounded at ±6% so audience/risk normalization cannot overpower documented career value; this is not a ceiling on verified event movement.
+
+For Creators, the production-fundamental migration rebases durable verified event moves onto the latest Creator fundamental. In other words: fundamental price reflects demonstrated creator production plus modest career runway, while new verified outcomes move that price versus the creator's own expectation baseline.
 
 After a full evidence build, every listing begins with a 0.00% change and a flat chart. A shared price changes only after a completed game with a player-level box score, or when another supported evidence event is added in a future feed. A virtual trade changes only that user's browser price. Hourly runs leave all unrelated listings unchanged.
 
@@ -110,13 +122,18 @@ The validation suite now checks:
 - A completed game creates one expectation-based price point and a repeated event ID creates none
 - Legacy max-move arguments do not clip verified results
 - No-game refreshes preserve both price and chart history
+- Creator Wikidata sitelink counts do not create production metrics
+- Creator multi-platform classifications are not chosen by an arbitrary platform priority list
+- Verified Creator production separates fundamentals when the evidence differs
+- Identical Creator production evidence can still produce a legitimate tie
+- Wikidata-only Creator pricing confidence remains at or below 50%
 - Anthony Edwards prices above Amen Thompson and Tyrese Maxey
 - Taylor Swift and Beyoncé price above Gracie Abrams
-- MrBeast prices above Marques Brownlee
+- MrBeast prices above Marques Brownlee when verified Creator production evidence supports that ordering
 - Zendaya prices above Pedro Pascal
 - Established NFL starters price above weak or fringe comparison records
 - Rookie draft metadata and Rookie IPO transitions remain functional
 
 ## Current limitation
 
-The music, actor, and creator models now have correct profession-specific architecture, but their dedicated evidence ingestion feeds still need to be built. Until then, current-seed order acts as a transparent temporary prior rather than allowing randomly generated prototype metrics to determine elite rankings.
+Creator production fundamentals currently have a direct YouTube evidence path. Twitch, podcast, newsletter/blog, and other creator media still need equivalent direct production collectors. Until a supported platform collector resolves those records, they remain visibly provisional rather than being priced from Wikidata notability proxies.
