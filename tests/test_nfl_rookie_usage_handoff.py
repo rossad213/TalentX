@@ -20,7 +20,7 @@ class NFLRookieUsageHandoffTests(unittest.TestCase):
         current_year = datetime.now(timezone.utc).year
         # Generic usage includes games played in the catalog enrichment layer.
         # Five appearances can therefore produce nonzero usage even with no RB
-        # carries/receptions; production must remain the handoff signal.
+        # carries/receptions; production must remain part of the handoff signal.
         raw = {
             "recentProduction": 0.0,
             "careerProduction": 0.0,
@@ -94,6 +94,46 @@ class NFLRookieUsageHandoffTests(unittest.TestCase):
         _, fair, explanation = production_fair_value(record)
 
         self.assertIsNotNone(explanation)
+        self.assertIsNone(explanation["rookieIpoAnchor"])
+        self.assertEqual(explanation["rookieInfluence"], 0.0)
+        self.assertAlmostEqual(fair, explanation["careerFairValue"], places=2)
+
+    def test_preseason_only_material_signal_does_not_end_ipo(self):
+        record = self.hunter_shape(meaningful_usage=True)
+        record["professionalGames"] = 0
+        record["pricingEvidenceSummary"]["recentSampleGamesEstimate"] = None
+        record["priceEvents"] = [
+            {
+                "eventType": "game",
+                "eventKey": "preseason-only",
+                "startedAt": "2026-08-27T23:00:00Z",
+            }
+        ]
+
+        _, fair, explanation = production_fair_value(record)
+
+        self.assertIsNotNone(explanation)
+        self.assertEqual(explanation["rookieEvidenceGames"], 0.0)
+        self.assertGreater(explanation["rookieInfluence"], 0.0)
+        self.assertIsNotNone(explanation["rookieIpoAnchor"])
+        self.assertGreater(fair, explanation["careerFairValue"])
+
+    def test_verified_regular_game_repairs_stale_professional_games(self):
+        record = self.hunter_shape(meaningful_usage=True)
+        record["professionalGames"] = 0
+        record["pricingEvidenceSummary"]["recentSampleGamesEstimate"] = 1
+        record["priceEvents"] = [
+            {
+                "eventType": "game",
+                "eventKey": "regular-week-one",
+                "startedAt": "2026-09-13T17:00:00Z",
+            }
+        ]
+
+        _, fair, explanation = production_fair_value(record)
+
+        self.assertIsNotNone(explanation)
+        self.assertEqual(explanation["rookieEvidenceGames"], 1.0)
         self.assertIsNone(explanation["rookieIpoAnchor"])
         self.assertEqual(explanation["rookieInfluence"], 0.0)
         self.assertAlmostEqual(fair, explanation["careerFairValue"], places=2)
