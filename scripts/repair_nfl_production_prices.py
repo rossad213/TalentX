@@ -9,16 +9,21 @@ defensive raw totals while still allowing every NFL player to be valued on the
 same TalentX market scale.
 
 The first few games of a new season are shrunk toward durable career evidence so
-one hot or cold week cannot silently replace an established fundamental. Verified
-game events remain separate and can still move the market price immediately.
+one hot or cold week cannot silently replace an established fundamental. When a
+provider omits a recent-games/usage field, verified regular-season event history
+is used as the sample-size fallback instead of silently treating the partial
+season as a full sample.
 
 No-debut drafted players can retain a time-decaying Rookie IPO anchor even when a
-roster feed labels them as second-year players.
+roster feed labels them as second-year players. Draft metadata can be recovered
+from embedded pricing evidence or a factual local metadata file before pricing.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import math
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,7 +33,9 @@ from category_market_store import load_records, write_records
 from enrich_current_catalog import percentile, role_group
 from nfl_production_pricing import MODEL_VERSION, production_fair_value
 
-REPAIR_VERSION = "3.0-nfl-position-normalized-sample-stable-rookie-ipo-rebase"
+ROOT = Path(__file__).resolve().parents[1]
+NFL_DRAFT_METADATA = ROOT / "data" / "nfl_draft_metadata_overrides.json"
+REPAIR_VERSION = "4.0-nfl-live-sample-and-draft-metadata-rebase"
 SIGNAL_KEYS = (
     "recentProduction",
     "careerProduction",
@@ -66,6 +73,17 @@ def _is_nfl(record: dict[str, Any]) -> bool:
     return str(record.get("leagueOrMedium") or "").strip().upper() == "NFL"
 
 
+def _name_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _positive_int(value: Any) -> int | None:
+    parsed = _number(value)
+    if parsed is None or parsed <= 0:
+        return None
+    return int(round(parsed))
+
+
 def _raw_signals(record: dict[str, Any]) -> dict[str, float] | None:
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     raw = summary.get("rawSignals") if isinstance(summary.get("rawSignals"), dict) else {}
@@ -87,20 +105,116 @@ def _nfl_pools(records: list[dict[str, Any]]) -> tuple[dict[str, list[dict[str, 
     return dict(pools), universal
 
 
+def _load_nfl_draft_metadata(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    records = payload.get("records", []) if isinstance(payload, dict) else payload
+    source = payload.get("source") if isinstance(payload, dict) else None
+    output: dict[str, dict[str, Any]] = {}
+    if not isinstance(records, list):
+        return output
+    for item in records:
+        if not isinstance(item, dict) or not item.get("name"):
+            continue
+        if str(item.get("league") or "NFL").strip().upper() != "NFL":
+            continue
+        entry = dict(item)
+        if source and not entry.get("sourceUrl"):
+            entry["sourceUrl"] = source
+        output[_name_key(item.get("name"))] = entry
+    return output
+
+
+def _recover_draft_metadata(record: dict[str, Any], overrides: dict[str, dict[str, Any]]) -> bool:
+    """Recover factual draft fields without introducing a manual price."""
+    before = tuple(record.get(field) for field in ("draftYear", "draftRound", "draftPick"))
+    summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
+    rookie = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else {}
+
+    embedded = {
+        "draftYear": summary.get("draftYear") or rookie.get("draftYear"),
+        "draftRound": summary.get("draftRound") or rookie.get("draftRound"),
+        "draftPick": summary.get("draftPick") or rookie.get("overallPick") or rookie.get("draftPick"),
+    }
+    override = overrides.get(_name_key(record.get("name")), {})
+    for field in ("draftYear", "draftRound", "draftPick"):
+        if _positive_int(record.get(field)) is not None:
+            continue
+        value = _positive_int(embedded.get(field)) or _positive_int(override.get(field))
+        if value is not None:
+            record[field] = value
+    if override and override.get("sourceUrl"):
+        record["draftMetadataSource"] = override["sourceUrl"]
+
+    after = tuple(record.get(field) for field in ("draftYear", "draftRound", "draftPick"))
+    return after != before
+
+
+def _parse_event_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None = None) -> int | None:
+    """Count current NFL regular-season game events when provider usage is absent.
+
+    August/preseason events are intentionally excluded. Returning zero is useful
+    when the record has current-season preseason evidence but no regular-season
+    appearance yet; otherwise ``None`` means event history cannot answer the
+    sample-size question and the usage fallback should be tried.
+    """
+    events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
+    current = now or datetime.now(timezone.utc)
+    season_year = current.year if current.month >= 7 else current.year - 1
+    preseason_start = datetime(season_year, 7, 15, tzinfo=timezone.utc)
+    regular_start = datetime(season_year, 9, 1, tzinfo=timezone.utc)
+    regular_end = datetime(season_year + 1, 2, 16, tzinfo=timezone.utc)
+
+    saw_current_season_event = False
+    keys: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict) or str(event.get("eventType") or "").lower() != "game":
+            continue
+        started = _parse_event_time(event.get("startedAt") or event.get("eventDate") or event.get("date"))
+        if started is None or started < preseason_start or started >= regular_end:
+            continue
+        saw_current_season_event = True
+        if regular_start <= started < regular_end:
+            key = str(event.get("eventKey") or event.get("eventId") or started.isoformat())
+            keys.add(key)
+    if saw_current_season_event:
+        return min(18, len(keys))
+    return None
+
+
 def _recent_sample_games(record: dict[str, Any]) -> int | None:
     """Estimate how much current-season evidence is represented by raw signals.
 
-    Future collectors may write an exact recent-game count. Existing records can
-    be estimated conservatively from the enrichment ``usage`` signal, which is
-    starts*3 + games. Starters therefore contribute about four usage points per
-    game. For non-starters we use a more permissive divisor of two so rotational
-    players are not treated as if a full season were only a few appearances.
+    Exact collector counts win. Verified current-season regular-game events are
+    the next fallback, which protects players whose ESPN stat map omits games or
+    usage. Only then do we estimate from the legacy usage signal.
     """
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     for key in ("recentSeasonGames", "recentGames", "seasonGames"):
         direct = _number(summary.get(key))
         if direct is not None and direct >= 0:
             return min(18, int(round(direct)))
+
+    event_games = _regular_season_event_games(record)
+    if event_games is not None:
+        return event_games
 
     signals = _raw_signals(record)
     if signals is None:
@@ -149,8 +263,6 @@ def _refresh_nfl_percentiles(
             float(signals.get(key, 0.0)),
             [float(peer.get(key, 0.0)) for peer in position_pool],
         )
-    # Award points are already one comparable concept across positions, so keep
-    # that percentile league-wide rather than manufacturing a position premium.
     award_pool = universal_pool or position_pool
     raw_pcts["awardPoints"] = percentile(
         float(signals.get("awardPoints", 0.0)),
@@ -165,6 +277,9 @@ def _refresh_nfl_percentiles(
     summary["percentiles"] = {key: round(value, 4) for key, value in pcts.items()}
     summary["recentSampleGamesEstimate"] = sample_games
     summary["recentSampleWeight"] = round(sample_weight, 4)
+    for field in ("draftYear", "draftRound", "draftPick"):
+        if _positive_int(record.get(field)) is not None:
+            summary[field] = int(record[field])
     record["pricingEvidenceSummary"] = summary
 
     metrics = dict(record.get("activeMetrics") or {})
@@ -228,11 +343,17 @@ def _recent_overlay_pct(record: dict[str, Any]) -> float:
     return 0.0
 
 
-def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, int]:
+def repair_catalog(
+    path: Path,
+    *,
+    repaired_at: str | None = None,
+    draft_metadata_path: Path | None = None,
+) -> tuple[int, int]:
     if not path.exists():
         return 0, 0
     records = load_records(path)
     pools, universal_pool = _nfl_pools(records)
+    draft_metadata = _load_nfl_draft_metadata(draft_metadata_path or NFL_DRAFT_METADATA)
     stamp = repaired_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     repriced = 0
     synchronized = 0
@@ -241,6 +362,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         if not _is_nfl(record):
             continue
 
+        _recover_draft_metadata(record, draft_metadata)
         has_ranked_evidence = _refresh_nfl_percentiles(record, pools, universal_pool)
         valuation_score, fair, explanation = production_fair_value(record)
         if valuation_score is None or fair is None or explanation is None:
@@ -303,7 +425,7 @@ def main() -> int:
     repriced, synchronized = repair_catalog(args.catalog)
     print(
         f"Synchronized {synchronized:,} position-normalized NFL valuation(s); "
-        f"rebased {repriced:,} price(s) with early-season stability and no-debut Rookie IPO protection."
+        f"rebased {repriced:,} price(s) with live sample stability and no-debut Rookie IPO protection."
     )
     return 0
 
