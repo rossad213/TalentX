@@ -15,6 +15,7 @@ from nfl_production_pricing import production_fair_value  # noqa: E402
 from repair_nfl_production_prices import (  # noqa: E402
     EARLY_SEASON_FULL_WEIGHT_GAMES,
     REPAIR_VERSION,
+    _regular_season_event_games,
     _stabilize_early_season_percentiles,
     repair_catalog,
 )
@@ -122,6 +123,42 @@ class NFLFundamentalStabilityTests(unittest.TestCase):
         self.assertLess(stable["recentProduction"], 0.80)
         self.assertLess(stable["efficiency"], 0.60)
 
+    def test_regular_season_event_history_supplies_sample_when_usage_is_missing(self):
+        season_year = datetime.now(timezone.utc).year if datetime.now(timezone.utc).month >= 7 else datetime.now(timezone.utc).year - 1
+        record = self.record(
+            player_id="event-rb",
+            name="Event RB",
+            role="Running Back",
+            raw={"usage": 0.0},
+            starter=False,
+            priceEvents=[
+                {
+                    "eventType": "game",
+                    "eventKey": "preseason-1",
+                    "startedAt": f"{season_year}-08-20T00:00:00Z",
+                },
+                {
+                    "eventType": "game",
+                    "eventKey": "regular-1",
+                    "startedAt": f"{season_year}-09-13T17:00:00Z",
+                },
+            ],
+        )
+        self.assertEqual(_regular_season_event_games(record), 1)
+        raw_pcts = {
+            "recentProduction": 0.60,
+            "careerProduction": 0.92,
+            "efficiency": 0.65,
+            "usage": 0.45,
+            "careerUsage": 0.50,
+            "awardPoints": 0.50,
+        }
+        stable, games, weight = _stabilize_early_season_percentiles(record, raw_pcts)
+        self.assertEqual(games, 1)
+        self.assertAlmostEqual(weight, 1.0 / 6.0, places=4)
+        self.assertGreater(stable["recentProduction"], 0.85)
+        self.assertLess(stable["efficiency"], 0.55)
+
     def test_six_game_sample_receives_full_recent_weight(self):
         record = self.record(
             player_id="six-game-rb",
@@ -178,6 +215,67 @@ class NFLFundamentalStabilityTests(unittest.TestCase):
         self.assertEqual(explanation["rookieAnchorReconstruction"]["source"], "reconstructed-from-draft-metadata")
         self.assertGreater(fair, 15.0)
         self.assertGreater(fair, 6.0)
+
+    def test_catalog_recovers_factual_draft_metadata_before_pricing_no_debut_player(self):
+        current_year = datetime.now(timezone.utc).year
+        howard = self.record(
+            player_id="howard-live-shape",
+            name="Will Howard",
+            role="Quarterback",
+            raw={"recentProduction": 0.0, "careerProduction": 0.26, "efficiency": 0.0, "usage": 0.0},
+            starter=False,
+            experienceYears=2,
+            professionalGames=0,
+            marketPrice=5.0,
+            previousMarketPrice=5.0,
+            careerScore=45.0,
+            priceEvents=[
+                {
+                    "eventType": "game",
+                    "eventKey": "preseason-only",
+                    "startedAt": f"{current_year}-08-27T23:00:00Z",
+                    "priceBefore": 5.0,
+                    "priceAfter": 5.0,
+                }
+            ],
+        )
+        peer = self.record(
+            player_id="qb-peer",
+            name="QB Peer",
+            role="Quarterback",
+            raw={"recentProduction": 80.0, "careerProduction": 150.0, "efficiency": 90.0},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            path = directory / "sports.json"
+            metadata = directory / "draft.json"
+            path.write_text(json.dumps([howard, peer]), encoding="utf-8")
+            metadata.write_text(
+                json.dumps(
+                    {
+                        "records": [
+                            {
+                                "name": "Will Howard",
+                                "league": "NFL",
+                                "draftYear": current_year - 1,
+                                "draftRound": 6,
+                                "draftPick": 185,
+                            }
+                        ],
+                        "source": "https://www.nfl.com/draft/tracker/2025/teams/pittsburgh-steelers",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            repair_catalog(path, repaired_at="2026-09-16T00:00:00Z", draft_metadata_path=metadata)
+            updated = {item["id"]: item for item in json.loads(path.read_text(encoding="utf-8"))}
+
+        repaired = updated["howard-live-shape"]
+        self.assertEqual(repaired["draftPick"], 185)
+        self.assertEqual(repaired["draftRound"], 6)
+        self.assertGreater(repaired["nflProductionPricing"]["rookieInfluence"], 0.0)
+        self.assertGreater(repaired["marketPrice"], 6.0)
+        self.assertEqual(repaired["nflProductionRebaseVersion"], REPAIR_VERSION)
 
     def test_old_zero_game_draft_anchor_eventually_expires(self):
         current_year = datetime.now(timezone.utc).year
