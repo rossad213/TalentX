@@ -30,6 +30,7 @@ on:
       - "tests/test_nfl_rb_receiving_td_credit.py"
       - "tests/test_nfl_opportunity_protection.py"
       - "tests/test_nfl_production_pricing.py"
+      - "tests/test_nfl_fundamental_stability.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -106,6 +107,7 @@ jobs:
           tests/test_nfl_rb_receiving_td_credit.py
           tests/test_nfl_opportunity_protection.py
           tests/test_nfl_production_pricing.py
+          tests/test_nfl_fundamental_stability.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
