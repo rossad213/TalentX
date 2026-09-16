@@ -113,11 +113,11 @@ STAGE_RUNWAY = {
     "retired — legacy": 10.0,
 }
 
+# These are role-production signals. Generic usage/careerUsage are deliberately
+# excluded because the catalog's usage formula itself includes games played.
 MEANINGFUL_PRODUCTION_KEYS = (
     "recentProduction",
     "careerProduction",
-    "usage",
-    "careerUsage",
 )
 
 # Optional explicit volume fields let future collectors provide a cleaner handoff
@@ -167,11 +167,11 @@ def _percentiles(record: dict[str, Any]) -> dict[str, float]:
 
 
 def _has_meaningful_professional_evidence(record: dict[str, Any]) -> bool:
-    """Return whether the record contains real NFL usage/production evidence.
+    """Return whether the record contains real NFL role production evidence.
 
-    ``professionalGames`` alone is intentionally excluded. A player can dress or
-    appear on special teams without earning the offensive/defensive role evidence
-    that should replace a draft/pre-pro IPO anchor.
+    ``professionalGames`` and generic usage are intentionally excluded. A player
+    can dress or appear on special teams without earning the offensive/defensive
+    role evidence that should replace a draft/pre-pro IPO anchor.
     """
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     raw = summary.get("rawSignals") if isinstance(summary.get("rawSignals"), dict) else {}
