@@ -18,12 +18,15 @@ from repair_nfl_production_prices_safe import SAFE_REPAIR_VERSION, repair_catalo
 class NFLRookieUsageHandoffTests(unittest.TestCase):
     def hunter_shape(self, *, meaningful_usage: bool = False) -> dict:
         current_year = datetime.now(timezone.utc).year
+        # Generic usage includes games played in the catalog enrichment layer.
+        # Five appearances can therefore produce nonzero usage even with no RB
+        # carries/receptions; production must remain the handoff signal.
         raw = {
             "recentProduction": 0.0,
             "careerProduction": 0.0,
             "efficiency": 0.0,
-            "usage": 0.0,
-            "careerUsage": 0.0,
+            "usage": 5.0,
+            "careerUsage": 2.5,
             "awardPoints": 0.0,
         }
         if meaningful_usage:
@@ -66,10 +69,13 @@ class NFLRookieUsageHandoffTests(unittest.TestCase):
                 "availability": 82,
                 "audience": 40,
             },
-            "pricingEvidenceSummary": {"rawSignals": raw},
+            "pricingEvidenceSummary": {
+                "recentSampleGamesEstimate": 3,
+                "rawSignals": raw,
+            },
         }
 
-    def test_zero_usage_appearances_keep_time_decayed_rookie_ipo_support(self):
+    def test_appearance_derived_usage_keeps_time_decayed_rookie_ipo_support(self):
         record = self.hunter_shape(meaningful_usage=False)
         _, fair, explanation = production_fair_value(record)
 
@@ -83,7 +89,7 @@ class NFLRookieUsageHandoffTests(unittest.TestCase):
         )
         self.assertGreater(fair, 5.0)
 
-    def test_meaningful_usage_transitions_player_off_reconstructed_ipo(self):
+    def test_meaningful_role_production_transitions_player_off_reconstructed_ipo(self):
         record = self.hunter_shape(meaningful_usage=True)
         _, fair, explanation = production_fair_value(record)
 
@@ -92,7 +98,7 @@ class NFLRookieUsageHandoffTests(unittest.TestCase):
         self.assertEqual(explanation["rookieInfluence"], 0.0)
         self.assertAlmostEqual(fair, explanation["careerFairValue"], places=2)
 
-    def test_safe_repair_updates_old_zero_usage_handoff_even_with_safe_marker(self):
+    def test_safe_repair_updates_old_zero_production_handoff_even_with_safe_marker(self):
         record = self.hunter_shape(meaningful_usage=False)
         record["nflProductionPriceModelVersion"] = "3.0-nfl-position-normalized-sample-stable-rookie-ipo"
         record["nflProductionRebaseVersion"] = SAFE_REPAIR_VERSION
@@ -119,7 +125,7 @@ class NFLRookieUsageHandoffTests(unittest.TestCase):
         self.assertEqual(updated["nflProductionRebaseVersion"], SAFE_REPAIR_VERSION)
         self.assertEqual(updated["nflProductionRebase"]["reason"], "meaningful-usage-rookie-ipo-restored")
 
-    def test_safe_repair_does_not_reprice_meaningful_usage_player_for_model_bump_alone(self):
+    def test_safe_repair_does_not_reprice_meaningful_production_player_for_model_bump_alone(self):
         record = self.hunter_shape(meaningful_usage=True)
         record["marketPrice"] = 88.88
         record["previousMarketPrice"] = 88.88
