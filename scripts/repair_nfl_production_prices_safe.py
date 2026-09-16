@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Safely apply NFL live-sample and missing-draft repairs.
 
-This wrapper deliberately limits market-price rebases to records whose pricing
-inputs actually changed: either a previously missing recent-game sample can now
-be inferred from a verified regular-season event, or factual draft metadata was
-recovered for a no-debut player. Unaffected NFL listings keep their accumulated
-market state.
+Market prices are rebased only when pricing evidence actually changes. The
+wrapper also repairs state from the earlier broad v4 rebase: unaffected listings
+are restored to their pre-v4 market state, while evidence-backed v4 corrections
+are preserved.
 """
 from __future__ import annotations
 
@@ -18,18 +17,13 @@ from typing import Any
 import repair_nfl_production_prices as base
 from nfl_production_pricing import MODEL_VERSION, production_fair_value
 
-SAFE_REPAIR_VERSION = "4.1-nfl-selective-live-sample-and-draft-rebase"
+UNSAFE_REPAIR_VERSION = base.REPAIR_VERSION
+SAFE_REPAIR_VERSION = "4.2-nfl-selective-self-healing-rebase"
 EARLY_SEASON_FULL_WEIGHT_GAMES = base.EARLY_SEASON_FULL_WEIGHT_GAMES
 
 
 def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None = None) -> int | None:
-    """Count verified current-season regular-season game events only.
-
-    Preseason events are ignored and, by themselves, do not imply a zero-game
-    current-season sample. That distinction protects established players whose
-    provider stat map is incomplete while still letting real September games
-    supply a missing sample count.
-    """
+    """Count verified current-season regular-season game events only."""
     events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
     current = now or datetime.now(timezone.utc)
     season_year = current.year if current.month >= 7 else current.year - 1
@@ -48,7 +42,7 @@ def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None 
 
 
 def _recent_sample_games(record: dict[str, Any]) -> int | None:
-    """Prefer provider evidence; use verified game history only as a fallback."""
+    """Prefer provider evidence; use verified regular games only as a fallback."""
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     for key in ("recentSeasonGames", "recentGames", "seasonGames"):
         direct = base._number(summary.get(key))
@@ -65,6 +59,18 @@ def _recent_sample_games(record: dict[str, Any]) -> int | None:
     return _regular_season_event_games(record)
 
 
+def _uses_event_fallback(record: dict[str, Any]) -> bool:
+    summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
+    for key in ("recentSeasonGames", "recentGames", "seasonGames"):
+        direct = base._number(summary.get(key))
+        if direct is not None and direct >= 0:
+            return False
+    signals = base._raw_signals(record)
+    if signals is not None and max(0.0, float(signals.get("usage", 0.0))) > 0:
+        return False
+    return _regular_season_event_games(record) is not None
+
+
 def _sample_changed(previous: Any, current: Any) -> bool:
     new_value = base._number(current)
     if new_value is None:
@@ -73,6 +79,46 @@ def _sample_changed(previous: Any, current: Any) -> bool:
     if old_value is None:
         return True
     return int(round(old_value)) != int(round(new_value))
+
+
+def _has_local_draft_override(record: dict[str, Any], draft_metadata: dict[str, dict[str, Any]]) -> bool:
+    if max(0.0, base._number(record.get("professionalGames")) or 0.0) > 0:
+        return False
+    return base._name_key(record.get("name")) in draft_metadata
+
+
+def _undo_unsafe_v4_rebase(record: dict[str, Any], stamp: str) -> bool:
+    """Restore pre-v4 market state using the broad rebase's own audit fields."""
+    if str(record.get("nflProductionRebaseVersion") or "") != UNSAFE_REPAIR_VERSION:
+        return False
+    info = record.get("nflProductionRebase") if isinstance(record.get("nflProductionRebase"), dict) else {}
+    old_price = base._number(info.get("oldPrice"))
+    if old_price is None or old_price <= 0:
+        return False
+
+    bad_price = base._number(record.get("marketPrice"))
+    ratio = base._number(info.get("historyScaleRatio"))
+    if ratio is not None and ratio > 0:
+        base._scale_price_state(record, 1.0 / ratio)
+    record["marketPrice"] = round(old_price, 2)
+    record["nflProductionRebaseVersion"] = SAFE_REPAIR_VERSION
+    record["nflProductionRebasedAt"] = stamp
+    record["nflProductionRebase"] = {
+        "reason": "unaffected-broad-v4-rebase-restored",
+        "unsafeV4Price": round(bad_price, 2) if bad_price is not None else None,
+        "restoredPrice": round(old_price, 2),
+        "restoredFromVersion": UNSAFE_REPAIR_VERSION,
+    }
+    return True
+
+
+def _mark_preserved_unsafe_v4(record: dict[str, Any], stamp: str, reason: str) -> None:
+    info = dict(record.get("nflProductionRebase") or {})
+    info["reason"] = reason
+    info["preservedFromVersion"] = UNSAFE_REPAIR_VERSION
+    record["nflProductionRebase"] = info
+    record["nflProductionRebaseVersion"] = SAFE_REPAIR_VERSION
+    record["nflProductionRebasedAt"] = stamp
 
 
 def repair_catalog(
@@ -84,7 +130,6 @@ def repair_catalog(
     if not path.exists():
         return 0, 0, 0, 0
 
-    # Make the base percentile refresher use the safe inference order above.
     base._regular_season_event_games = _regular_season_event_games
     base._recent_sample_games = _recent_sample_games
 
@@ -101,6 +146,13 @@ def repair_catalog(
     for record in records:
         if not base._is_nfl(record):
             continue
+
+        was_unsafe_v4 = str(record.get("nflProductionRebaseVersion") or "") == UNSAFE_REPAIR_VERSION
+        event_fallback_needed = _uses_event_fallback(record)
+        local_draft_override = _has_local_draft_override(record, draft_metadata)
+        preserve_unsafe = was_unsafe_v4 and (event_fallback_needed or local_draft_override)
+        if was_unsafe_v4 and not preserve_unsafe:
+            _undo_unsafe_v4_rebase(record, stamp)
 
         prior_summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
         prior_sample = prior_summary.get("recentSampleGamesEstimate")
@@ -129,12 +181,21 @@ def repair_catalog(
         record["modelTargetPrice"] = round(fair, 2)
         synchronized += 1
 
+        # If broad v4 already made exactly the correction now considered valid,
+        # keep that price but convert its marker to the safe version.
+        if preserve_unsafe and not sample_repaired and not draft_recovered:
+            reason = "missing-sample-recovered" if event_fallback_needed else "missing-draft-metadata-recovered"
+            if event_fallback_needed and local_draft_override:
+                reason = "missing-sample-and-draft-metadata-recovered"
+            _mark_preserved_unsafe_v4(record, stamp, reason)
+            continue
+
         rookie_influence = base._number(explanation.get("rookieInfluence")) or 0.0
         evidence_changed = sample_repaired or draft_recovered
         can_reprice = evidence_changed and (has_ranked_evidence or rookie_influence > 0.0)
         if not can_reprice:
             continue
-        if str(record.get("nflProductionRebaseVersion") or "") == SAFE_REPAIR_VERSION:
+        if str(record.get("nflProductionRebaseVersion") or "") == SAFE_REPAIR_VERSION and not was_unsafe_v4:
             continue
 
         current = base._number(record.get("marketPrice"))
