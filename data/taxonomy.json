@@ -142,6 +142,7 @@
         "Beauty",
         "Beauty / Business",
         "Beauty / Lifestyle",
+        "Blogging",
         "Business / Interviews",
         "Comedy",
         "Comedy / Entertainment",
@@ -152,6 +153,7 @@
         "Commentary",
         "Commentary / Comedy",
         "Creator Economy / Interviews",
+        "Digital Content",
         "Education / Literature",
         "Education / Productivity",
         "Entertainment",
@@ -181,14 +183,17 @@
         "Lifestyle / Food",
         "Lifestyle / Music",
         "Lifestyle / Podcasting",
+        "Livestreaming",
         "Narrative Entertainment",
         "News / Commentary",
         "Paranormal / Entertainment",
+        "Podcasting",
         "Podcasting / Commentary",
         "Science / Education",
         "Science / Engineering",
         "Self-Development",
         "Self-Development / Interviews",
+        "Social Media",
         "Sports / Entertainment",
         "Streaming / Entertainment",
         "Streaming / Music",
@@ -199,7 +204,11 @@
         "Travel / Adventure",
         "Travel / Education",
         "Travel / Lifestyle",
-        "Visual Effects / Entertainment"
+        "Twitch",
+        "VTubing",
+        "Vlogging",
+        "Visual Effects / Entertainment",
+        "YouTube"
       ],
       "filters": [
         "platform",
@@ -254,13 +263,14 @@
         },
         "Creator": {
           "weights": {
-            "audience": 0.25,
+            "audience": 0.3,
             "performance": 0.25,
-            "potential": 0.2,
-            "consistency": 0.15,
-            "achievements": 0.15
+            "achievements": 0.2,
+            "potential": 0.1,
+            "consistency": 0.1,
+            "careerRunway": 0.05
           },
-          "description": "Audience reach, engagement quality, growth, retention and consistency, and commercial strength."
+          "description": "Verified audience/reach production, recent engagement/view production, sustained career production, growth/momentum, output consistency, and modest career runway. Wikidata identity data is not treated as production."
         }
       },
       "calibration": {

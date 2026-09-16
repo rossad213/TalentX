@@ -7,15 +7,16 @@ creator, YouTuber, streamer, influencer, podcaster, vlogger, or related creator.
 It is intentionally isolated from Athlete, Music, and Actor expansion so Creator
 growth cannot shrink or rewrite the other TalentX categories.
 
-Wikidata is not a live employment roster. Generated records therefore use an
-"active-status proxy" and clearly state that the evidence is occupation/current-
-activity proxy data rather than a real-time platform roster.
+Wikidata is used here for identity, creator-type discovery, rough career tenure,
+and platform-resolution hints. It is not treated as creator production. Records
+without verified platform production therefore receive a conservative provisional
+prior and deliberately low pricing confidence until a production collector (for
+example the YouTube RSS workflow) supplies direct evidence.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import re
 import time
 from collections import Counter
@@ -55,26 +56,17 @@ CREATOR_OCCUPATIONS: dict[str, tuple[str, str, str]] = {
     "Q8246794": ("Blogger", "Blogging", "Web / social platforms"),
 }
 
-DISCIPLINE_PRIORITY = {
-    "YouTube": 10,
-    "Twitch": 9,
-    "VTubing": 8,
-    "Livestreaming": 7,
-    "Digital Content": 6,
-    "Social Media": 5,
-    "Podcasting": 4,
-    "Vlogging": 3,
-    "Blogging": 2,
-}
+# A platform-specific occupation may be used when it is the only specific signal
+# available. Conflicting platform occupations are intentionally classified as
+# multi-platform rather than resolved by an arbitrary priority list.
+GENERIC_CREATOR_DISCIPLINES = {"Digital Content", "Social Media"}
 
 
 def creator_candidate_is_eligible(candidate: dict[str, Any], minimum_sitelinks: int, recent_cutoff: int) -> bool:
-    """Use a creator-specific current/notability proxy.
+    """Use a creator-specific current/notability proxy for catalog inclusion only.
 
-    Creator occupations are themselves strong public-role evidence, so unlike the
-    actor/music discovery layer we do not require 40+ sitelinks when a work-start
-    date is absent. That keeps the pool broad enough to represent internet-native
-    creators whose Wikidata biographies are smaller than traditional celebrities.
+    Sitelinks help decide whether a public identity is sufficiently established to
+    list. They do not feed Creator production metrics or pricing.
     """
     name = str(candidate.get("name") or "").strip()
     qid = str(candidate.get("qid") or "")
@@ -93,28 +85,76 @@ def creator_candidate_is_eligible(candidate: dict[str, Any], minimum_sitelinks: 
     return True
 
 
+def _occupation_evidence(candidate: dict[str, Any]) -> dict[str, str]:
+    return {
+        "discipline": str(candidate.get("discipline") or "Digital Content"),
+        "role": str(candidate.get("role") or "Content creator"),
+        "platform": str(candidate.get("platform") or "Digital platforms"),
+    }
+
+
+def _resolve_creator_classification(evidence: list[dict[str, str]]) -> tuple[str, str, str]:
+    """Resolve Creator labels without inventing a primary platform.
+
+    One unambiguous platform-specific occupation can supply a useful label. When
+    Wikidata contains multiple specific platform/activity occupations, TalentX
+    keeps the record multi-platform until direct platform evidence identifies a
+    primary activity.
+    """
+    unique: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for item in evidence:
+        key = (item["discipline"], item["role"], item["platform"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+
+    specific = [item for item in unique if item["discipline"] not in GENERIC_CREATOR_DISCIPLINES]
+    specific_disciplines = {item["discipline"] for item in specific}
+    specific_platforms = {item["platform"] for item in specific}
+    if len(specific_disciplines) == 1 and len(specific_platforms) == 1:
+        chosen = specific[0]
+        return chosen["discipline"], chosen["role"], chosen["platform"]
+    if len(specific_disciplines) > 1 or len(specific_platforms) > 1:
+        return "Digital Content", "Multi-platform creator", "Digital platforms"
+    if unique:
+        chosen = unique[0]
+        return chosen["discipline"], chosen["role"], chosen["platform"]
+    return "Digital Content", "Content creator", "Digital platforms"
+
+
 def merge_creator_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deduplicate creator identities while keeping their strongest platform role."""
+    """Deduplicate Creator identities while retaining all occupation evidence."""
     by_qid: dict[str, dict[str, Any]] = {}
     for candidate in candidates:
         qid = str(candidate.get("qid") or "")
         if not qid:
             continue
+        evidence = _occupation_evidence(candidate)
         existing = by_qid.get(qid)
         if existing is None:
-            by_qid[qid] = dict(candidate)
+            created = dict(candidate)
+            created["creatorOccupationEvidence"] = [evidence]
+            by_qid[qid] = created
             continue
         if int(candidate.get("sitelinks") or 0) > int(existing.get("sitelinks") or 0):
             existing["sitelinks"] = candidate.get("sitelinks")
-        if DISCIPLINE_PRIORITY.get(str(candidate.get("discipline") or ""), 0) > DISCIPLINE_PRIORITY.get(str(existing.get("discipline") or ""), 0):
-            existing["discipline"] = candidate.get("discipline")
-            existing["role"] = candidate.get("role")
-            existing["platform"] = candidate.get("platform")
+        evidence_rows = existing.setdefault("creatorOccupationEvidence", [])
+        if evidence not in evidence_rows:
+            evidence_rows.append(evidence)
         for key in ("birthYear", "workStartYear", "workEndYear"):
             if existing.get(key) is None and candidate.get(key) is not None:
                 existing[key] = candidate.get(key)
         if existing.get("country") == "Not listed" and candidate.get("country") not in {None, "", "Not listed"}:
             existing["country"] = candidate.get("country")
+
+    for row in by_qid.values():
+        evidence = row.get("creatorOccupationEvidence") if isinstance(row.get("creatorOccupationEvidence"), list) else []
+        discipline, role, platform = _resolve_creator_classification(evidence)
+        row["discipline"] = discipline
+        row["role"] = role
+        row["platform"] = platform
+
     return sorted(
         by_qid.values(),
         key=lambda row: (-int(row.get("sitelinks") or 0), str(row.get("name") or "")),
@@ -122,34 +162,40 @@ def merge_creator_candidates(candidates: list[dict[str, Any]]) -> list[dict[str,
 
 
 def creator_metrics(candidate: dict[str, Any]) -> dict[str, float]:
+    """Return a conservative Creator prior that contains no fake production.
+
+    Audience, recent performance, sustained production, and growth are neutral
+    until verified platform evidence exists. Years active can modestly inform
+    career continuity, and age can inform runway, because those are the only two
+    pricing concepts that Wikidata identity/activity fields can reasonably support.
+    """
     current_year = datetime.now(timezone.utc).year
-    sitelinks = max(0, int(candidate.get("sitelinks") or 0))
     birth_year = candidate.get("birthYear")
     start_year = candidate.get("workStartYear")
     age = current_year - birth_year if isinstance(birth_year, int) else None
     years_active = max(0, current_year - start_year) if isinstance(start_year, int) else None
 
-    audience = clamp(38 + math.log1p(sitelinks) * 10.2, 38, 97)
-    consistency = clamp(50 + min(36, (years_active or 4) * 2.0), 48, 94)
-    achievements = clamp(43 + math.log1p(sitelinks) * 7.7 + min(10, (years_active or 0) * .3), 43, 95)
-    potential = clamp(94 - max(0, (age or 27) - 20) * 2.15, 35, 96)
-    performance = clamp(audience * .35 + achievements * .30 + consistency * .35, 45, 96)
+    consistency = 50.0 if years_active is None else clamp(45 + min(years_active, 20) * 1.0, 45, 65)
+    career_runway = 55.0 if age is None else clamp(88 - max(0, age - 20) * 1.8, 30, 88)
     return {
-        "audience": round(audience, 2),
-        "performance": round(performance, 2),
-        "potential": round(potential, 2),
+        "audience": 50.0,
+        "performance": 50.0,
+        "achievements": 50.0,
+        "potential": 50.0,
         "consistency": round(consistency, 2),
-        "achievements": round(achievements, 2),
+        "careerRunway": round(career_runway, 2),
         "availability": 80.0,
     }
 
 
 def creator_confidence(candidate: dict[str, Any]) -> float:
-    sitelinks = max(0, int(candidate.get("sitelinks") or 0))
+    """Confidence in a provisional Creator listing, not in Creator production."""
     completeness = sum(candidate.get(key) is not None for key in ("birthYear", "workStartYear"))
     has_country = candidate.get("country") not in {None, "", "Not listed"}
-    value = .68 + min(.12, math.log1p(sitelinks) / 55) + completeness * .035 + int(has_country) * .025
-    return round(float(clamp(value, .68, .90)), 2)
+    evidence = candidate.get("creatorOccupationEvidence")
+    occupation_rows = len(evidence) if isinstance(evidence, list) else 1
+    value = .32 + completeness * .05 + int(has_country) * .03 + min(.05, max(0, occupation_rows - 1) * .02)
+    return round(float(clamp(value, .32, .50)), 2)
 
 
 def make_creator_record(
@@ -176,7 +222,7 @@ def make_creator_record(
     platform = str(candidate.get("platform") or "Digital platforms")
     source_url = f"https://www.wikidata.org/wiki/{qid}"
     confidence = creator_confidence(candidate)
-    proxy_note = "Living-person creator-occupation proxy; not a live platform roster"
+    proxy_note = "Creator identity/activity proxy; platform production not yet verified"
 
     record: dict[str, Any] = {
         "id": profile_id,
@@ -200,23 +246,24 @@ def make_creator_record(
         "sourceNamespace": "wikidata-creator",
         "dataConfidence": confidence,
         "pricingConfidence": confidence,
-        "pricingDataStatus": "Public creator identity/activity evidence; platform performance evidence partial",
+        "pricingDataStatus": "Provisional — creator identity/activity evidence only; platform production unverified",
         "pricingEvidence": [source_url],
         "activeMetrics": creator_metrics(candidate),
         "legacyMetrics": {},
-        "modelType": "Active career model",
+        "modelType": "Creator provisional prior",
         "avatar": initials(name),
         "description": f"{role} associated with {discipline}. {proxy_note}.",
         "searchText": " ".join([
             name, "Creator", discipline, "Digital Media", platform, role,
-            str(candidate.get("country") or ""), "Current active",
+            str(candidate.get("country") or ""), "Current active provisional",
         ]).lower(),
         "benchmarkRank": rank,
         "benchmarkPoolSize": pool_size,
         "wikidataSitelinks": int(candidate.get("sitelinks") or 0),
         "wikidataWorkStartYear": start_year,
         "wikidataWorkEndYear": candidate.get("workEndYear"),
-        "creatorDiscoveryFrameworkVersion": "1.0",
+        "creatorOccupationEvidence": candidate.get("creatorOccupationEvidence", []),
+        "creatorDiscoveryFrameworkVersion": "2.0",
         "discoveryEvidence": proxy_note,
     }
     if age is not None:
@@ -360,7 +407,7 @@ def main() -> int:
     )
     counts = Counter(str(record.get("primaryCategory") or "") for record in combined)
     manifest = {
-        "version": "1.0",
+        "version": "2.0",
         "generatedAt": verified_at,
         "source": SPARQL_ENDPOINT,
         "activityProxyCutoffYear": recent_cutoff,
@@ -377,8 +424,9 @@ def main() -> int:
         ],
         "sourceErrors": source_errors,
         "statusLimitation": (
-            "Wikidata is not a live platform roster. Creator eligibility uses living-person, "
-            "explicit creator occupation, sitelink, and work-end proxies and should be refreshed regularly."
+            "Wikidata is used for Creator identity, occupation, and activity hints only. "
+            "Sitelinks are not treated as audience or production. New records remain low-confidence "
+            "provisional listings until direct platform production evidence is collected."
         ),
     }
 

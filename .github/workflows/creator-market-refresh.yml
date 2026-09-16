@@ -11,6 +11,7 @@ on:
       - "scripts/creator_youtube_rss_refresh_calibrated.py"
       - "scripts/market_outcome_calibration_v2.py"
       - "scripts/reprice_category_outcomes_v2.py"
+      - "scripts/reprice_creator_fundamentals.py"
       - "scripts/prepare_creator_wikipedia_identities.py"
       - "scripts/discover_creators_only.py"
       - "scripts/expand_creator_market.py"
@@ -21,6 +22,7 @@ on:
       - "tests/test_creator_youtube_refresh.py"
       - "tests/test_category_breakout_calibration.py"
       - "tests/test_discover_creators_only.py"
+      - "tests/test_reprice_creator_fundamentals.py"
       - "tests/test_category_market_store.py"
   workflow_run:
     workflows: ["Build current catalog baseline"]
@@ -90,7 +92,7 @@ jobs:
           tests/test_creator_attention_refresh.py
           tests/test_creator_youtube_refresh.py
           tests/test_category_breakout_calibration.py
-          tests/test_discover_creators_only.py
+          tests/test_reprice_creator_fundamentals.py
           tests/test_category_market_store.py -v
       - name: Expand Creator coverage toward 1,000
         run: >-
@@ -134,6 +136,12 @@ jobs:
           --catalog data/market/creators.json
           --category creators
           --youtube-manifest data/creator_youtube_manifest.json
+      - name: Rebuild Creator fundamentals from verified production
+        run: >-
+          python scripts/reprice_creator_fundamentals.py
+          --catalog data/market/creators.json
+          --youtube-manifest data/creator_youtube_manifest.json
+          --summary data/creator_fundamental_summary.json
       - name: Append durable Creator events
         run: python scripts/append_game_event_history.py --catalog data/market/creators.json
       - name: Append dated Creator history
@@ -146,4 +154,5 @@ jobs:
             data/creator_attention_manifest.json
             data/creator_youtube_manifest.json
             data/creator_discovery_manifest.json
+            data/creator_fundamental_summary.json
           retention-days: 14
