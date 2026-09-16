@@ -186,14 +186,17 @@ class NFLSafeRebaseTests(unittest.TestCase):
         self.assertEqual(updated["nflProductionRebase"]["reason"], "unaffected-broad-v4-rebase-restored")
 
     def test_evidence_backed_broad_v4_rebase_is_preserved(self):
+        # Use a non-RB fixture so this test isolates broad-v4 preservation rather
+        # than intentionally triggering the RB cohort calibration layer.
         affected = self.record(
             "unsafe-affected",
-            "Unsafe Affected RB",
+            "Unsafe Affected QB",
             usage=0.0,
             recent=20.0,
             career=200.0,
             old_sample=1,
-            event_stats={"rushingYards": 25.0, "car": 8.0},
+            role="Quarterback",
+            event_stats={"passingYards": 210.0, "passingTouchdowns": 1.0, "interceptions": 1.0},
         )
         affected["marketPrice"] = 111.11
         affected["nflProductionRebaseVersion"] = UNSAFE_REPAIR_VERSION
