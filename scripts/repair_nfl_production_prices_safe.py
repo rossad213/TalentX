@@ -15,7 +15,11 @@ from pathlib import Path
 from typing import Any
 
 import repair_nfl_production_prices as base
-from nfl_production_pricing import MODEL_VERSION, production_fair_value
+from nfl_production_pricing import (
+    MODEL_VERSION,
+    _has_meaningful_professional_evidence,
+    production_fair_value,
+)
 
 UNSAFE_REPAIR_VERSION = base.REPAIR_VERSION
 SAFE_REPAIR_VERSION = "4.2-nfl-selective-self-healing-rebase"
@@ -87,6 +91,27 @@ def _has_local_draft_override(record: dict[str, Any], draft_metadata: dict[str, 
     return base._name_key(record.get("name")) in draft_metadata
 
 
+def _needs_meaningful_usage_handoff_repair(
+    record: dict[str, Any], prior_model_version: str, explanation: dict[str, Any]
+) -> bool:
+    """Detect players whose appearances incorrectly displaced their Rookie IPO.
+
+    This is intentionally narrow: at least one professional appearance, no real
+    NFL production/usage evidence, a live IPO anchor, and an older model version.
+    It therefore fixes Hunter-like zero-usage appearances without repricing the
+    wider NFL catalog.
+    """
+    if prior_model_version == MODEL_VERSION:
+        return False
+    if max(0.0, base._number(record.get("professionalGames")) or 0.0) <= 0:
+        return False
+    if _has_meaningful_professional_evidence(record):
+        return False
+    anchor = base._number(explanation.get("rookieIpoAnchor"))
+    influence = base._number(explanation.get("rookieInfluence"))
+    return anchor is not None and anchor > 0 and influence is not None and influence > 0
+
+
 def _undo_unsafe_v4_rebase(record: dict[str, Any], stamp: str) -> bool:
     """Restore pre-v4 market state using the broad rebase's own audit fields."""
     if str(record.get("nflProductionRebaseVersion") or "") != UNSAFE_REPAIR_VERSION:
@@ -147,6 +172,7 @@ def repair_catalog(
         if not base._is_nfl(record):
             continue
 
+        prior_model_version = str(record.get("nflProductionPriceModelVersion") or "")
         was_unsafe_v4 = str(record.get("nflProductionRebaseVersion") or "") == UNSAFE_REPAIR_VERSION
         event_fallback_needed = _uses_event_fallback(record)
         local_draft_override = _has_local_draft_override(record, draft_metadata)
@@ -181,21 +207,28 @@ def repair_catalog(
         record["modelTargetPrice"] = round(fair, 2)
         synchronized += 1
 
+        rookie_influence = base._number(explanation.get("rookieInfluence")) or 0.0
+        handoff_repaired = _needs_meaningful_usage_handoff_repair(record, prior_model_version, explanation)
+
         # If broad v4 already made exactly the correction now considered valid,
-        # keep that price but convert its marker to the safe version.
-        if preserve_unsafe and not sample_repaired and not draft_recovered:
+        # keep that price but convert its marker to the safe version. A newly
+        # detected meaningful-usage handoff must still be repriced once.
+        if preserve_unsafe and not sample_repaired and not draft_recovered and not handoff_repaired:
             reason = "missing-sample-recovered" if event_fallback_needed else "missing-draft-metadata-recovered"
             if event_fallback_needed and local_draft_override:
                 reason = "missing-sample-and-draft-metadata-recovered"
             _mark_preserved_unsafe_v4(record, stamp, reason)
             continue
 
-        rookie_influence = base._number(explanation.get("rookieInfluence")) or 0.0
-        evidence_changed = sample_repaired or draft_recovered
+        evidence_changed = sample_repaired or draft_recovered or handoff_repaired
         can_reprice = evidence_changed and (has_ranked_evidence or rookie_influence > 0.0)
         if not can_reprice:
             continue
-        if str(record.get("nflProductionRebaseVersion") or "") == SAFE_REPAIR_VERSION and not was_unsafe_v4:
+        if (
+            str(record.get("nflProductionRebaseVersion") or "") == SAFE_REPAIR_VERSION
+            and not was_unsafe_v4
+            and not handoff_repaired
+        ):
             continue
 
         current = base._number(record.get("marketPrice"))
@@ -211,7 +244,12 @@ def repair_catalog(
         record["nflProductionRebaseVersion"] = SAFE_REPAIR_VERSION
         record["nflProductionRebasedAt"] = stamp
         cohort = str((record.get("pricingEvidenceSummary") or {}).get("cohort") or "NFL normalized")
-        reason = "missing-sample-recovered" if sample_repaired else "missing-draft-metadata-recovered"
+        if handoff_repaired:
+            reason = "meaningful-usage-rookie-ipo-restored"
+        elif sample_repaired:
+            reason = "missing-sample-recovered"
+        else:
+            reason = "missing-draft-metadata-recovered"
         if sample_repaired and draft_recovered:
             reason = "missing-sample-and-draft-metadata-recovered"
         record["nflProductionRebase"] = {
