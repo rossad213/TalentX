@@ -7,8 +7,17 @@
       "league": "NFL",
       "draftYear": 2025,
       "draftRound": 6,
-      "draftPick": 185
+      "draftPick": 185,
+      "sourceUrl": "https://www.nfl.com/draft/tracker/2025/teams/pittsburgh-steelers"
+    },
+    {
+      "name": "Jarquez Hunter",
+      "league": "NFL",
+      "draftYear": 2025,
+      "draftRound": 4,
+      "draftPick": 117,
+      "sourceUrl": "https://www.nfl.com/draft/tracker/2025/rounds/4"
     }
   ],
-  "source": "https://www.nfl.com/draft/tracker/2025/teams/pittsburgh-steelers"
+  "source": "https://www.nfl.com/draft/tracker/2025"
 }
