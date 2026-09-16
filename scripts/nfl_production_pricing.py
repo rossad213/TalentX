@@ -167,30 +167,83 @@ def _percentiles(record: dict[str, Any]) -> dict[str, float]:
     return output
 
 
-def _has_meaningful_professional_evidence(record: dict[str, Any]) -> bool:
-    """Return whether the record contains real NFL role production evidence.
+def _parse_event_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
-    ``professionalGames`` and generic usage are intentionally excluded as role
-    signals. Zero-game records are never treated as having established NFL role
-    evidence, and tiny provider/preseason production noise does not end IPO support.
+
+def _verified_regular_game_count(record: dict[str, Any]) -> int:
+    """Count durable NFL regular/postseason game events while excluding preseason."""
+    events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
+    keys: set[str] = set()
+    for event in events:
+        if not isinstance(event, dict) or str(event.get("eventType") or "").lower() != "game":
+            continue
+        started = _parse_event_time(event.get("startedAt") or event.get("eventDate") or event.get("date"))
+        if started is None:
+            continue
+        # NFL preseason evidence is primarily August. September-February game
+        # events are durable professional evidence, including postseason games.
+        if 3 <= started.month <= 8:
+            continue
+        key = str(event.get("eventKey") or event.get("eventId") or started.isoformat())
+        keys.add(key)
+    return len(keys)
+
+
+def _reported_sample_games(record: dict[str, Any]) -> float:
+    summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
+    for key in ("recentSampleGamesEstimate", "recentSeasonGames", "recentGames", "seasonGames"):
+        value = _number(summary.get(key))
+        if value is not None and value > 0:
+            return float(value)
+    return 0.0
+
+
+def _has_meaningful_professional_evidence(record: dict[str, Any]) -> bool:
+    """Return whether the record contains verified, material NFL role evidence.
+
+    Generic usage is not enough because it includes games played. Tiny production
+    values can also be provider/preseason noise. Material production must pair with
+    a professional-game signal, unless an explicit professional volume field proves
+    real touches/attempts/targets/snaps directly.
     """
-    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
-    if games <= 0:
-        return False
+    if any((_number(record.get(key)) or 0.0) > 0.0 for key in MEANINGFUL_VOLUME_FIELDS):
+        return True
 
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     raw = summary.get("rawSignals") if isinstance(summary.get("rawSignals"), dict) else {}
-    if any(abs(_number(raw.get(key)) or 0.0) >= MEANINGFUL_PRODUCTION_MIN for key in MEANINGFUL_PRODUCTION_KEYS):
+    material_production = any(
+        abs(_number(raw.get(key)) or 0.0) >= MEANINGFUL_PRODUCTION_MIN for key in MEANINGFUL_PRODUCTION_KEYS
+    )
+    if not material_production:
+        return False
+
+    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
+    if games > 0:
         return True
-    if any((_number(record.get(key)) or 0.0) > 0.0 for key in MEANINGFUL_VOLUME_FIELDS):
+    if _reported_sample_games(record) > 0:
         return True
-    return False
+    return _verified_regular_game_count(record) > 0
 
 
 def _rookie_evidence_games(record: dict[str, Any]) -> float:
-    """Games used for IPO decay, counting appearances only after role evidence exists."""
+    """Games used for IPO decay, with verified history repairing stale game counts."""
+    if not _has_meaningful_professional_evidence(record):
+        return 0.0
     games = max(0.0, _number(record.get("professionalGames")) or 0.0)
-    return games if _has_meaningful_professional_evidence(record) else 0.0
+    sample = _reported_sample_games(record)
+    verified = float(_verified_regular_game_count(record))
+    # Explicit volume is meaningful even if every game-count field is missing.
+    return max(games, sample, verified, 1.0)
 
 
 def production_components(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -476,7 +529,7 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
         "pricingPrinciple": (
             "position-normalized production-led NFL value; early-season fundamentals are sample-stabilized; "
             "modest achievement, career-runway, and availability context; no fame or starter premium; "
-            "Rookie IPO fades with meaningful professional role evidence and time since draft"
+            "Rookie IPO fades with verified meaningful professional role evidence and time since draft"
         ),
         "modelVersion": MODEL_VERSION,
     }
