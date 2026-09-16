@@ -10,9 +10,10 @@ Early-season fundamentals are stabilized upstream so one or two games do not
 silently replace an established player's durable career baseline. Game-to-game
 surprise remains the event engine's job.
 
-Drafted players who have not made an NFL debut retain a decaying IPO anchor even
-when roster systems label them as second-year players. Professional games, not
-roster tenure alone, determine how quickly the draft/pre-pro anchor fades.
+Drafted players who have not established meaningful NFL production or usage retain
+a decaying IPO anchor even when they have dressed for games or roster systems label
+them as second-year players. Meaningful professional evidence, not activation alone,
+determines how quickly the draft/pre-pro anchor fades.
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-MODEL_VERSION = "3.0-nfl-position-normalized-sample-stable-rookie-ipo"
+MODEL_VERSION = "3.1-nfl-position-normalized-sample-stable-meaningful-usage-rookie-ipo"
 
 PRICE_FLOOR = 4.0
 PRICE_SCALE = 310.0
@@ -59,9 +60,9 @@ NFL_ROOKIE_GAME_BANDS = (
     (34.0, 0.00),
 )
 
-# A player who still has zero NFL games should not lose all pre-pro value merely
-# because the roster feed says "2 years". The anchor decays by time as well as
-# games so a player cannot remain a rookie indefinitely.
+# A player without meaningful NFL usage should not lose all pre-pro value merely
+# because the roster feed says "2 years" or counts inactive/zero-usage appearances.
+# The anchor still decays by time so a player cannot remain a rookie indefinitely.
 NO_DEBUT_DRAFT_AGE_CAPS = {
     0: 1.00,
     1: 0.60,
@@ -112,6 +113,26 @@ STAGE_RUNWAY = {
     "retired — legacy": 10.0,
 }
 
+MEANINGFUL_PRODUCTION_KEYS = (
+    "recentProduction",
+    "careerProduction",
+    "usage",
+    "careerUsage",
+)
+
+# Optional explicit volume fields let future collectors provide a cleaner handoff
+# than aggregate production scores without changing this model again.
+MEANINGFUL_VOLUME_FIELDS = (
+    "professionalTouches",
+    "careerTouches",
+    "professionalAttempts",
+    "careerAttempts",
+    "professionalTargets",
+    "careerTargets",
+    "professionalSnaps",
+    "careerSnaps",
+)
+
 
 def _number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
@@ -143,6 +164,28 @@ def _percentiles(record: dict[str, Any]) -> dict[str, float]:
         if value is not None:
             output[key] = max(0.0, min(1.0, value)) * 100.0
     return output
+
+
+def _has_meaningful_professional_evidence(record: dict[str, Any]) -> bool:
+    """Return whether the record contains real NFL usage/production evidence.
+
+    ``professionalGames`` alone is intentionally excluded. A player can dress or
+    appear on special teams without earning the offensive/defensive role evidence
+    that should replace a draft/pre-pro IPO anchor.
+    """
+    summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
+    raw = summary.get("rawSignals") if isinstance(summary.get("rawSignals"), dict) else {}
+    if any(abs(_number(raw.get(key)) or 0.0) > 1e-9 for key in MEANINGFUL_PRODUCTION_KEYS):
+        return True
+    if any((_number(record.get(key)) or 0.0) > 0.0 for key in MEANINGFUL_VOLUME_FIELDS):
+        return True
+    return False
+
+
+def _rookie_evidence_games(record: dict[str, Any]) -> float:
+    """Games used for IPO decay, counting appearances only after role evidence exists."""
+    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
+    return games if _has_meaningful_professional_evidence(record) else 0.0
 
 
 def production_components(record: dict[str, Any]) -> dict[str, Any] | None:
@@ -300,12 +343,11 @@ def _derived_rookie_anchor(record: dict[str, Any]) -> tuple[float | None, dict[s
     """Reconstruct a missing NFL IPO anchor from factual draft metadata.
 
     This is used when an upstream generic-pricing pass removed ``rookiePricing``
-    because roster tenure reached two years even though the player still has zero
-    NFL games. It never invents draft position or a manual price.
+    even though the player has not established meaningful NFL role evidence. It
+    never invents draft position or a manual price.
     """
     draft = _draft_capital_score(record)
-    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
-    if draft is None or games > 0:
+    if draft is None or _has_meaningful_professional_evidence(record):
         return None, None
 
     metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
@@ -382,7 +424,7 @@ def _game_decay(games: float) -> float:
 def rookie_influence(record: dict[str, Any], saved_max: float) -> float:
     if saved_max <= 0:
         return 0.0
-    games = max(0.0, _number(record.get("professionalGames")) or 0.0)
+    games = _rookie_evidence_games(record)
     by_games = _game_decay(games)
     by_time = _draft_age_cap(record)
     return round(max(0.0, min(saved_max, by_games, by_time)), 4)
@@ -423,12 +465,13 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
         "careerFairValue": round(career_fair, 2),
         "rookieIpoAnchor": round(rookie_anchor, 2) if rookie_anchor is not None else None,
         "rookieInfluence": round(ipo_influence, 4),
+        "rookieEvidenceGames": round(_rookie_evidence_games(record), 2),
         "rookieAnchorReconstruction": reconstructed,
         "fairValue": round(fair, 2),
         "pricingPrinciple": (
             "position-normalized production-led NFL value; early-season fundamentals are sample-stabilized; "
             "modest achievement, career-runway, and availability context; no fame or starter premium; "
-            "Rookie IPO fades with actual professional games and time since draft"
+            "Rookie IPO fades with meaningful professional role evidence and time since draft"
         ),
         "modelVersion": MODEL_VERSION,
     }
