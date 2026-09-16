@@ -14,6 +14,7 @@ on:
       - "scripts/nfl_production_pricing.py"
       - "scripts/repair_nfl_persisted_opportunity_prices.py"
       - "scripts/repair_nfl_production_prices.py"
+      - "scripts/repair_nfl_production_prices_safe.py"
       - "scripts/repair_mlb_market_prices.py"
       - "scripts/tennis_event_refresh.py"
       - "scripts/tennis_event_refresh_results.py"
@@ -31,6 +32,7 @@ on:
       - "tests/test_nfl_opportunity_protection.py"
       - "tests/test_nfl_production_pricing.py"
       - "tests/test_nfl_fundamental_stability.py"
+      - "tests/test_nfl_safe_rebase.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -108,6 +110,7 @@ jobs:
           tests/test_nfl_opportunity_protection.py
           tests/test_nfl_production_pricing.py
           tests/test_nfl_fundamental_stability.py
+          tests/test_nfl_safe_rebase.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
@@ -147,7 +150,7 @@ jobs:
           --base data/current_catalog.json
           --snapshot data/sports_event_market_state.json
       - name: Restore NFL production-first fundamentals
-        run: python scripts/repair_nfl_production_prices.py --catalog data/current_catalog.json
+        run: python scripts/repair_nfl_production_prices_safe.py --catalog data/current_catalog.json
       - name: Explain latest game without repricing
         run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
       - name: Apply verified athlete signings and team changes
