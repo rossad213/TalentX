@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from repair_nfl_production_prices_safe import (  # noqa: E402
     SAFE_REPAIR_VERSION,
+    UNSAFE_REPAIR_VERSION,
     _recent_sample_games,
     _regular_season_event_games,
     repair_catalog,
@@ -113,6 +114,52 @@ class NFLSafeRebaseTests(unittest.TestCase):
         self.assertEqual(updated["affected"]["nflProductionRebaseVersion"], SAFE_REPAIR_VERSION)
         self.assertEqual(updated["stable"]["marketPrice"], 88.88)
         self.assertNotEqual(updated["stable"].get("nflProductionRebaseVersion"), SAFE_REPAIR_VERSION)
+
+    def test_unaffected_broad_v4_rebase_is_restored(self):
+        stable = self.record("unsafe-stable", "Unsafe Stable RB", usage=4.0, recent=120.0, career=180.0, old_sample=1)
+        stable["marketPrice"] = 50.0
+        stable["previousMarketPrice"] = 45.0
+        stable["trend"] = [50.0]
+        stable["nflProductionRebaseVersion"] = UNSAFE_REPAIR_VERSION
+        stable["nflProductionRebase"] = {
+            "oldPrice": 88.88,
+            "historyScaleRatio": 50.0 / 88.88,
+            "rebasedPrice": 50.0,
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sports.json"
+            draft = Path(directory) / "draft.json"
+            path.write_text(json.dumps([stable]), encoding="utf-8")
+            draft.write_text(json.dumps({"records": []}), encoding="utf-8")
+            repair_catalog(path, repaired_at="2026-09-16T00:00:00Z", draft_metadata_path=draft)
+            updated = json.loads(path.read_text(encoding="utf-8"))[0]
+
+        self.assertEqual(updated["marketPrice"], 88.88)
+        self.assertEqual(updated["nflProductionRebaseVersion"], SAFE_REPAIR_VERSION)
+        self.assertEqual(updated["nflProductionRebase"]["reason"], "unaffected-broad-v4-rebase-restored")
+
+    def test_evidence_backed_broad_v4_rebase_is_preserved(self):
+        affected = self.record("unsafe-affected", "Unsafe Affected RB", usage=0.0, recent=20.0, career=200.0, old_sample=1)
+        affected["marketPrice"] = 111.11
+        affected["nflProductionRebaseVersion"] = UNSAFE_REPAIR_VERSION
+        affected["nflProductionRebase"] = {
+            "oldPrice": 70.0,
+            "historyScaleRatio": 111.11 / 70.0,
+            "rebasedPrice": 111.11,
+        }
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sports.json"
+            draft = Path(directory) / "draft.json"
+            path.write_text(json.dumps([affected]), encoding="utf-8")
+            draft.write_text(json.dumps({"records": []}), encoding="utf-8")
+            repair_catalog(path, repaired_at="2026-09-16T00:00:00Z", draft_metadata_path=draft)
+            updated = json.loads(path.read_text(encoding="utf-8"))[0]
+
+        self.assertEqual(updated["marketPrice"], 111.11)
+        self.assertEqual(updated["nflProductionRebaseVersion"], SAFE_REPAIR_VERSION)
+        self.assertEqual(updated["nflProductionRebase"]["reason"], "missing-sample-recovered")
 
 
 if __name__ == "__main__":
