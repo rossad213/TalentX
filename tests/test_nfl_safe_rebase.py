@@ -21,15 +21,35 @@ from repair_nfl_production_prices_safe import (  # noqa: E402
 
 
 class NFLSafeRebaseTests(unittest.TestCase):
-    def record(self, player_id: str, name: str, *, usage: float, recent: float, career: float, old_sample=None):
+    def record(
+        self,
+        player_id: str,
+        name: str,
+        *,
+        usage: float,
+        recent: float,
+        career: float,
+        old_sample=None,
+        role: str = "Running Back",
+        event_stats: dict | None = None,
+    ):
         year = datetime.now(timezone.utc).year
+        event = {
+            "eventType": "game",
+            "eventKey": f"{player_id}-week1",
+            "startedAt": f"{year}-09-13T17:00:00Z",
+            "priceBefore": 70.0,
+            "priceAfter": 70.0,
+        }
+        if event_stats is not None:
+            event["stats"] = event_stats
         return {
             "id": player_id,
             "name": name,
             "primaryCategory": "Athlete",
             "discipline": "American Football",
             "leagueOrMedium": "NFL",
-            "role": "Running Back",
+            "role": role,
             "careerStatus": "Active",
             "careerStage": "Early Career",
             "age": 24,
@@ -40,15 +60,7 @@ class NFLSafeRebaseTests(unittest.TestCase):
             "previousMarketPrice": 70.0,
             "trend": [70.0],
             "priceHistory": [],
-            "priceEvents": [
-                {
-                    "eventType": "game",
-                    "eventKey": f"{player_id}-week1",
-                    "startedAt": f"{year}-09-13T17:00:00Z",
-                    "priceBefore": 70.0,
-                    "priceAfter": 70.0,
-                }
-            ],
+            "priceEvents": [event],
             "activeMetrics": {
                 "performance": 70,
                 "achievements": 40,
@@ -70,9 +82,35 @@ class NFLSafeRebaseTests(unittest.TestCase):
             },
         }
 
-    def test_provider_usage_beats_single_event_fallback(self):
+    def test_provider_usage_beats_empty_event_shell(self):
         record = self.record("usage-rb", "Usage RB", usage=36.0, recent=100.0, career=150.0, old_sample=9)
         self.assertEqual(_recent_sample_games(record), 9)
+
+    def test_verified_qb_box_score_beats_generic_usage(self):
+        record = self.record(
+            "usage-qb",
+            "Usage QB",
+            usage=17.0,
+            recent=170.0,
+            career=250.0,
+            old_sample=9,
+            role="Quarterback",
+            event_stats={"passingYards": 250.0, "passingTouchdowns": 2.0, "interceptions": 1.0},
+        )
+        self.assertEqual(_recent_sample_games(record), 1)
+
+    def test_verified_receiver_box_score_beats_generic_usage(self):
+        record = self.record(
+            "usage-wr",
+            "Usage WR",
+            usage=17.0,
+            recent=140.0,
+            career=200.0,
+            old_sample=9,
+            role="Wide Receiver",
+            event_stats={"receptions": 6.0, "receivingYards": 90.0, "receivingTouchdowns": 1.0},
+        )
+        self.assertEqual(_recent_sample_games(record), 1)
 
     def test_preseason_only_does_not_invent_zero_game_sample(self):
         year = datetime.now(timezone.utc).year
@@ -88,7 +126,15 @@ class NFLSafeRebaseTests(unittest.TestCase):
         self.assertIsNone(_recent_sample_games(record))
 
     def test_only_changed_evidence_rebases_market_price(self):
-        affected = self.record("affected", "Affected RB", usage=0.0, recent=20.0, career=200.0, old_sample=None)
+        affected = self.record(
+            "affected",
+            "Affected RB",
+            usage=0.0,
+            recent=20.0,
+            career=200.0,
+            old_sample=None,
+            event_stats={"rushingYards": 25.0, "car": 8.0},
+        )
         stable = self.record("stable", "Stable RB", usage=4.0, recent=120.0, career=180.0, old_sample=1)
         stable["marketPrice"] = 88.88
         stable["previousMarketPrice"] = 88.88
@@ -140,7 +186,15 @@ class NFLSafeRebaseTests(unittest.TestCase):
         self.assertEqual(updated["nflProductionRebase"]["reason"], "unaffected-broad-v4-rebase-restored")
 
     def test_evidence_backed_broad_v4_rebase_is_preserved(self):
-        affected = self.record("unsafe-affected", "Unsafe Affected RB", usage=0.0, recent=20.0, career=200.0, old_sample=1)
+        affected = self.record(
+            "unsafe-affected",
+            "Unsafe Affected RB",
+            usage=0.0,
+            recent=20.0,
+            career=200.0,
+            old_sample=1,
+            event_stats={"rushingYards": 25.0, "car": 8.0},
+        )
         affected["marketPrice"] = 111.11
         affected["nflProductionRebaseVersion"] = UNSAFE_REPAIR_VERSION
         affected["nflProductionRebase"] = {
