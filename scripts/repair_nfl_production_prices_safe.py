@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Safely apply NFL live-sample and missing-draft repairs.
+"""Safely apply NFL live-sample, draft, and RB cohort repairs.
 
 Market prices are rebased only when pricing evidence actually changes. The
 wrapper also repairs state from the earlier broad v4 rebase: unaffected listings
-are restored to their pre-v4 market state, while evidence-backed v4 corrections
-are preserved.
+are restored to their pre-v4 market state, while evidence-backed corrections are
+preserved.
+
+Running backs with verified current-season games receive an additional narrow
+repair: every active RB is compared on the same current-season event window,
+early-season evidence is shrunk consistently, and sparse award counts cannot
+create a near-binary achievement premium.
 """
 from __future__ import annotations
 
@@ -14,6 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import nfl_rb_cohort_calibration as rb_calibration
 import repair_nfl_production_prices as base
 from nfl_production_pricing import (
     MODEL_VERSION,
@@ -22,7 +28,7 @@ from nfl_production_pricing import (
 )
 
 UNSAFE_REPAIR_VERSION = base.REPAIR_VERSION
-SAFE_REPAIR_VERSION = "4.2-nfl-selective-self-healing-rebase"
+SAFE_REPAIR_VERSION = "4.3-nfl-selective-rb-cohort-rebase"
 EARLY_SEASON_FULL_WEIGHT_GAMES = base.EARLY_SEASON_FULL_WEIGHT_GAMES
 
 
@@ -46,12 +52,20 @@ def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None 
 
 
 def _recent_sample_games(record: dict[str, Any]) -> int | None:
-    """Prefer provider evidence; use verified regular games only as a fallback."""
+    """Use verified RB box scores before generic usage; preserve legacy priority elsewhere."""
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     for key in ("recentSeasonGames", "recentGames", "seasonGames"):
         direct = base._number(summary.get(key))
         if direct is not None and direct >= 0:
             return min(18, int(round(direct)))
+
+    # Generic NFL usage includes games played and can turn one RB game into a
+    # fake multi-game sample. Only a verified RB event containing box-score stats
+    # is allowed to outrank provider usage; empty event shells keep legacy logic.
+    if rb_calibration.is_nfl_running_back(record):
+        verified_rb_events = rb_calibration.current_regular_events(record)
+        if verified_rb_events:
+            return min(18, len(verified_rb_events))
 
     signals = base._raw_signals(record)
     if signals is not None:
@@ -69,6 +83,10 @@ def _uses_event_fallback(record: dict[str, Any]) -> bool:
         direct = base._number(summary.get(key))
         if direct is not None and direct >= 0:
             return False
+
+    if rb_calibration.is_nfl_running_back(record) and rb_calibration.current_regular_events(record):
+        return True
+
     signals = base._raw_signals(record)
     if signals is not None and max(0.0, float(signals.get("usage", 0.0))) > 0:
         return False
@@ -94,13 +112,7 @@ def _has_local_draft_override(record: dict[str, Any], draft_metadata: dict[str, 
 def _needs_meaningful_usage_handoff_repair(
     record: dict[str, Any], prior_model_version: str, explanation: dict[str, Any]
 ) -> bool:
-    """Detect players whose appearances incorrectly displaced their Rookie IPO.
-
-    This is intentionally narrow: at least one professional appearance, no real
-    NFL production/usage evidence, a live IPO anchor, and an older model version.
-    It therefore fixes Hunter-like zero-usage appearances without repricing the
-    wider NFL catalog.
-    """
+    """Detect players whose appearances incorrectly displaced their Rookie IPO."""
     if prior_model_version == MODEL_VERSION:
         return False
     if max(0.0, base._number(record.get("professionalGames")) or 0.0) <= 0:
@@ -159,6 +171,9 @@ def repair_catalog(
     base._recent_sample_games = _recent_sample_games
 
     records = base.load_records(path)
+    # Correct active RB raw recent/efficiency signals from durable current-season
+    # game events before any percentile pools are built.
+    rb_context = rb_calibration.prepare_rb_context(records)
     pools, universal_pool = base._nfl_pools(records)
     draft_metadata = base._load_nfl_draft_metadata(draft_metadata_path or base.NFL_DRAFT_METADATA)
     stamp = repaired_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -184,6 +199,9 @@ def repair_catalog(
         prior_sample = prior_summary.get("recentSampleGamesEstimate")
         draft_recovered = base._recover_draft_metadata(record, draft_metadata)
         has_ranked_evidence = base._refresh_nfl_percentiles(record, pools, universal_pool)
+        rb_percentiles_applied = rb_calibration.apply_rb_percentiles(record, rb_context)
+        rb_cohort_repaired = rb_percentiles_applied and rb_calibration.needs_rb_rebase(record, rb_context)
+
         new_summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
         current_sample = new_summary.get("recentSampleGamesEstimate")
         sample_repaired = _sample_changed(prior_sample, current_sample)
@@ -210,17 +228,22 @@ def repair_catalog(
         rookie_influence = base._number(explanation.get("rookieInfluence")) or 0.0
         handoff_repaired = _needs_meaningful_usage_handoff_repair(record, prior_model_version, explanation)
 
-        # If broad v4 already made exactly the correction now considered valid,
-        # keep that price but convert its marker to the safe version. A newly
-        # detected meaningful-usage handoff must still be repriced once.
-        if preserve_unsafe and not sample_repaired and not draft_recovered and not handoff_repaired:
+        # If broad v4 already made exactly a still-valid correction, keep that
+        # price. A new RB cohort repair must still be allowed to reprice once.
+        if (
+            preserve_unsafe
+            and not sample_repaired
+            and not draft_recovered
+            and not handoff_repaired
+            and not rb_cohort_repaired
+        ):
             reason = "missing-sample-recovered" if event_fallback_needed else "missing-draft-metadata-recovered"
             if event_fallback_needed and local_draft_override:
                 reason = "missing-sample-and-draft-metadata-recovered"
             _mark_preserved_unsafe_v4(record, stamp, reason)
             continue
 
-        evidence_changed = sample_repaired or draft_recovered or handoff_repaired
+        evidence_changed = sample_repaired or draft_recovered or handoff_repaired or rb_cohort_repaired
         can_reprice = evidence_changed and (has_ranked_evidence or rookie_influence > 0.0)
         if not can_reprice:
             continue
@@ -228,6 +251,7 @@ def repair_catalog(
             str(record.get("nflProductionRebaseVersion") or "") == SAFE_REPAIR_VERSION
             and not was_unsafe_v4
             and not handoff_repaired
+            and not rb_cohort_repaired
         ):
             continue
 
@@ -243,14 +267,18 @@ def repair_catalog(
             record["previousMarketPrice"] = target
         record["nflProductionRebaseVersion"] = SAFE_REPAIR_VERSION
         record["nflProductionRebasedAt"] = stamp
+        if rb_cohort_repaired:
+            rb_calibration.mark_rb_rebased(record)
         cohort = str((record.get("pricingEvidenceSummary") or {}).get("cohort") or "NFL normalized")
-        if handoff_repaired:
+        if rb_cohort_repaired:
+            reason = "rb-current-season-cohort-calibration"
+        elif handoff_repaired:
             reason = "meaningful-usage-rookie-ipo-restored"
         elif sample_repaired:
             reason = "missing-sample-recovered"
         else:
             reason = "missing-draft-metadata-recovered"
-        if sample_repaired and draft_recovered:
+        if sample_repaired and draft_recovered and not rb_cohort_repaired:
             reason = "missing-sample-and-draft-metadata-recovered"
         record["nflProductionRebase"] = {
             "reason": reason,
@@ -266,6 +294,9 @@ def repair_catalog(
             "recentSampleGamesEstimate": current_sample,
             "recentSampleWeight": (record.get("pricingEvidenceSummary") or {}).get("recentSampleWeight"),
             "historyScaleRatio": round(ratio, 6),
+            "rbCohortCalibrationVersion": (
+                rb_calibration.RB_COHORT_CALIBRATION_VERSION if rb_cohort_repaired else None
+            ),
         }
         repriced += 1
 
@@ -281,7 +312,8 @@ def main() -> int:
     repriced, synchronized, sample_repairs, draft_repairs = repair_catalog(args.catalog)
     print(
         f"Synchronized {synchronized:,} NFL valuation(s); selectively rebased {repriced:,} price(s) "
-        f"from {sample_repairs:,} repaired live-sample input(s) and {draft_repairs:,} recovered draft record(s)."
+        f"from {sample_repairs:,} repaired live-sample input(s), {draft_repairs:,} recovered draft record(s), "
+        f"and current-season RB cohort calibration where verified games were available."
     )
     return 0
 
