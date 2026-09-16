@@ -236,7 +236,7 @@ class NFLProductionPricingTests(unittest.TestCase):
         self.assertLess(veteran_price, 100)
         self.assertGreater(elite_price, veteran_price * 2)
 
-    def test_repair_uses_one_universal_nfl_production_cohort(self):
+    def test_repair_normalizes_raw_production_inside_position_groups(self):
         low = self.record(
             id="low-wr", name="Low WR", role="Wide Receiver", marketPrice=100,
             pricingEvidenceSummary={"rawSignals": {
@@ -259,8 +259,8 @@ class NFLProductionPricingTests(unittest.TestCase):
         self.assertEqual(synchronized, 2)
         self.assertEqual(repriced, 2)
         by_id = {record["id"]: record for record in updated}
-        self.assertEqual(by_id["low-wr"]["pricingEvidenceSummary"]["cohort"], "NFL · universal production-led")
-        self.assertEqual(by_id["high-lb"]["pricingEvidenceSummary"]["cohort"], "NFL · universal production-led")
+        self.assertEqual(by_id["low-wr"]["pricingEvidenceSummary"]["cohort"], "NFL · REC normalized production")
+        self.assertEqual(by_id["high-lb"]["pricingEvidenceSummary"]["cohort"], "NFL · DEF normalized production")
         self.assertGreater(by_id["high-lb"]["marketPrice"], by_id["low-wr"]["marketPrice"])
         self.assertEqual(by_id["high-lb"]["nflProductionRebaseVersion"], REPAIR_VERSION)
 

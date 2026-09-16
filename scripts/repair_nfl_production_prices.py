@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
-"""Rebase NFL prices onto the production-led TalentX valuation scale.
+"""Rebase NFL prices onto the stable production-led TalentX valuation scale.
 
-The migration is intentionally NFL-only. Every NFL player remains in one
-universal NFL production pool after football statistics have been translated
-into common TalentX production signals. Production is the dominant input, while
-verified achievements, remaining career runway, and availability are modest
-secondary inputs. Position, starter/reserve labels, and fame do not create price
-premiums.
+Raw football statistics are first normalized inside comparable position groups
+(QB, RB, receivers, defense, offensive line, special teams). Those normalized
+0-100 production percentiles then share one universal NFL dollar scale. This
+avoids comparing passing-yard raw totals directly with rushing, receiving, or
+defensive raw totals while still allowing every NFL player to be valued on the
+same TalentX market scale.
 
-Drafted rookies retain their existing Rookie IPO anchor and transition toward
-professional value as games accumulate. Verified chart/event percentage moves are
-preserved while stale absolute prices are rebased onto the new fair value.
+The first few games of a new season are shrunk toward durable career evidence so
+one hot or cold week cannot silently replace an established fundamental. Verified
+game events remain separate and can still move the market price immediately.
+
+No-debut drafted players can retain a time-decaying Rookie IPO anchor even when a
+roster feed labels them as second-year players.
 """
 from __future__ import annotations
 
 import argparse
 import math
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from category_market_store import load_records, write_records
-from enrich_current_catalog import percentile
+from enrich_current_catalog import percentile, role_group
 from nfl_production_pricing import MODEL_VERSION, production_fair_value
 
-REPAIR_VERSION = "2.0-nfl-production-led-career-stage-rookie-ipo-rebase"
+REPAIR_VERSION = "3.0-nfl-position-normalized-sample-stable-rookie-ipo-rebase"
 SIGNAL_KEYS = (
     "recentProduction",
     "careerProduction",
@@ -33,6 +37,14 @@ SIGNAL_KEYS = (
     "careerUsage",
     "awardPoints",
 )
+POSITION_NORMALIZED_KEYS = (
+    "recentProduction",
+    "careerProduction",
+    "efficiency",
+    "usage",
+    "careerUsage",
+)
+EARLY_SEASON_FULL_WEIGHT_GAMES = 6.0
 
 
 def _number(value: Any) -> float | None:
@@ -61,28 +73,98 @@ def _raw_signals(record: dict[str, Any]) -> dict[str, float] | None:
     return output if any(output.values()) else None
 
 
-def _nfl_pool(records: list[dict[str, Any]]) -> list[dict[str, float]]:
-    pool: list[dict[str, float]] = []
+def _nfl_pools(records: list[dict[str, Any]]) -> tuple[dict[str, list[dict[str, float]]], list[dict[str, float]]]:
+    pools: dict[str, list[dict[str, float]]] = defaultdict(list)
+    universal: list[dict[str, float]] = []
     for record in records:
         if not _is_nfl(record):
             continue
         signals = _raw_signals(record)
-        if signals is not None:
-            pool.append(signals)
-    return pool
+        if signals is None:
+            continue
+        pools[role_group(record)].append(signals)
+        universal.append(signals)
+    return dict(pools), universal
 
 
-def _refresh_nfl_percentiles(record: dict[str, Any], pool: list[dict[str, float]]) -> bool:
+def _recent_sample_games(record: dict[str, Any]) -> int | None:
+    """Estimate how much current-season evidence is represented by raw signals.
+
+    Future collectors may write an exact recent-game count. Existing records can
+    be estimated conservatively from the enrichment ``usage`` signal, which is
+    starts*3 + games. Starters therefore contribute about four usage points per
+    game. For non-starters we use a more permissive divisor of two so rotational
+    players are not treated as if a full season were only a few appearances.
+    """
+    summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
+    for key in ("recentSeasonGames", "recentGames", "seasonGames"):
+        direct = _number(summary.get(key))
+        if direct is not None and direct >= 0:
+            return min(18, int(round(direct)))
+
     signals = _raw_signals(record)
-    if signals is None or not pool:
+    if signals is None:
+        return None
+    usage = max(0.0, float(signals.get("usage", 0.0)))
+    if usage <= 0:
+        return None
+    divisor = 4.0 if bool(record.get("starter")) else 2.0
+    return min(18, max(1, int(math.ceil(usage / divisor))))
+
+
+def _stabilize_early_season_percentiles(
+    record: dict[str, Any], pcts: dict[str, float]
+) -> tuple[dict[str, float], int | None, float]:
+    """Shrink tiny recent samples toward durable career/neutral evidence."""
+    games = _recent_sample_games(record)
+    if games is None or games >= EARLY_SEASON_FULL_WEIGHT_GAMES:
+        return dict(pcts), games, 1.0
+
+    weight = max(0.0, min(1.0, games / EARLY_SEASON_FULL_WEIGHT_GAMES))
+    output = dict(pcts)
+    recent = float(output.get("recentProduction", 0.5))
+    career = float(output.get("careerProduction", 0.5))
+    efficiency = float(output.get("efficiency", 0.5))
+    output["recentProduction"] = career + (recent - career) * weight
+    output["efficiency"] = 0.5 + (efficiency - 0.5) * weight
+    return output, games, weight
+
+
+def _refresh_nfl_percentiles(
+    record: dict[str, Any],
+    pools: dict[str, list[dict[str, float]]],
+    universal_pool: list[dict[str, float]],
+) -> bool:
+    signals = _raw_signals(record)
+    if signals is None:
         return False
-    pcts = {
-        key: percentile(float(signals.get(key, 0.0)), [float(peer.get(key, 0.0)) for peer in pool])
-        for key in SIGNAL_KEYS
-    }
+    group = role_group(record)
+    position_pool = pools.get(group, [])
+    if not position_pool:
+        return False
+
+    raw_pcts: dict[str, float] = {}
+    for key in POSITION_NORMALIZED_KEYS:
+        raw_pcts[key] = percentile(
+            float(signals.get(key, 0.0)),
+            [float(peer.get(key, 0.0)) for peer in position_pool],
+        )
+    # Award points are already one comparable concept across positions, so keep
+    # that percentile league-wide rather than manufacturing a position premium.
+    award_pool = universal_pool or position_pool
+    raw_pcts["awardPoints"] = percentile(
+        float(signals.get("awardPoints", 0.0)),
+        [float(peer.get("awardPoints", 0.0)) for peer in award_pool],
+    )
+
+    pcts, sample_games, sample_weight = _stabilize_early_season_percentiles(record, raw_pcts)
     summary = dict(record.get("pricingEvidenceSummary") or {})
-    summary["cohort"] = "NFL · universal production-led"
+    summary["cohort"] = f"NFL · {group} normalized production"
+    summary["normalization"] = "position-group raw statistics -> universal 0-100 NFL value scale"
+    summary["unstabilizedPercentiles"] = {key: round(value, 4) for key, value in raw_pcts.items()}
     summary["percentiles"] = {key: round(value, 4) for key, value in pcts.items()}
+    summary["recentSampleGamesEstimate"] = sample_games
+    summary["recentSampleWeight"] = round(sample_weight, 4)
     record["pricingEvidenceSummary"] = summary
 
     metrics = dict(record.get("activeMetrics") or {})
@@ -150,7 +232,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
     if not path.exists():
         return 0, 0
     records = load_records(path)
-    pool = _nfl_pool(records)
+    pools, universal_pool = _nfl_pools(records)
     stamp = repaired_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     repriced = 0
     synchronized = 0
@@ -159,7 +241,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         if not _is_nfl(record):
             continue
 
-        has_ranked_evidence = _refresh_nfl_percentiles(record, pool)
+        has_ranked_evidence = _refresh_nfl_percentiles(record, pools, universal_pool)
         valuation_score, fair, explanation = production_fair_value(record)
         if valuation_score is None or fair is None or explanation is None:
             continue
@@ -193,6 +275,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
             record["previousMarketPrice"] = target
         record["nflProductionRebaseVersion"] = REPAIR_VERSION
         record["nflProductionRebasedAt"] = stamp
+        cohort = str((record.get("pricingEvidenceSummary") or {}).get("cohort") or "NFL normalized")
         record["nflProductionRebase"] = {
             "oldPrice": round(current, 2),
             "productionLedFairValue": round(fair, 2),
@@ -201,7 +284,9 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
             "rookieInfluence": round(rookie_influence, 4),
             "latestGameOverlayPct": round(overlay, 3),
             "rebasedPrice": target,
-            "productionCohort": "NFL universal",
+            "productionCohort": cohort,
+            "recentSampleGamesEstimate": (record.get("pricingEvidenceSummary") or {}).get("recentSampleGamesEstimate"),
+            "recentSampleWeight": (record.get("pricingEvidenceSummary") or {}).get("recentSampleWeight"),
             "historyScaleRatio": round(ratio, 6),
         }
         repriced += 1
@@ -217,8 +302,8 @@ def main() -> int:
     args = parser.parse_args()
     repriced, synchronized = repair_catalog(args.catalog)
     print(
-        f"Synchronized {synchronized:,} NFL production-led valuation(s); "
-        f"rebased {repriced:,} market price(s) with Rookie IPO and career-stage context."
+        f"Synchronized {synchronized:,} position-normalized NFL valuation(s); "
+        f"rebased {repriced:,} price(s) with early-season stability and no-debut Rookie IPO protection."
     )
     return 0
 
