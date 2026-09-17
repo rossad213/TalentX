@@ -66,8 +66,6 @@ def _verified_starter(record: dict[str, Any]) -> bool:
 def _age_factor(record: dict[str, Any]) -> float:
     age = _num(record.get("age"))
     if _is_quarterback(record):
-        # Quarterbacks frequently enter the league older and can retain much longer
-        # productive runways; age should not erase a legitimate Year-1/Year-2 IPO.
         if age is None or age <= 25: return 1.00
         if age <= 27: return 0.90
         if age <= 29: return 0.75
@@ -106,7 +104,6 @@ def _career_games(record: dict[str, Any]) -> float:
 
 
 def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
-    """Build the IPO anchor only from current factual/profile evidence."""
     draft = core._draft_capital_score(record)
     if draft is None: return None, None
     starter_bonus = 12.0 if _verified_starter(record) else 0.0
@@ -119,8 +116,6 @@ def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any
                             core.availability_score(record)),
     }
     score = sum(inputs[key] * weight for key, weight in ANCHOR_WEIGHTS.items())
-    # Use TalentX's calibrated NFL IPO economic scale ($135), not the old generic
-    # $92 ceiling that was compressing legitimate early-career listings.
     anchor = core.PRICE_FLOOR + core.ROOKIE_IPO_SCALE * (core._clamp(score) / 100.0) ** 2
     detail = {key: round(float(value), 2) for key, value in inputs.items()}
     detail["rookieScore"] = round(score, 2)
@@ -132,7 +127,7 @@ def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any
 def _anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
     anchor, detail = _derived_anchor(record)
     if anchor is None: return None, None
-    return anchor, {"source": "factual-draft-metadata-v3-calibrated", **(detail or {})}
+    return anchor, {"source": "factual-draft-metadata-v2", **(detail or {})}
 
 
 def influence(record: dict[str, Any], current_year: int | None = None) -> tuple[float, dict[str, Any]]:
@@ -163,7 +158,6 @@ def influence(record: dict[str, Any], current_year: int | None = None) -> tuple[
 
 
 def _working_record(record: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-    """Neutralize a false current-season zero when no recent sample exists."""
     working = dict(record)
     summary = dict(record.get("pricingEvidenceSummary") or {})
     pcts = dict(summary.get("percentiles") or {})
