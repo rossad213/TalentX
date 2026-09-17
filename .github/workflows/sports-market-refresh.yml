@@ -12,6 +12,9 @@ on:
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
       - "scripts/nfl_production_pricing.py"
+      - "scripts/nfl_rookie_transition.py"
+      - "scripts/sync_nfl_draft_metadata.py"
+      - "scripts/repair_nfl_rookie_ipo_prices.py"
       - "scripts/repair_nfl_persisted_opportunity_prices.py"
       - "scripts/repair_nfl_production_prices.py"
       - "scripts/repair_nfl_production_prices_safe.py"
@@ -26,11 +29,13 @@ on:
       - "scripts/append_game_event_history.py"
       - "scripts/append_price_history.py"
       - "scripts/category_market_store.py"
+      - "data/nfl_draft_metadata_overrides.json"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_nfl_per_game_expectations.py"
       - "tests/test_nfl_rb_receiving_td_credit.py"
       - "tests/test_nfl_opportunity_protection.py"
       - "tests/test_nfl_production_pricing.py"
+      - "tests/test_nfl_rookie_ipo_system.py"
       - "tests/test_nfl_fundamental_stability.py"
       - "tests/test_nfl_safe_rebase.py"
       - "tests/test_results_event_pricing.py"
@@ -109,6 +114,7 @@ jobs:
           tests/test_nfl_rb_receiving_td_credit.py
           tests/test_nfl_opportunity_protection.py
           tests/test_nfl_production_pricing.py
+          tests/test_nfl_rookie_ipo_system.py
           tests/test_nfl_fundamental_stability.py
           tests/test_nfl_safe_rebase.py
           tests/test_results_event_pricing.py
@@ -120,6 +126,8 @@ jobs:
           tests/test_athlete_career_event_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py -v
+      - name: Sync factual NFL draft metadata
+        run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
       - name: Refresh completed-game evidence
         run: >-
           python scripts/hourly_price_refresh_nfl_rb.py
@@ -151,6 +159,8 @@ jobs:
           --snapshot data/sports_event_market_state.json
       - name: Restore NFL production-first fundamentals
         run: python scripts/repair_nfl_production_prices_safe.py --catalog data/current_catalog.json
+      - name: Apply NFL Rookie IPO transition
+        run: python scripts/repair_nfl_rookie_ipo_prices.py --catalog data/current_catalog.json
       - name: Explain latest game without repricing
         run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
       - name: Apply verified athlete signings and team changes
