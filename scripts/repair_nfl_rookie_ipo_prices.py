@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Apply systemic NFL Rookie IPO and young-starter valuation repairs."""
+"""Apply systemic NFL Rookie IPO and young-starter valuation repairs.
+
+Fundamental value may refresh whenever evidence changes, but market price is only
+rebased once per migration version. After that one-time correction, games, role
+changes, injuries, awards, and trading/event logic move marketPrice from its prior
+market level. This keeps rookies and second-year players IPO-like without repeatedly
+resetting their quoted market price back to a model target.
+"""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +17,11 @@ import nfl_rookie_transition as rookie
 import nfl_young_starter_value as starter_value
 import repair_nfl_production_prices as base
 
-REPAIR_VERSION = "1.1-nfl-rookie-ipo-plus-young-starter-rebase"
+REPAIR_VERSION = "1.2-nfl-ipo-one-time-market-migration"
+
+
+def _already_migrated(record: dict, field: str) -> bool:
+    return str(record.get(field) or "") == REPAIR_VERSION
 
 
 def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, int]:
@@ -21,7 +32,9 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
     synchronized = 0
     repriced = 0
 
-    # First preserve the factual, decaying Rookie IPO bridge for recent draft classes.
+    # Rookie / Year-2 IPO bridge: continuously update the fundamental, but only
+    # migrate the quoted market price once for this model version. New evidence
+    # after migration must be expressed through market events, not another reset.
     for record in records:
         if not base._is_nfl(record):
             continue
@@ -31,9 +44,12 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
 
         synchronized += 1
         signature = rookie.evidence_signature(record, explanation)
-        prior_version = str(record.get("nflRookieIpoModelVersion") or "")
-        prior_signature = str(record.get("nflRookieIpoEvidenceSignature") or "")
 
+        explanation = dict(explanation)
+        explanation["marketBehavior"] = (
+            "IPO-style: draft/opportunity establish the early-career fundamental; "
+            "after one migration, marketPrice moves from events/trading rather than model resets"
+        )
         record["nflProductionPricing"] = explanation
         record["fairValue"] = fair
         record["fundamentalValue"] = fair
@@ -42,7 +58,9 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["nflRookieIpoEvidenceSignature"] = signature
         record["nflRookieIpoEvaluatedAt"] = stamp
 
-        if prior_version == rookie.MODEL_VERSION and prior_signature == signature:
+        # CRITICAL market rule: evidence/signature changes do not authorize
+        # another market-price rebase. Only a new migration version does.
+        if _already_migrated(record, "nflRookieIpoRebaseVersion"):
             continue
 
         current = base._number(record.get("marketPrice"))
@@ -59,7 +77,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["nflRookieIpoRebasedAt"] = stamp
         factors = explanation.get("rookieIpoFactors") or {}
         record["nflRookieIpoRebase"] = {
-            "reason": "rookie-ipo-systemic-multifactor-handoff",
+            "reason": "one-time-rookie-year2-ipo-market-migration",
             "oldPrice": round(current, 2),
             "careerFairValue": explanation.get("careerFairValue"),
             "rookieIpoAnchor": explanation.get("rookieIpoAnchor"),
@@ -74,12 +92,13 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
             "latestGameOverlayPct": round(overlay, 3),
             "rebasedPrice": target,
             "historyScaleRatio": round(ratio, 6),
+            "futureBehavior": "no automatic rebase for evidence changes; market events move price",
         }
         repriced += 1
 
-    # Then apply the same league-wide role/runway rule to every qualifying young
-    # NFL starter. This is deliberately not player-specific and only raises a
-    # fundamental when verified starter opportunity + production justify it.
+    # League-wide young-starter support follows the same stock-market rule. It may
+    # improve the fundamental estimate, but it cannot repeatedly drag marketPrice
+    # back to fair value whenever production or starter evidence changes.
     for record in records:
         if not base._is_nfl(record):
             continue
@@ -101,9 +120,10 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         explanation = dict(explanation)
         explanation["priorSystemFairValue"] = round(existing_fair, 2)
         explanation["fairValue"] = fair
+        explanation["marketBehavior"] = (
+            "fundamental support only after migration; quoted market price moves through market events"
+        )
         signature = starter_value.evidence_signature(record, explanation)
-        prior_version = str(record.get("nflYoungStarterModelVersion") or "")
-        prior_signature = str(record.get("nflYoungStarterEvidenceSignature") or "")
 
         record["nflYoungStarterPricing"] = explanation
         record["fairValue"] = fair
@@ -113,7 +133,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["nflYoungStarterEvidenceSignature"] = signature
         record["nflYoungStarterEvaluatedAt"] = stamp
 
-        if prior_version == starter_value.MODEL_VERSION and prior_signature == signature:
+        if _already_migrated(record, "nflYoungStarterRebaseVersion"):
             continue
 
         current = base._number(record.get("marketPrice"))
@@ -129,7 +149,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["nflYoungStarterRebaseVersion"] = REPAIR_VERSION
         record["nflYoungStarterRebasedAt"] = stamp
         record["nflYoungStarterRebase"] = {
-            "reason": "league-wide-young-starter-role-runway-correction",
+            "reason": "one-time-league-wide-young-starter-market-migration",
             "oldPrice": round(current, 2),
             "priorSystemFairValue": round(existing_fair, 2),
             "productionScore": explanation.get("productionScore"),
@@ -142,6 +162,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
             "latestGameOverlayPct": round(overlay, 3),
             "rebasedPrice": target,
             "historyScaleRatio": round(ratio, 6),
+            "futureBehavior": "no automatic rebase for evidence changes; market events move price",
         }
         repriced += 1
 
@@ -156,8 +177,8 @@ def main() -> int:
     args = parser.parse_args()
     repriced, synchronized = repair_catalog(args.catalog)
     print(
-        f"NFL valuation audit synchronized {synchronized:,} Rookie IPO/young-starter listings "
-        f"and rebased {repriced:,} changed listings."
+        f"NFL IPO/fundamental audit synchronized {synchronized:,} listings and performed "
+        f"{repriced:,} one-time market migrations."
     )
     return 0
 
