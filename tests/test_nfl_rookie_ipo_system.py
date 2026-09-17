@@ -113,6 +113,24 @@ class NFLRookieIpoSystemTests(unittest.TestCase):
         self.assertIsNone(fair)
         self.assertIsNone(explanation)
 
+    def test_legacy_saved_rookie_anchor_and_influence_are_ignored(self):
+        baseline = self.record()
+        contaminated = self.record(rookiePricing={
+            "calibratedIpoPrice": 250.0,
+            "ipoPrice": 240.0,
+            "rookieScore": 99.0,
+            "draftInfluencePct": 1.0,
+        })
+        baseline_fair, baseline_explanation = rookie.fair_value(baseline, current_year=2026)
+        contaminated_fair, contaminated_explanation = rookie.fair_value(contaminated, current_year=2026)
+        self.assertEqual(baseline_explanation["rookieIpoAnchor"], contaminated_explanation["rookieIpoAnchor"])
+        self.assertEqual(baseline_explanation["rookieInfluence"], contaminated_explanation["rookieInfluence"])
+        self.assertEqual(baseline_fair, contaminated_fair)
+        self.assertEqual(
+            contaminated_explanation["rookieAnchorReconstruction"]["source"],
+            "factual-draft-metadata-v2",
+        )
+
     def test_missing_recent_sample_does_not_treat_provider_zero_as_real_zero(self):
         record = self.record(
             professionalGames=0,
