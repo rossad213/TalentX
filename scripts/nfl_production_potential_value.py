@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""NFL veteran valuation using the same Production + Potential market architecture.
+"""NFL veteran valuation using TalentX's Production + Potential architecture.
 
 Rookies and second-year players remain on the separate Rookie IPO transition.
-For established NFL players, fundamental value is built from two top-level buckets:
-70% Production and 30% Potential. Sport-specific evidence is normalized inside
-those buckets; no NBA code or NBA pricing constants are touched here.
+Established NFL players use two top-level buckets: 70% Production and 30% Potential.
+NFL evidence is normalized inside those buckets, while the final score is converted
+to value on the same quadratic economic scale used by the broader TalentX athlete
+market. NBA code and NBA records are not modified by this module.
 
-This module computes fundamental/fair value only. Live market price remains a
-separate state that moves from games, role changes, injuries, awards, and trading.
+This module computes fundamental/fair value only. Live market price remains separate
+and moves from games, role changes, injuries, awards, and trading/event behavior.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from typing import Any
 
 import nfl_production_pricing as core
 
-MODEL_VERSION = "1.0-nfl-production-potential-veteran"
+MODEL_VERSION = "1.1-nfl-production-potential-shared-market-scale"
 TOP_LEVEL_WEIGHTS = {"production": 0.70, "potential": 0.30}
 PRODUCTION_SUBWEIGHTS = {
     "normalizedProduction": 0.60,
@@ -30,9 +31,21 @@ POTENTIAL_SUBWEIGHTS = {
     "development": 0.10,
 }
 
+# Match the broader TalentX athlete-market economic curve instead of the old
+# NFL-only ^4.4 curve, which compressed strong 60-75 scores into very low prices.
+MARKET_PRICE_FLOOR = 4.0
+MARKET_PRICE_COEFFICIENT = 0.0325
+MARKET_PRICE_CEILING = 350.0
+
 
 def _num(value: Any) -> float | None:
     return core._number(value)
+
+
+def price_from_score(score: float) -> float:
+    normalized = core._clamp(score)
+    value = MARKET_PRICE_FLOOR + MARKET_PRICE_COEFFICIENT * normalized * normalized
+    return round(max(MARKET_PRICE_FLOOR, min(MARKET_PRICE_CEILING, value)), 2)
 
 
 def years_since_draft(record: dict[str, Any], current_year: int | None = None) -> int | None:
@@ -75,15 +88,21 @@ def consistency_score(record: dict[str, Any], production: float) -> float:
 
 def role_opportunity_score(record: dict[str, Any]) -> float:
     role_status = str(record.get("roleStatus") or "").strip().lower()
-    if record.get("starter") is True or record.get("isStarter") is True or role_status in {
-        "starter", "starting", "first team", "first-team"
-    }:
+    evidence = record.get("situationEvidence") if isinstance(record.get("situationEvidence"), dict) else {}
+    evidence_status = str(evidence.get("roleStatus") or "").strip().lower()
+    starter = (
+        record.get("starter") is True
+        or record.get("isStarter") is True
+        or evidence.get("starter") is True
+        or role_status in {"starter", "starting", "first team", "first-team"}
+        or evidence_status in {"starter", "starting", "first team", "first-team"}
+    )
+    if starter:
         return 92.0
     if role_status in {"rotation", "rotational", "committee", "sixth man"}:
         return 72.0
     if role_status in {"reserve", "backup", "bench", "demoted"}:
         return 45.0
-    # Do not invent a starter premium when role evidence is missing.
     return 60.0
 
 
@@ -93,7 +112,6 @@ def development_score(record: dict[str, Any]) -> float:
     runway = core.career_runway_score(record)
     if explicit is None:
         return round(core._clamp(runway), 2)
-    # Keep the saved development signal, but anchor it to evidence-based runway.
     return round(core._clamp(explicit * 0.55 + runway * 0.45), 2)
 
 
@@ -138,7 +156,7 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
         production * TOP_LEVEL_WEIGHTS["production"]
         + potential * TOP_LEVEL_WEIGHTS["potential"]
     )
-    fair = core.price_from_score(valuation_score)
+    fair = price_from_score(valuation_score)
     return fair, {
         "leagueWide": True,
         "valuationArchitecture": "Production + Potential",
@@ -151,6 +169,7 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
         "potentialInputs": potential_inputs,
         "valuationScore": round(valuation_score, 2),
         "fairValue": round(fair, 2),
-        "pricingPrinciple": "NFL veteran fundamental value = 70% Production + 30% Potential; live market price is separate and event/trading driven",
+        "priceCurve": "4 + 0.0325 * valuationScore^2, capped at 350",
+        "pricingPrinciple": "NFL veteran fundamental value = 70% Production + 30% Potential on the shared TalentX athlete-market value scale; live market price stays separate",
         "modelVersion": f"{core.MODEL_VERSION}+veteran/{MODEL_VERSION}",
     }
