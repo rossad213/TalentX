@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import nfl_production_pricing as core
 import nfl_rookie_transition as rookie
+import nfl_young_starter_value as starter_value
 from sync_nfl_draft_metadata import sync_records
 
 
@@ -160,6 +161,86 @@ class NFLRookieIpoSystemTests(unittest.TestCase):
         self.assertTrue(explanation["rookieIpoMissingRecentSampleGuard"])
         self.assertGreater(explanation["productionScore"], unguarded)
         self.assertAlmostEqual(explanation["inputs"]["recentProduction"], 65.0, places=1)
+
+    def test_young_starting_qb_gets_league_wide_role_runway_uplift(self):
+        record = self.record(
+            starter=True,
+            roleStatus="starter",
+            age=27,
+            experienceYears=2,
+            draftRound=2,
+            draftPick=40,
+            professionalGames=18,
+            pricingEvidenceSummary={
+                "percentiles": {
+                    "recentProduction": 0.45,
+                    "careerProduction": 0.42,
+                    "efficiency": 0.50,
+                    "awardPoints": 0.10,
+                },
+                "rawSignals": {
+                    "recentProduction": 20,
+                    "careerProduction": 80,
+                    "efficiency": 50,
+                    "usage": 8,
+                    "careerUsage": 25,
+                    "awardPoints": 0,
+                },
+                "recentSampleGamesEstimate": 2,
+            },
+        )
+        fair, explanation = starter_value.fair_value(record)
+        self.assertIsNotNone(fair)
+        self.assertTrue(explanation["leagueWide"])
+        self.assertTrue(explanation["verifiedStarter"])
+        self.assertTrue(explanation["quarterback"])
+        self.assertTrue(explanation["upliftApplied"])
+        self.assertGreater(fair, explanation["baseCareerFairValue"])
+        self.assertGreater(fair, 30.0)
+
+    def test_young_starter_uplift_still_rewards_better_production(self):
+        strong = self.record(
+            starter=True,
+            age=24,
+            experienceYears=2,
+            professionalGames=34,
+            pricingEvidenceSummary={
+                "percentiles": {
+                    "recentProduction": 0.90,
+                    "careerProduction": 0.82,
+                    "efficiency": 0.88,
+                    "awardPoints": 0.80,
+                },
+                "rawSignals": {"recentProduction": 100, "careerProduction": 220},
+                "recentSampleGamesEstimate": 17,
+            },
+        )
+        weaker = self.record(
+            starter=True,
+            age=24,
+            experienceYears=2,
+            professionalGames=34,
+            pricingEvidenceSummary={
+                "percentiles": {
+                    "recentProduction": 0.40,
+                    "careerProduction": 0.38,
+                    "efficiency": 0.42,
+                    "awardPoints": 0.10,
+                },
+                "rawSignals": {"recentProduction": 20, "careerProduction": 60},
+                "recentSampleGamesEstimate": 17,
+            },
+        )
+        strong_fair, _ = starter_value.fair_value(strong)
+        weak_fair, _ = starter_value.fair_value(weaker)
+        self.assertGreater(strong_fair, weak_fair)
+        self.assertGreater(strong_fair, 100.0)
+
+    def test_reserve_does_not_receive_young_starter_uplift(self):
+        reserve = self.record(starter=False, roleStatus="reserve")
+        fair, explanation = starter_value.fair_value(reserve)
+        self.assertIsNone(fair)
+        self.assertIsNone(explanation)
 
     def test_metadata_sync_prefers_espn_id_without_changing_price(self):
         records = [{
