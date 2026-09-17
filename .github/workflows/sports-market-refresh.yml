@@ -12,6 +12,7 @@ on:
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
       - "scripts/nfl_production_pricing.py"
+      - "scripts/nfl_production_potential_value.py"
       - "scripts/nfl_rookie_transition.py"
       - "scripts/sync_nfl_draft_metadata.py"
       - "scripts/repair_nfl_rookie_ipo_prices.py"
@@ -159,7 +160,7 @@ jobs:
           --snapshot data/sports_event_market_state.json
       - name: Restore NFL production-first fundamentals
         run: python scripts/repair_nfl_production_prices_safe.py --catalog data/current_catalog.json
-      - name: Apply NFL Rookie IPO transition
+      - name: Apply NFL IPO then Production + Potential architecture
         run: python scripts/repair_nfl_rookie_ipo_prices.py --catalog data/current_catalog.json
       - name: Explain latest game without repricing
         run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
