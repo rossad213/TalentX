@@ -9,7 +9,7 @@ from typing import Any
 
 import nfl_production_pricing as core
 
-MODEL_VERSION = "2.1-nfl-rookie-factual-anchor-multifactor-handoff"
+MODEL_VERSION = "2.2-nfl-rookie-calibrated-ipo-starter-opportunity"
 MAX_DRAFT_AGE = 4
 TIME_CAPS = {0: 1.00, 1: 0.78, 2: 0.58, 3: 0.32, 4: 0.12}
 EXP_CAPS = {0: 1.00, 1: 1.00, 2: 0.78, 3: 0.58, 4: 0.32, 5: 0.12}
@@ -22,10 +22,19 @@ ANCHOR_WEIGHTS = {
     "draftCapital": 0.50, "positionValue": 0.15, "development": 0.15,
     "opportunity": 0.12, "availability": 0.08,
 }
+MARKET_PRICE_FLOOR = 4.0
+MARKET_PRICE_COEFFICIENT = 0.0325
+MARKET_PRICE_CEILING = 350.0
 
 
 def _num(value: Any) -> float | None:
     return core._number(value)
+
+
+def _shared_price_from_score(score: float) -> float:
+    normalized = core._clamp(score)
+    value = MARKET_PRICE_FLOOR + MARKET_PRICE_COEFFICIENT * normalized * normalized
+    return round(max(MARKET_PRICE_FLOOR, min(MARKET_PRICE_CEILING, value)), 2)
 
 
 def years_since_draft(record: dict[str, Any], current_year: int | None = None) -> int | None:
@@ -36,8 +45,34 @@ def years_since_draft(record: dict[str, Any], current_year: int | None = None) -
     return max(0, year - int(round(draft_year)))
 
 
+def _is_quarterback(record: dict[str, Any]) -> bool:
+    role = str(record.get("role") or "").strip().lower()
+    return role == "qb" or "quarterback" in role
+
+
+def _verified_starter(record: dict[str, Any]) -> bool:
+    role_status = str(record.get("roleStatus") or "").strip().lower()
+    evidence = record.get("situationEvidence") if isinstance(record.get("situationEvidence"), dict) else {}
+    evidence_status = str(evidence.get("roleStatus") or "").strip().lower()
+    return (
+        record.get("starter") is True
+        or record.get("isStarter") is True
+        or evidence.get("starter") is True
+        or role_status in {"starter", "starting", "first team", "first-team"}
+        or evidence_status in {"starter", "starting", "first team", "first-team"}
+    )
+
+
 def _age_factor(record: dict[str, Any]) -> float:
     age = _num(record.get("age"))
+    if _is_quarterback(record):
+        # Quarterbacks frequently enter the league older and can retain much longer
+        # productive runways; age should not erase a legitimate Year-1/Year-2 IPO.
+        if age is None or age <= 25: return 1.00
+        if age <= 27: return 0.90
+        if age <= 29: return 0.75
+        if age <= 31: return 0.55
+        return 0.35
     if age is None or age <= 23: return 1.00
     if age <= 24: return 0.96
     if age <= 25: return 0.90
@@ -71,33 +106,33 @@ def _career_games(record: dict[str, Any]) -> float:
 
 
 def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
-    """Build the IPO anchor only from current factual/profile evidence.
-
-    Legacy ``rookiePricing`` is deliberately ignored. The prior generic IPO formula
-    could contain audience and starter effects, so reusing its stored price would
-    preserve the very mispricing this transition is intended to remove.
-    """
+    """Build the IPO anchor only from current factual/profile evidence."""
     draft = core._draft_capital_score(record)
     if draft is None: return None, None
+    starter_bonus = 12.0 if _verified_starter(record) else 0.0
     inputs = {
         "draftCapital": draft,
         "positionValue": core._rookie_position_value(record),
         "development": core._rookie_development(record),
-        "opportunity": core._clamp(45.0 + draft * 0.45, 35.0, 96.0),
+        "opportunity": core._clamp(45.0 + draft * 0.45 + starter_bonus, 35.0, 98.0),
         "availability": max(82.0 if str(record.get("careerStatus") or "").lower() == "active" else 62.0,
                             core.availability_score(record)),
     }
     score = sum(inputs[key] * weight for key, weight in ANCHOR_WEIGHTS.items())
-    anchor = 2.0 + core.GENERIC_NFL_ROOKIE_PRICE_CEILING * (core._clamp(score) / 100.0) ** 2
+    # Use TalentX's calibrated NFL IPO economic scale ($135), not the old generic
+    # $92 ceiling that was compressing legitimate early-career listings.
+    anchor = core.PRICE_FLOOR + core.ROOKIE_IPO_SCALE * (core._clamp(score) / 100.0) ** 2
     detail = {key: round(float(value), 2) for key, value in inputs.items()}
     detail["rookieScore"] = round(score, 2)
+    detail["verifiedStarter"] = _verified_starter(record)
+    detail["ipoScale"] = core.ROOKIE_IPO_SCALE
     return round(anchor, 2), detail
 
 
 def _anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
     anchor, detail = _derived_anchor(record)
     if anchor is None: return None, None
-    return anchor, {"source": "factual-draft-metadata-v2", **(detail or {})}
+    return anchor, {"source": "factual-draft-metadata-v3-calibrated", **(detail or {})}
 
 
 def influence(record: dict[str, Any], current_year: int | None = None) -> tuple[float, dict[str, Any]]:
@@ -123,6 +158,7 @@ def influence(record: dict[str, Any], current_year: int | None = None) -> tuple[
         "experienceCap": round(exp_cap, 4), "careerGameEvidence": round(games, 2),
         "roleGamePace": round(pace, 4), "gameCap": round(game_cap, 4),
         "meaningfulProduction": meaningful, "productionFactor": production_factor,
+        "verifiedStarter": _verified_starter(record),
     }
 
 
@@ -162,11 +198,11 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
         "availability": core.availability_score(working),
     }
     score = core._clamp(sum(values[k] * w for k, w in core.NFL_VALUE_WEIGHTS.items()))
-    career_fair = core.price_from_score(score)
+    career_fair = _shared_price_from_score(score)
     anchor, anchor_detail = _anchor(record)
     rookie_influence, factors = influence(record, current_year)
     fair = career_fair if anchor is None else anchor * rookie_influence + career_fair * (1.0 - rookie_influence)
-    fair = round(max(core.PRICE_FLOOR, min(core.PRICE_CEILING, fair)), 2)
+    fair = round(max(MARKET_PRICE_FLOOR, min(MARKET_PRICE_CEILING, fair)), 2)
     return fair, {
         **components, "valueWeights": dict(core.NFL_VALUE_WEIGHTS),
         "valueInputs": {k: round(v, 2) for k, v in values.items()},
@@ -174,7 +210,7 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
         "rookieIpoAnchor": anchor, "rookieInfluence": rookie_influence,
         "rookieAnchorReconstruction": anchor_detail, "rookieIpoFactors": factors,
         "rookieIpoMissingRecentSampleGuard": guarded, "fairValue": fair,
-        "pricingPrinciple": "production-led NFL value plus a temporary Rookie IPO bridge using factual draft capital, age, experience, durable games, meaningful NFL production, and role; no player-specific prices, legacy IPO carryover, fame premium, or generic starter premium",
+        "pricingPrinciple": "calibrated NFL IPO bridge using factual draft capital, verified starter opportunity, position-aware age/runway, durable games and professional production; transitions onto the shared TalentX athlete-market value scale",
         "modelVersion": f"{core.MODEL_VERSION}+rookie/{MODEL_VERSION}",
     }
 
@@ -186,7 +222,8 @@ def evidence_signature(record: dict[str, Any], explanation: dict[str, Any]) -> s
     payload = {
         "draft": [record.get("draftYear"), record.get("draftRound"), record.get("draftPick")],
         "age": record.get("age"), "experience": record.get("experienceYears"),
-        "role": record.get("role"), "games": factors.get("careerGameEvidence"),
+        "role": record.get("role"), "starter": _verified_starter(record),
+        "games": factors.get("careerGameEvidence"),
         "meaningful": factors.get("meaningfulProduction"),
         "careerPct": round(float(_num(pcts.get("careerProduction")) or 0.0), 2),
         "guard": explanation.get("rookieIpoMissingRecentSampleGuard"), "model": MODEL_VERSION,
