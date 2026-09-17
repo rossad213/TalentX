@@ -9,7 +9,7 @@ from typing import Any
 
 import nfl_production_pricing as core
 
-MODEL_VERSION = "2.0-nfl-rookie-multifactor-handoff"
+MODEL_VERSION = "2.1-nfl-rookie-factual-anchor-multifactor-handoff"
 MAX_DRAFT_AGE = 4
 TIME_CAPS = {0: 1.00, 1: 0.78, 2: 0.58, 3: 0.32, 4: 0.12}
 EXP_CAPS = {0: 1.00, 1: 1.00, 2: 0.78, 3: 0.58, 4: 0.32, 5: 0.12}
@@ -70,19 +70,13 @@ def _career_games(record: dict[str, Any]) -> float:
     )
 
 
-def _saved_anchor(record: dict[str, Any]) -> tuple[float | None, float]:
-    pricing = record.get("rookiePricing") if isinstance(record.get("rookiePricing"), dict) else {}
-    saved = _num(pricing.get("draftInfluencePct"))
-    maximum = 1.0 if saved is None else max(0.0, min(1.0, saved / 100.0))
-    anchor = _num(pricing.get("calibratedIpoPrice")) or _num(pricing.get("ipoPrice"))
-    if anchor is None:
-        score = _num(pricing.get("rookieScore"))
-        if score is not None:
-            anchor = core.PRICE_FLOOR + core.ROOKIE_IPO_SCALE * (core._clamp(score) / 100.0) ** 2
-    return (round(anchor, 2) if anchor and anchor > 0 else None), maximum
-
-
 def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
+    """Build the IPO anchor only from current factual/profile evidence.
+
+    Legacy ``rookiePricing`` is deliberately ignored. The prior generic IPO formula
+    could contain audience and starter effects, so reusing its stored price would
+    preserve the very mispricing this transition is intended to remove.
+    """
     draft = core._draft_capital_score(record)
     if draft is None: return None, None
     inputs = {
@@ -100,16 +94,13 @@ def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any
     return round(anchor, 2), detail
 
 
-def _anchor(record: dict[str, Any]) -> tuple[float | None, float, dict[str, Any] | None]:
-    saved, maximum = _saved_anchor(record)
-    if saved is not None: return saved, maximum, {"source": "saved-rookie-pricing"}
+def _anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any] | None]:
     anchor, detail = _derived_anchor(record)
-    if anchor is None: return None, 0.0, None
-    return anchor, maximum, {"source": "reconstructed-from-draft-metadata", **(detail or {})}
+    if anchor is None: return None, None
+    return anchor, {"source": "factual-draft-metadata-v2", **(detail or {})}
 
 
-def influence(record: dict[str, Any], saved_max: float = 1.0,
-              current_year: int | None = None) -> tuple[float, dict[str, Any]]:
+def influence(record: dict[str, Any], current_year: int | None = None) -> tuple[float, dict[str, Any]]:
     draft_score = core._draft_capital_score(record)
     draft_age = years_since_draft(record, current_year)
     if draft_score is None or draft_age is None or draft_age > MAX_DRAFT_AGE:
@@ -123,7 +114,7 @@ def influence(record: dict[str, Any], saved_max: float = 1.0,
     age_factor = _age_factor(record)
     meaningful = core._has_meaningful_professional_evidence(record)
     production_factor = 0.90 if meaningful else 1.0
-    cap = max(0.0, min(saved_max, game_cap, time_cap, exp_cap))
+    cap = max(0.0, min(game_cap, time_cap, exp_cap))
     value = round(max(0.0, min(1.0, cap * draft_factor * age_factor * production_factor)), 4)
     return value, {
         "eligible": True, "draftCapitalScore": round(draft_score, 2),
@@ -172,8 +163,8 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
     }
     score = core._clamp(sum(values[k] * w for k, w in core.NFL_VALUE_WEIGHTS.items()))
     career_fair = core.price_from_score(score)
-    anchor, maximum, anchor_detail = _anchor(record)
-    rookie_influence, factors = influence(record, maximum, current_year)
+    anchor, anchor_detail = _anchor(record)
+    rookie_influence, factors = influence(record, current_year)
     fair = career_fair if anchor is None else anchor * rookie_influence + career_fair * (1.0 - rookie_influence)
     fair = round(max(core.PRICE_FLOOR, min(core.PRICE_CEILING, fair)), 2)
     return fair, {
@@ -183,7 +174,7 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
         "rookieIpoAnchor": anchor, "rookieInfluence": rookie_influence,
         "rookieAnchorReconstruction": anchor_detail, "rookieIpoFactors": factors,
         "rookieIpoMissingRecentSampleGuard": guarded, "fairValue": fair,
-        "pricingPrinciple": "production-led NFL value plus a temporary Rookie IPO bridge using draft capital, age, experience, durable games, meaningful NFL production, and role; no player-specific prices",
+        "pricingPrinciple": "production-led NFL value plus a temporary Rookie IPO bridge using factual draft capital, age, experience, durable games, meaningful NFL production, and role; no player-specific prices, legacy IPO carryover, fame premium, or generic starter premium",
         "modelVersion": f"{core.MODEL_VERSION}+rookie/{MODEL_VERSION}",
     }
 
