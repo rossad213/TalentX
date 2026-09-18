@@ -104,7 +104,17 @@
         .then(response => response.ok ? response : nativeFetch(input, fresh))
         .catch(() => nativeFetch(input, fresh));
     }
-    if (dataRequest) return nativeFetch(input, {...init, cache: 'no-store'});
+    if (dataRequest) {
+      const fresh = {...init, cache: 'no-store'};
+      if (url.startsWith(publishedDataBase)) return nativeFetch(input, fresh);
+      const match = url.match(/(?:^|\\/)data\\/(.+?)(?:[?#].*)?$/);
+      if (match && match[1]) {
+        return nativeFetch(`${publishedDataBase}/${match[1]}`, fresh)
+          .then(response => response.ok ? response : nativeFetch(input, fresh))
+          .catch(() => nativeFetch(input, fresh));
+      }
+      return nativeFetch(input, fresh);
+    }
     return nativeFetch(input, init);
   };
   window.__talentxDataFallbackBase = publishedDataBase;
