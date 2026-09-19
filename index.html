@@ -93,10 +93,10 @@
     const catalogManifestRequest = /(?:^|\/)data\/catalog_manifest\.json(?:$|[?#])/.test(url);
     if (currentCatalogRequest) {
       const fresh = {...init, cache: 'no-store'};
-      return nativeFetch(`${publishedDataBase}/catalog_index.json`, fresh)
-        .then(response => response.ok ? response : nativeFetch('./data/catalog_index.json', fresh))
+      return nativeFetch('./data/catalog_index.json', fresh)
+        .then(response => response.ok ? response : nativeFetch(`${publishedDataBase}/catalog_index.json`, fresh))
         .then(response => response.ok ? response : nativeFetch(input, fresh))
-        .catch(() => nativeFetch('./data/catalog_index.json', fresh));
+        .catch(() => nativeFetch(input, fresh));
     }
     if (catalogManifestRequest) {
       const fresh = {...init, cache: 'no-store'};
@@ -104,17 +104,7 @@
         .then(response => response.ok ? response : nativeFetch(input, fresh))
         .catch(() => nativeFetch(input, fresh));
     }
-    if (dataRequest) {
-      const fresh = {...init, cache: 'no-store'};
-      if (url.startsWith(publishedDataBase)) return nativeFetch(input, fresh);
-      const match = url.match(/(?:^|\\/)data\\/(.+?)(?:[?#].*)?$/);
-      if (match && match[1]) {
-        return nativeFetch(`${publishedDataBase}/${match[1]}`, fresh)
-          .then(response => response.ok ? response : nativeFetch(input, fresh))
-          .catch(() => nativeFetch(input, fresh));
-      }
-      return nativeFetch(input, fresh);
-    }
+    if (dataRequest) return nativeFetch(input, {...init, cache: 'no-store'});
     return nativeFetch(input, init);
   };
   window.__talentxDataFallbackBase = publishedDataBase;
