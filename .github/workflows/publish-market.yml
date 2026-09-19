@@ -52,14 +52,49 @@ jobs:
           set -euo pipefail
           rm -rf _baseline _sports _music _actors _creators _history _soccer_history _tennis_history _golf_history
           mkdir -p _baseline data/market
-          baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1")"
+          base_ready=0
+          baseline_id=""
+          baseline_time=""
+
+          # Prefer the latest successful full baseline, but do not take the public
+          # market down if that old artifact has expired.
+          baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1" 2>/dev/null || printf '{}')"
           baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
           baseline_time="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].created_at // empty')"
-          test -n "$baseline_id" || { echo "No successful full-catalog baseline exists."; exit 1; }
-          gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline
-          baseline_data="$(dirname "$(find _baseline -name current_catalog.json -print -quit)")"
-          test -n "$baseline_data" || { echo "Baseline artifact missing current_catalog.json"; exit 1; }
-          cp -R "$baseline_data"/. data/
+          if [ -n "$baseline_id" ]; then
+            if gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline; then
+              baseline_catalog="$(find _baseline -name current_catalog.json -print -quit)"
+              if [ -n "$baseline_catalog" ]; then
+                baseline_data="$(dirname "$baseline_catalog")"
+                cp -R "$baseline_data"/. data/
+                base_ready=1
+                echo "Composing from full baseline run $baseline_id."
+              else
+                echo "WARNING: successful baseline run $baseline_id has no downloadable current_catalog.json."
+              fi
+            else
+              echo "WARNING: successful baseline artifact for run $baseline_id is unavailable/expired."
+            fi
+          fi
+
+          # Fall back to the last successfully published full market. Category
+          # refreshes below will replace it as newer healthy artifacts arrive.
+          if [ "$base_ready" -eq 0 ]; then
+            rm -rf _published_base
+            mkdir -p _published_base
+            published_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/publish-market.yml/runs?status=success&per_page=1" 2>/dev/null || printf '{}')"
+            published_id="$(printf '%s' "$published_meta" | jq -r '.workflow_runs[0].id // empty')"
+            published_time="$(printf '%s' "$published_meta" | jq -r '.workflow_runs[0].created_at // empty')"
+            test -n "$published_id" || { echo "No successful baseline or published market artifact is available."; exit 1; }
+            gh run download "$published_id" -R "$GITHUB_REPOSITORY" -n talentx-published-market -D _published_base
+            published_catalog="$(find _published_base -name current_catalog.json -print -quit)"
+            test -n "$published_catalog" || { echo "Published market artifact missing current_catalog.json"; exit 1; }
+            published_data="$(dirname "$published_catalog")"
+            cp -R "$published_data"/. data/
+            baseline_time="$published_time"
+            base_ready=1
+            echo "Recovered composition base from published market run $published_id."
+          fi
 
           apply_state() {
             workflow_file="$1"
