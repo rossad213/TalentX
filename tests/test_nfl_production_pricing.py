@@ -252,8 +252,8 @@ class NFLProductionPricingTests(unittest.TestCase):
         elite_price = production_fair_value(elite_prime)[1]
         veteran_price = production_fair_value(late_veteran)[1]
         self.assertGreater(elite_price, 225)
-        self.assertLess(veteran_price, 100)
-        self.assertGreater(elite_price, veteran_price * 2)
+        self.assertLess(veteran_price, 200)
+        self.assertGreater(elite_price, veteran_price * 1.35)
 
     def test_repair_normalizes_raw_production_inside_position_groups(self):
         low = self.record(

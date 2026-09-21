@@ -11,6 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+from nfl_production_pricing import MODEL_VERSION  # noqa: E402
 from repair_nfl_production_prices_safe import (  # noqa: E402
     SAFE_REPAIR_VERSION,
     UNSAFE_REPAIR_VERSION,
@@ -57,6 +58,7 @@ class NFLSafeRebaseTests(unittest.TestCase):
                 "availability": 75,
                 "audience": 50,
             },
+            "nflProductionPriceModelVersion": MODEL_VERSION,
             "pricingEvidenceSummary": {
                 "recentSampleGamesEstimate": old_sample,
                 "rawSignals": {
