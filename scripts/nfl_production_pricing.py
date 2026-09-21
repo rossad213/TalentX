@@ -21,14 +21,14 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-MODEL_VERSION = "3.1-nfl-position-normalized-sample-stable-meaningful-usage-rookie-ipo"
+MODEL_VERSION = "3.2-nfl-production-potential-shared-market-scale"
 
 PRICE_FLOOR = 4.0
-PRICE_SCALE = 310.0
-PRICE_EXPONENT = 4.4
-PRICE_CEILING = 300.0
+PRICE_SCALE = 0.0325
+PRICE_EXPONENT = 2.0
+PRICE_CEILING = 350.0
 ROOKIE_IPO_SCALE = 135.0
-GENERIC_NFL_ROOKIE_PRICE_CEILING = 92.0
+GENERIC_NFL_ROOKIE_PRICE_CEILING = ROOKIE_IPO_SCALE
 NFL_MAX_DRAFT_PICKS = 257.0
 
 # Recent production remains important, but durable career evidence has enough
@@ -41,9 +41,20 @@ NFL_PRODUCTION_WEIGHTS = {
 
 NFL_VALUE_WEIGHTS = {
     "production": 0.70,
-    "achievements": 0.15,
-    "careerRunway": 0.10,
-    "availability": 0.05,
+    "potential": 0.30,
+}
+
+NFL_PRODUCTION_BUCKET_WEIGHTS = {
+    "normalizedProduction": 0.60,
+    "achievements": 0.20,
+    "consistency": 0.20,
+}
+
+NFL_POTENTIAL_BUCKET_WEIGHTS = {
+    "careerRunway": 0.45,
+    "opportunity": 0.25,
+    "availability": 0.20,
+    "development": 0.10,
 }
 
 NFL_FALLBACK_WEIGHTS = {
@@ -66,8 +77,6 @@ NFL_ROOKIE_GAME_BANDS = (
 NO_DEBUT_DRAFT_AGE_CAPS = {
     0: 1.00,
     1: 0.60,
-    2: 0.30,
-    3: 0.10,
 }
 
 NFL_ROOKIE_WEIGHTS = {
@@ -351,8 +360,62 @@ def availability_score(record: dict[str, Any]) -> float:
     return 75.0 if status in {"", "active"} else 60.0
 
 
+def consistency_score(record: dict[str, Any], fallback: float = 65.0) -> float:
+    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    explicit = _number(metrics.get("consistency"))
+    return round(_clamp(explicit if explicit is not None else fallback), 2)
+
+
+def opportunity_score(record: dict[str, Any]) -> float:
+    """Evidence-based current role/opportunity; not a fame or position premium."""
+    role_status = str(record.get("roleStatus") or "").strip().lower()
+    if record.get("starter") is True or role_status in {"starter", "starting", "first team", "first-team"}:
+        return 95.0
+    if role_status in {"reserve", "backup", "bench", "demoted"}:
+        return 45.0
+
+    summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
+    percentiles = summary.get("percentiles") if isinstance(summary.get("percentiles"), dict) else {}
+    usage = _number(percentiles.get("usage"))
+    if usage is not None:
+        if usage <= 1.0:
+            usage *= 100.0
+        return round(_clamp(45.0 + 0.50 * usage, 45.0, 95.0), 2)
+    return 60.0
+
+
+def development_score(record: dict[str, Any]) -> float:
+    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    explicit = _number(metrics.get("potential"))
+    runway = career_runway_score(record)
+    if explicit is None:
+        return runway
+    return round(_clamp(explicit * 0.60 + runway * 0.40), 2)
+
+
+def production_bucket_score(record: dict[str, Any], normalized_production: float) -> tuple[float, dict[str, float]]:
+    values = {
+        "normalizedProduction": _clamp(normalized_production),
+        "achievements": achievement_score(record),
+        "consistency": consistency_score(record, normalized_production),
+    }
+    score = sum(values[key] * NFL_PRODUCTION_BUCKET_WEIGHTS[key] for key in NFL_PRODUCTION_BUCKET_WEIGHTS)
+    return round(_clamp(score), 2), {key: round(value, 2) for key, value in values.items()}
+
+
+def potential_bucket_score(record: dict[str, Any]) -> tuple[float, dict[str, float]]:
+    values = {
+        "careerRunway": career_runway_score(record),
+        "opportunity": opportunity_score(record),
+        "availability": availability_score(record),
+        "development": development_score(record),
+    }
+    score = sum(values[key] * NFL_POTENTIAL_BUCKET_WEIGHTS[key] for key in NFL_POTENTIAL_BUCKET_WEIGHTS)
+    return round(_clamp(score), 2), {key: round(value, 2) for key, value in values.items()}
+
+
 def price_from_score(score: float) -> float:
-    normalized = _clamp(score) / 100.0
+    normalized = _clamp(score)
     value = PRICE_FLOOR + PRICE_SCALE * (normalized ** PRICE_EXPONENT)
     return round(max(PRICE_FLOOR, min(PRICE_CEILING, value)), 2)
 
@@ -411,7 +474,10 @@ def _derived_rookie_anchor(record: dict[str, Any]) -> tuple[float | None, dict[s
     metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
     achievements = _clamp(metrics.get("achievements", 20.0))
     pre_pro = _clamp(52.0 + draft * 0.38 + achievements * 0.05, 48.0, 96.0)
-    opportunity = _clamp(38.0 + draft * 0.52 + (7.0 if record.get("starter") else 0.0), 35.0, 96.0)
+    opportunity = max(
+        _clamp(38.0 + draft * 0.52, 35.0, 96.0),
+        opportunity_score(record),
+    )
     position = _rookie_position_value(record)
     development = _rookie_development(record)
     availability = max(82.0 if str(record.get("careerStatus") or "") == "Active" else 62.0, _clamp(metrics.get("availability", 75.0)))
@@ -426,16 +492,34 @@ def _derived_rookie_anchor(record: dict[str, Any]) -> tuple[float | None, dict[s
         "audience": audience,
     }
     score = sum(inputs[key] * weight for key, weight in NFL_ROOKIE_WEIGHTS.items())
-    anchor = 2.0 + GENERIC_NFL_ROOKIE_PRICE_CEILING * (_clamp(score) / 100.0) ** 2
+    anchor = PRICE_FLOOR + GENERIC_NFL_ROOKIE_PRICE_CEILING * (_clamp(score) / 100.0) ** 2
     return round(anchor, 2), {**{key: round(value, 2) for key, value in inputs.items()}, "rookieScore": round(score, 2)}
 
 
-def _draft_age_cap(record: dict[str, Any], *, current_year: int | None = None) -> float:
+def years_since_draft(record: dict[str, Any], *, current_year: int | None = None) -> int | None:
     draft_year = _number(record.get("draftYear"))
     if draft_year is None:
-        return 1.0
+        return None
     year = int(current_year or datetime.now(timezone.utc).year)
-    age = max(0, year - int(round(draft_year)))
+    return max(0, year - int(round(draft_year)))
+
+
+def is_rookie_ipo_player(record: dict[str, Any], *, current_year: int | None = None) -> bool:
+    """TalentX IPO regime is limited to rookies and second-year NFL players."""
+    age = years_since_draft(record, current_year=current_year)
+    if age is not None:
+        return age <= 1
+    experience = _number(record.get("experienceYears"))
+    if experience is not None:
+        return experience <= 2
+    stage = str(record.get("careerStage") or "").lower()
+    return "rookie" in stage or "drafted" in stage or "pre-draft" in stage
+
+
+def _draft_age_cap(record: dict[str, Any], *, current_year: int | None = None) -> float:
+    age = years_since_draft(record, current_year=current_year)
+    if age is None:
+        return 1.0
     return NO_DEBUT_DRAFT_AGE_CAPS.get(age, 0.0)
 
 
@@ -493,16 +577,13 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
     if components is None:
         return None, None, None
 
-    production = float(components["productionScore"])
-    achievements = achievement_score(record)
-    runway = career_runway_score(record)
-    availability = availability_score(record)
+    normalized_production = float(components["productionScore"])
+    production, production_inputs = production_bucket_score(record, normalized_production)
+    potential, potential_inputs = potential_bucket_score(record)
 
     inputs = {
         "production": production,
-        "achievements": achievements,
-        "careerRunway": runway,
-        "availability": availability,
+        "potential": potential,
     }
     score = sum(inputs[key] * weight for key, weight in NFL_VALUE_WEIGHTS.items())
     score = _clamp(score)
@@ -519,6 +600,10 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
         **components,
         "valueWeights": dict(NFL_VALUE_WEIGHTS),
         "valueInputs": {key: round(value, 2) for key, value in inputs.items()},
+        "productionSubweights": dict(NFL_PRODUCTION_BUCKET_WEIGHTS),
+        "potentialSubweights": dict(NFL_POTENTIAL_BUCKET_WEIGHTS),
+        "productionInputs": production_inputs,
+        "potentialInputs": potential_inputs,
         "valuationScore": round(score, 2),
         "careerFairValue": round(career_fair, 2),
         "rookieIpoAnchor": round(rookie_anchor, 2) if rookie_anchor is not None else None,
@@ -527,9 +612,10 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
         "rookieAnchorReconstruction": reconstructed,
         "fairValue": round(fair, 2),
         "pricingPrinciple": (
-            "position-normalized production-led NFL value; early-season fundamentals are sample-stabilized; "
-            "modest achievement, career-runway, and availability context; no fame or starter premium; "
-            "Rookie IPO fades with verified meaningful professional role evidence and time since draft"
+            "NFL veteran fundamental value = 70% Production + 30% Potential on the shared TalentX athlete-market "
+            "quadratic value scale; Production contains normalized recent/career/efficiency evidence, achievements, "
+            "and consistency; Potential contains career runway, verified role/usage opportunity, availability, and "
+            "development; no fame premium. Rookie IPO applies only to rookies and second-year players."
         ),
         "modelVersion": MODEL_VERSION,
     }

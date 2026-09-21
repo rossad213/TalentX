@@ -9,9 +9,9 @@ from typing import Any
 
 import nfl_production_pricing as core
 
-MODEL_VERSION = "2.1-nfl-rookie-factual-anchor-multifactor-handoff"
-MAX_DRAFT_AGE = 4
-TIME_CAPS = {0: 1.00, 1: 0.78, 2: 0.58, 3: 0.32, 4: 0.12}
+MODEL_VERSION = "2.2-nfl-rookie-year2-calibrated-ipo"
+MAX_DRAFT_AGE = 1
+TIME_CAPS = {0: 1.00, 1: 0.78}
 EXP_CAPS = {0: 1.00, 1: 1.00, 2: 0.78, 3: 0.58, 4: 0.32, 5: 0.12}
 ROLE_GAME_PACE = {
     "quarterback": 0.72, "tight end": 0.88, "wide receiver": 0.92,
@@ -38,6 +38,13 @@ def years_since_draft(record: dict[str, Any], current_year: int | None = None) -
 
 def _age_factor(record: dict[str, Any]) -> float:
     age = _num(record.get("age"))
+    role = str(record.get("role") or "").lower()
+    if "quarterback" in role or role.strip() == "qb":
+        if age is None or age <= 25: return 1.00
+        if age <= 27: return 0.90
+        if age <= 29: return 0.75
+        if age <= 31: return 0.55
+        return 0.35
     if age is None or age <= 23: return 1.00
     if age <= 24: return 0.96
     if age <= 25: return 0.90
@@ -83,12 +90,12 @@ def _derived_anchor(record: dict[str, Any]) -> tuple[float | None, dict[str, Any
         "draftCapital": draft,
         "positionValue": core._rookie_position_value(record),
         "development": core._rookie_development(record),
-        "opportunity": core._clamp(45.0 + draft * 0.45, 35.0, 96.0),
+        "opportunity": max(core._clamp(45.0 + draft * 0.45, 35.0, 96.0), core.opportunity_score(record)),
         "availability": max(82.0 if str(record.get("careerStatus") or "").lower() == "active" else 62.0,
                             core.availability_score(record)),
     }
     score = sum(inputs[key] * weight for key, weight in ANCHOR_WEIGHTS.items())
-    anchor = 2.0 + core.GENERIC_NFL_ROOKIE_PRICE_CEILING * (core._clamp(score) / 100.0) ** 2
+    anchor = core.PRICE_FLOOR + core.ROOKIE_IPO_SCALE * (core._clamp(score) / 100.0) ** 2
     detail = {key: round(float(value), 2) for key, value in inputs.items()}
     detail["rookieScore"] = round(score, 2)
     return round(anchor, 2), detail
@@ -153,28 +160,21 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
     if not core.is_nfl(record) or draft_age is None or draft_age > MAX_DRAFT_AGE:
         return None, None
     working, guarded = _working_record(record)
-    components = core.production_components(working)
-    if components is None: return None, None
-    values = {
-        "production": float(components["productionScore"]),
-        "achievements": core.achievement_score(working),
-        "careerRunway": core.career_runway_score(working),
-        "availability": core.availability_score(working),
-    }
-    score = core._clamp(sum(values[k] * w for k, w in core.NFL_VALUE_WEIGHTS.items()))
-    career_fair = core.price_from_score(score)
+    score, _, base_explanation = core.production_fair_value(working)
+    if score is None or base_explanation is None: return None, None
+    career_fair = core._number(base_explanation.get("careerFairValue"))
+    if career_fair is None: return None, None
     anchor, anchor_detail = _anchor(record)
     rookie_influence, factors = influence(record, current_year)
     fair = career_fair if anchor is None else anchor * rookie_influence + career_fair * (1.0 - rookie_influence)
     fair = round(max(core.PRICE_FLOOR, min(core.PRICE_CEILING, fair)), 2)
     return fair, {
-        **components, "valueWeights": dict(core.NFL_VALUE_WEIGHTS),
-        "valueInputs": {k: round(v, 2) for k, v in values.items()},
+        **base_explanation,
         "valuationScore": round(score, 2), "careerFairValue": round(career_fair, 2),
         "rookieIpoAnchor": anchor, "rookieInfluence": rookie_influence,
         "rookieAnchorReconstruction": anchor_detail, "rookieIpoFactors": factors,
         "rookieIpoMissingRecentSampleGuard": guarded, "fairValue": fair,
-        "pricingPrinciple": "production-led NFL value plus a temporary Rookie IPO bridge using factual draft capital, age, experience, durable games, meaningful NFL production, and role; no player-specific prices, legacy IPO carryover, fame premium, or generic starter premium",
+        "pricingPrinciple": "rookie and second-year NFL IPO bridge using factual draft capital, position-aware age/runway, verified role/usage opportunity and professional evidence; transitions into the same Production + Potential veteran scale",
         "modelVersion": f"{core.MODEL_VERSION}+rookie/{MODEL_VERSION}",
     }
 

@@ -97,25 +97,30 @@ class NFLProductionPricingTests(unittest.TestCase):
         }
         self.assertEqual(len(prices), 1)
 
-    def test_starter_or_reserve_label_does_not_change_price(self):
+    def test_verified_role_changes_potential_without_changing_production(self):
         starter = self.record(starter=True, roleStatus="starter")
         reserve = self.record(starter=False, roleStatus="reserve")
-        self.assertEqual(production_fair_value(starter)[1], production_fair_value(reserve)[1])
+        starter_result = production_fair_value(starter)
+        reserve_result = production_fair_value(reserve)
+        self.assertEqual(starter_result[2]["productionScore"], reserve_result[2]["productionScore"])
+        self.assertGreater(starter_result[2]["valueInputs"]["potential"], reserve_result[2]["valueInputs"]["potential"])
+        self.assertGreater(starter_result[1], reserve_result[1])
 
     def test_audience_or_fame_does_not_change_nfl_fair_value(self):
-        low = self.record(
-            activeMetrics={
-                "performance": 80, "achievements": 70, "consistency": 76,
-                "potential": 5, "availability": 75, "audience": 5,
-            },
-        )
-        high = self.record(
-            activeMetrics={
-                "performance": 80, "achievements": 70, "consistency": 76,
-                "potential": 100, "availability": 75, "audience": 100,
-            },
-        )
+        low = self.record(activeMetrics={
+            "performance": 80, "achievements": 70, "consistency": 76,
+            "potential": 70, "availability": 75, "audience": 5,
+        })
+        high = self.record(activeMetrics={
+            "performance": 80, "achievements": 70, "consistency": 76,
+            "potential": 70, "availability": 75, "audience": 100,
+        })
         self.assertEqual(production_fair_value(low)[1], production_fair_value(high)[1])
+
+    def test_development_potential_changes_value(self):
+        low = self.record(activeMetrics={"consistency": 76, "potential": 35, "availability": 75})
+        high = self.record(activeMetrics={"consistency": 76, "potential": 95, "availability": 75})
+        self.assertGreater(production_fair_value(high)[1], production_fair_value(low)[1])
 
     def test_age_and_career_stage_apply_modest_not_crushing_discount(self):
         young = self.record(age=25, careerStage="Early Career")
@@ -151,10 +156,11 @@ class NFLProductionPricingTests(unittest.TestCase):
         )
         self.assertGreater(production_fair_value(elite_veteran)[1], production_fair_value(young_mediocre)[1])
 
-    def test_price_curve_keeps_midlevel_players_well_below_elite_stars(self):
-        self.assertLess(price_from_score(70), 75)
-        self.assertGreater(price_from_score(93), 225)
-        self.assertGreater(price_from_score(95), 245)
+    def test_price_curve_matches_shared_talentx_athlete_market_scale(self):
+        self.assertGreater(price_from_score(70), 155)
+        self.assertLess(price_from_score(70), 170)
+        self.assertGreater(price_from_score(93), 280)
+        self.assertGreater(price_from_score(95), 295)
 
     def test_rookie_ipo_anchor_is_preserved_before_production(self):
         rookie = self.record(
@@ -168,6 +174,19 @@ class NFLProductionPricingTests(unittest.TestCase):
         _, fair, explanation = production_fair_value(rookie)
         self.assertAlmostEqual(fair, 51.31, places=2)
         self.assertEqual(explanation["rookieInfluence"], 1.0)
+
+    def test_third_year_player_has_exited_the_ipo_regime(self):
+        third_year = self.record(
+            careerStage="Early Career",
+            age=24,
+            draftYear=2024,
+            experienceYears=3,
+            professionalGames=30,
+            rookiePricing={"draftInfluencePct": 100, "calibratedIpoPrice": 80.0},
+        )
+        _, _, explanation = production_fair_value(third_year)
+        self.assertEqual(explanation["rookieInfluence"], 0.0)
+        self.assertEqual(explanation["fairValue"], explanation["careerFairValue"])
 
     def test_rookie_ipo_fades_instead_of_disappearing_after_first_stats(self):
         produced = self.record(

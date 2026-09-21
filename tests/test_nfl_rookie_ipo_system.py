@@ -107,6 +107,12 @@ class NFLRookieIpoSystemTests(unittest.TestCase):
         self.assertIsNone(fair)
         self.assertIsNone(explanation)
 
+    def test_third_year_player_is_no_longer_rookie_ipo_eligible(self):
+        record = self.record(draftYear=2024, experienceYears=3, professionalGames=30)
+        fair, explanation = rookie.fair_value(record, current_year=2026)
+        self.assertIsNone(fair)
+        self.assertIsNone(explanation)
+
     def test_missing_draft_metadata_never_invents_an_anchor(self):
         record = self.record(draftYear=None, draftRound=None, draftPick=None)
         fair, explanation = rookie.fair_value(record, current_year=2026)
@@ -134,8 +140,8 @@ class NFLRookieIpoSystemTests(unittest.TestCase):
     def test_missing_recent_sample_does_not_treat_provider_zero_as_real_zero(self):
         record = self.record(
             professionalGames=0,
-            experienceYears=3,
-            draftYear=2024,
+            experienceYears=2,
+            draftYear=2025,
             age=24,
             pricingEvidenceSummary={
                 "percentiles": {
