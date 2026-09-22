@@ -9,7 +9,7 @@ from typing import Any
 
 import nfl_production_pricing as core
 
-MODEL_VERSION = "2.2-nfl-rookie-year2-calibrated-ipo"
+MODEL_VERSION = "2.3-nfl-rookie-shared-evidence-calibration"
 MAX_DRAFT_AGE = 1
 TIME_CAPS = {0: 1.00, 1: 0.78}
 EXP_CAPS = {0: 1.00, 1: 1.00, 2: 0.78, 3: 0.58, 4: 0.32, 5: 0.12}
