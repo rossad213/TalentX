@@ -21,7 +21,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-MODEL_VERSION = "3.2-nfl-production-potential-shared-market-scale"
+MODEL_VERSION = "3.3-nfl-production-potential-evidence-calibrated"
 
 PRICE_FLOOR = 4.0
 PRICE_SCALE = 0.0325
