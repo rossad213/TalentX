@@ -35,7 +35,7 @@ from nfl_production_pricing import MODEL_VERSION, production_fair_value
 
 ROOT = Path(__file__).resolve().parents[1]
 NFL_DRAFT_METADATA = ROOT / "data" / "nfl_draft_metadata_overrides.json"
-REPAIR_VERSION = "4.0-nfl-live-sample-and-draft-metadata-rebase"
+REPAIR_VERSION = "4.1-nfl-sample-and-achievement-evidence-rebase"
 SIGNAL_KEYS = (
     "recentProduction",
     "careerProduction",
@@ -263,16 +263,27 @@ def _refresh_nfl_percentiles(
             float(signals.get(key, 0.0)),
             [float(peer.get(key, 0.0)) for peer in position_pool],
         )
-    award_pool = universal_pool or position_pool
-    raw_pcts["awardPoints"] = percentile(
-        float(signals.get("awardPoints", 0.0)),
-        [float(peer.get("awardPoints", 0.0)) for peer in award_pool],
-    )
+    # Award observations are extremely sparse in the NFL feed, so percentile
+    # ranking turns a zero into an artificial ~50th-percentile achievement score
+    # and a single award into an almost-elite score. Treat career production as
+    # the durable track-record signal and use raw award points only as an
+    # absolute bonus. This preserves meaningful career context without rewarding
+    # players merely because most peers also have zero recorded awards.
+    career_pct = raw_pcts["careerProduction"]
+    award_points = max(0.0, float(signals.get("awardPoints", 0.0)))
+    award_context = min(1.0, award_points / 12.0)
+    raw_pcts["awardPoints"] = career_pct * 0.70 + award_context * 0.30
 
     pcts, sample_games, sample_weight = _stabilize_early_season_percentiles(record, raw_pcts)
     summary = dict(record.get("pricingEvidenceSummary") or {})
     summary["cohort"] = f"NFL · {group} normalized production"
     summary["normalization"] = "position-group raw statistics -> universal 0-100 NFL value scale"
+    summary["achievementCalibration"] = {
+        "careerProductionWeight": 0.70,
+        "absoluteAwardWeight": 0.30,
+        "awardPointsForFullBonus": 12.0,
+        "rawAwardPoints": round(max(0.0, float(signals.get("awardPoints", 0.0))), 2),
+    }
     summary["unstabilizedPercentiles"] = {key: round(value, 4) for key, value in raw_pcts.items()}
     summary["percentiles"] = {key: round(value, 4) for key, value in pcts.items()}
     summary["recentSampleGamesEstimate"] = sample_games

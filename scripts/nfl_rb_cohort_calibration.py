@@ -19,7 +19,7 @@ from typing import Any
 
 from enrich_current_catalog import percentile
 
-RB_COHORT_CALIBRATION_VERSION = "1.0-rb-current-season-consistent-window"
+RB_COHORT_CALIBRATION_VERSION = "1.1-rb-current-season-achievement-evidence"
 EARLY_SEASON_FULL_WEIGHT_GAMES = 6.0
 
 
@@ -214,11 +214,11 @@ def apply_rb_percentiles(record: dict[str, Any], context: RBCohortContext) -> bo
     recent_pct = career_pct + (raw_recent_pct - career_pct) * sample_weight
     efficiency_pct = 0.5 + (raw_efficiency_pct - 0.5) * sample_weight
 
-    # Sparse award counts should add context, not create a near-binary 50-point
-    # achievement gap. Durable career production remains the main accomplishment
-    # signal, with raw awards supplying a modest absolute bonus.
+    # Keep RB accomplishment scoring on the same evidence-calibrated scale as
+    # the rest of the NFL: durable career production plus an absolute award
+    # bonus. Zero recorded awards contribute no artificial neutral bonus.
     award_points = max(0.0, _number(raw.get("awardPoints")) or 0.0)
-    award_context = 0.50 + 0.40 * min(1.0, award_points / 12.0)
+    award_context = min(1.0, award_points / 12.0)
     achievement_pct = career_pct * 0.70 + award_context * 0.30
 
     percentiles = dict(summary.get("percentiles") or {})
@@ -242,6 +242,7 @@ def apply_rb_percentiles(record: dict[str, Any], context: RBCohortContext) -> bo
     summary["rbAchievementCalibration"] = {
         "careerProductionWeight": 0.70,
         "awardContextWeight": 0.30,
+        "awardPointsForFullBonus": 12.0,
         "rawAwardPoints": round(award_points, 2),
         "calibratedAchievementPercentile": round(achievement_pct, 4),
     }

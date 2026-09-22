@@ -29,7 +29,7 @@ from nfl_production_pricing import (
 )
 
 UNSAFE_REPAIR_VERSION = base.REPAIR_VERSION
-SAFE_REPAIR_VERSION = "4.3-nfl-selective-rb-cohort-rebase"
+SAFE_REPAIR_VERSION = "4.4-nfl-verified-game-sample-rebase"
 EARLY_SEASON_FULL_WEIGHT_GAMES = base.EARLY_SEASON_FULL_WEIGHT_GAMES
 
 
@@ -53,20 +53,23 @@ def _regular_season_event_games(record: dict[str, Any], *, now: datetime | None 
 
 
 def _recent_sample_games(record: dict[str, Any]) -> int | None:
-    """Use verified RB box scores before generic usage; preserve legacy priority elsewhere."""
+    """Prefer verified current-season games before generic usage estimates."""
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     for key in ("recentSeasonGames", "recentGames", "seasonGames"):
         direct = base._number(summary.get(key))
         if direct is not None and direct >= 0:
             return min(18, int(round(direct)))
 
-    # Generic NFL usage includes games played and can turn one RB game into a
-    # fake multi-game sample. Only a verified RB event containing box-score stats
-    # is allowed to outrank provider usage; empty event shells keep legacy logic.
+    # Durable game events are a better sample-size source than the generic usage
+    # signal. The latter is not a game counter and was causing many two-game
+    # starters to be treated as one-game samples.
     if rb_calibration.is_nfl_running_back(record):
         verified_rb_events = rb_calibration.current_regular_events(record)
         if verified_rb_events:
             return min(18, len(verified_rb_events))
+    event_games = _regular_season_event_games(record)
+    if event_games is not None:
+        return event_games
 
     signals = base._raw_signals(record)
     if signals is not None:
@@ -87,11 +90,13 @@ def _uses_event_fallback(record: dict[str, Any]) -> bool:
 
     if rb_calibration.is_nfl_running_back(record) and rb_calibration.current_regular_events(record):
         return True
+    if _regular_season_event_games(record) is not None:
+        return True
 
     signals = base._raw_signals(record)
     if signals is not None and max(0.0, float(signals.get("usage", 0.0))) > 0:
         return False
-    return _regular_season_event_games(record) is not None
+    return False
 
 
 def _sample_changed(previous: Any, current: Any) -> bool:

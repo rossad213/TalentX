@@ -72,9 +72,23 @@ class NFLSafeRebaseTests(unittest.TestCase):
             },
         }
 
-    def test_provider_usage_beats_single_event_fallback(self):
+    def test_verified_game_event_beats_generic_usage_estimate(self):
         record = self.record("usage-rb", "Usage RB", usage=36.0, recent=100.0, career=150.0, old_sample=9)
-        self.assertEqual(_recent_sample_games(record), 9)
+        self.assertEqual(_recent_sample_games(record), 1)
+
+    def test_two_verified_games_fix_non_rb_one_game_usage_estimate(self):
+        year = datetime.now(timezone.utc).year
+        record = self.record("two-game-wr", "Two Game WR", usage=2.0, recent=100.0, career=150.0, old_sample=1)
+        record["role"] = "Wide Receiver"
+        record["starter"] = False
+        record["priceEvents"].append({
+            "eventType": "game",
+            "eventKey": "two-game-wr-week2",
+            "startedAt": f"{year}-09-20T17:00:00Z",
+            "priceBefore": 70.0,
+            "priceAfter": 70.0,
+        })
+        self.assertEqual(_recent_sample_games(record), 2)
 
     def test_preseason_only_does_not_invent_zero_game_sample(self):
         year = datetime.now(timezone.utc).year

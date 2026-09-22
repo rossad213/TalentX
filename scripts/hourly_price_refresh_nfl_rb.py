@@ -106,7 +106,6 @@ def production_first_apply_game_market_moves(
     trend = [round(value, 2) for value in prior_trend] or [round(old_price, 2)] * 18
     event_results = []
     seen_keys: set[str] = set()
-    production_anchor_applied = False
 
     for event in sorted(events, key=lambda value: str(value.get("startedAt") or "")):
         key = str(event.get("eventKey") or event.get("eventId") or "").strip()
@@ -124,13 +123,17 @@ def production_first_apply_game_market_moves(
             continue
 
         before = price
-        event_base = model_target if not production_anchor_applied else price
-        anchor_move = ((event_base / before) - 1.0) * 100.0 if before > 0 else 0.0
+        # A completed game should move the market from the actual pre-game price.
+        # Re-anchoring to fair value inside the event loop made ordinary game
+        # results appear as 30-50% moves whenever the model target had drifted.
+        # Fundamental convergence is handled by the dedicated rebase step later
+        # in the workflow; event pricing records only the game surprise itself.
+        event_base = price
+        anchor_move = 0.0
         next_price = max(0.01, round(event_base * (1.0 + event_move / 100.0), 2))
         actual_move = round((next_price / before - 1.0) * 100.0, 3)
         price = next_price
         trend = trend[-17:] + [price]
-        production_anchor_applied = True
         event_results.append({
             **event,
             **evidence,
@@ -140,6 +143,8 @@ def production_first_apply_game_market_moves(
             "priceAfter": price,
             "productionAnchorPrice": round(event_base, 2),
             "productionAnchorMovePct": round(anchor_move, 3),
+            "productionTargetPrice": round(model_target, 2),
+            "productionTargetGapPct": round(((model_target / before) - 1.0) * 100.0, 3) if before > 0 else 0.0,
             "nflProductionPriceModelVersion": production_pricing.MODEL_VERSION,
         })
 
