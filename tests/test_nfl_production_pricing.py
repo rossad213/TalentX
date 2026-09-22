@@ -255,6 +255,45 @@ class NFLProductionPricingTests(unittest.TestCase):
         self.assertLess(veteran_price, 200)
         self.assertGreater(elite_price, veteran_price * 1.35)
 
+    def test_achievement_calibration_uses_career_context_not_sparse_award_percentiles(self):
+        low = self.record(
+            id="low-track-record", name="Low Track Record", role="Wide Receiver",
+            nflProductionPriceModelVersion="old-model",
+            pricingEvidenceSummary={"rawSignals": {
+                "recentProduction": 40, "careerProduction": 20, "efficiency": 50,
+                "usage": 2, "careerUsage": 10, "awardPoints": 0,
+            }},
+        )
+        high = self.record(
+            id="high-track-record", name="High Track Record", role="Wide Receiver",
+            nflProductionPriceModelVersion="old-model",
+            pricingEvidenceSummary={"rawSignals": {
+                "recentProduction": 40, "careerProduction": 200, "efficiency": 50,
+                "usage": 2, "careerUsage": 80, "awardPoints": 0,
+            }},
+        )
+        awarded = self.record(
+            id="awarded", name="Awarded", role="Wide Receiver",
+            nflProductionPriceModelVersion="old-model",
+            pricingEvidenceSummary={"rawSignals": {
+                "recentProduction": 40, "careerProduction": 20, "efficiency": 50,
+                "usage": 2, "careerUsage": 10, "awardPoints": 3,
+            }},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sports.json"
+            path.write_text(json.dumps([low, high, awarded]), encoding="utf-8")
+            repair_catalog(path, repaired_at="2026-09-21T00:00:00Z")
+            updated = {item["id"]: item for item in json.loads(path.read_text(encoding="utf-8"))}
+
+        low_achievement = updated["low-track-record"]["pricingEvidenceSummary"]["percentiles"]["awardPoints"]
+        high_achievement = updated["high-track-record"]["pricingEvidenceSummary"]["percentiles"]["awardPoints"]
+        awarded_achievement = updated["awarded"]["pricingEvidenceSummary"]["percentiles"]["awardPoints"]
+        self.assertLess(low_achievement, high_achievement)
+        self.assertGreater(awarded_achievement, low_achievement)
+        self.assertLess(low_achievement, 0.50)
+        self.assertIn("achievementCalibration", updated["low-track-record"]["pricingEvidenceSummary"])
+
     def test_repair_normalizes_raw_production_inside_position_groups(self):
         low = self.record(
             id="low-wr", name="Low WR", role="Wide Receiver", marketPrice=100,
