@@ -9,7 +9,7 @@ from pathlib import Path
 import nfl_rookie_transition as rookie
 import repair_nfl_production_prices as base
 
-REPAIR_VERSION = "1.1-nfl-rookie-year2-model-migration"
+REPAIR_VERSION = "1.0-nfl-rookie-ipo-multifactor-rebase"
 
 
 def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, int]:
@@ -40,9 +40,9 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         record["nflRookieIpoEvidenceSignature"] = signature
         record["nflRookieIpoEvaluatedAt"] = stamp
 
-        # Rebase only when the pricing model version changes. New games/stat
-        # signatures update fundamentals, while the event engine moves marketPrice.
-        if prior_version == rookie.MODEL_VERSION:
+        # Rebase once for a model/evidence change. Hourly runs with identical
+        # evidence only refresh fair value metadata and leave market history alone.
+        if prior_version == rookie.MODEL_VERSION and prior_signature == signature:
             continue
 
         current = base._number(record.get("marketPrice"))
@@ -51,10 +51,10 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
         overlay = base._recent_overlay_pct(record)
         target = max(0.01, round(fair * (1.0 + overlay / 100.0), 2))
         ratio = target / current if current > 0 else 1.0
-        record["previousMarketPrice"] = round(current, 2)
+        base._scale_price_state(record, ratio)
         record["marketPrice"] = target
-        record["dailyChange"] = round(target - current, 2)
-        record["hourlyChangePct"] = round((target / current - 1.0) * 100.0, 3) if current > 0 else 0.0
+        if base._number(record.get("previousMarketPrice")) is None:
+            record["previousMarketPrice"] = target
         record["nflRookieIpoRebaseVersion"] = REPAIR_VERSION
         record["nflRookieIpoRebasedAt"] = stamp
         factors = explanation.get("rookieIpoFactors") or {}
@@ -73,9 +73,7 @@ def repair_catalog(path: Path, *, repaired_at: str | None = None) -> tuple[int, 
             "missingRecentSampleGuard": explanation.get("rookieIpoMissingRecentSampleGuard"),
             "latestGameOverlayPct": round(overlay, 3),
             "rebasedPrice": target,
-            "historyScaleRatio": 1.0,
-            "marketMoveRatio": round(ratio, 6),
-            "futureBehavior": "fundamental updates do not reset marketPrice; verified events/trading move the quote",
+            "historyScaleRatio": round(ratio, 6),
         }
         repriced += 1
 

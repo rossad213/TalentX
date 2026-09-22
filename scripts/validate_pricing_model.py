@@ -93,10 +93,9 @@ def main() -> int:
         )
         for higher, lower in zip(ranked_records, ranked_records[1:]):
             if float(higher.get("fundamentalValue") or 0) + TOLERANCE < float(lower.get("fundamentalValue") or 0):
-                print(
-                    f"PRICING VALIDATION WARNING: {category} live evidence crossed curated benchmark order: "
-                    f"{higher.get('name')} now prices below {lower.get('name')}. "
-                    "Benchmark rank remains a prior; evidence-backed final fundamentals may cross."
+                errors.append(
+                    f"{category} benchmark order reversed: {higher.get('name')} "
+                    f"must not price below {lower.get('name')} on fundamentals"
                 )
                 break
 

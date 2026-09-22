@@ -24,7 +24,6 @@ import repair_nfl_production_prices as base
 from nfl_production_pricing import (
     MODEL_VERSION,
     _has_meaningful_professional_evidence,
-    is_rookie_ipo_player,
     production_fair_value,
 )
 
@@ -228,7 +227,6 @@ def repair_catalog(
 
         rookie_influence = base._number(explanation.get("rookieInfluence")) or 0.0
         handoff_repaired = _needs_meaningful_usage_handoff_repair(record, prior_model_version, explanation)
-        model_migration = prior_model_version != MODEL_VERSION and not is_rookie_ipo_player(record)
 
         # If broad v4 already made exactly a still-valid correction, keep that
         # price. A new RB cohort repair must still be allowed to reprice once.
@@ -238,7 +236,6 @@ def repair_catalog(
             and not draft_recovered
             and not handoff_repaired
             and not rb_cohort_repaired
-            and not model_migration
         ):
             reason = "missing-sample-recovered" if event_fallback_needed else "missing-draft-metadata-recovered"
             if event_fallback_needed and local_draft_override:
@@ -246,7 +243,7 @@ def repair_catalog(
             _mark_preserved_unsafe_v4(record, stamp, reason)
             continue
 
-        evidence_changed = model_migration or sample_repaired or draft_recovered or handoff_repaired or rb_cohort_repaired
+        evidence_changed = sample_repaired or draft_recovered or handoff_repaired or rb_cohort_repaired
         can_reprice = evidence_changed and (has_ranked_evidence or rookie_influence > 0.0)
         if not can_reprice:
             continue
@@ -264,27 +261,16 @@ def repair_catalog(
         overlay = base._recent_overlay_pct(record)
         target = max(0.01, round(fair * (1.0 + overlay / 100.0), 2))
         ratio = target / current if current > 0 else 1.0
-        if model_migration:
-            # A model migration corrects today's quote once without rewriting historical chart prices.
-            record["previousMarketPrice"] = round(current, 2)
-            record["marketPrice"] = target
-            record["dailyChange"] = round(target - current, 2)
-            record["hourlyChangePct"] = round((target / current - 1.0) * 100.0, 3) if current > 0 else 0.0
-            history_scale_ratio = 1.0
-        else:
-            base._scale_price_state(record, ratio)
-            record["marketPrice"] = target
-            if base._number(record.get("previousMarketPrice")) is None:
-                record["previousMarketPrice"] = target
-            history_scale_ratio = ratio
+        base._scale_price_state(record, ratio)
+        record["marketPrice"] = target
+        if base._number(record.get("previousMarketPrice")) is None:
+            record["previousMarketPrice"] = target
         record["nflProductionRebaseVersion"] = SAFE_REPAIR_VERSION
         record["nflProductionRebasedAt"] = stamp
         if rb_cohort_repaired:
             rb_calibration.mark_rb_rebased(record)
         cohort = str((record.get("pricingEvidenceSummary") or {}).get("cohort") or "NFL normalized")
-        if model_migration:
-            reason = "production-potential-shared-market-model-migration"
-        elif rb_cohort_repaired:
+        if rb_cohort_repaired:
             reason = "rb-current-season-cohort-calibration"
         elif handoff_repaired:
             reason = "meaningful-usage-rookie-ipo-restored"
@@ -307,8 +293,7 @@ def repair_catalog(
             "previousRecentSampleGamesEstimate": prior_sample,
             "recentSampleGamesEstimate": current_sample,
             "recentSampleWeight": (record.get("pricingEvidenceSummary") or {}).get("recentSampleWeight"),
-            "historyScaleRatio": round(history_scale_ratio, 6),
-            "marketMoveRatio": round(ratio, 6),
+            "historyScaleRatio": round(ratio, 6),
             "rbCohortCalibrationVersion": (
                 rb_calibration.RB_COHORT_CALIBRATION_VERSION if rb_cohort_repaired else None
             ),
