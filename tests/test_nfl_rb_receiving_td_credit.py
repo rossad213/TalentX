@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +129,52 @@ class NflRunningBackReceivingTouchdownTests(unittest.TestCase):
         self.assertAlmostEqual(move, 1.100, places=2)
         self.assertGreater(move, 1.0)
         self.assertLess(move, 1.3)
+
+
+    def test_game_event_moves_from_pre_game_price_without_fair_value_reanchor(self) -> None:
+        old_record = {
+            **self.bijan_record(),
+            "marketPrice": 100.0,
+            "trend": [100.0] * 18,
+            "priceEvents": [],
+        }
+        new_record = dict(old_record)
+        event = {
+            **self.bijan_event(),
+            "eventKey": "espn:no-reanchor",
+            "eventId": "no-reanchor",
+        }
+        reliability = SimpleNamespace(
+            RESULTS_MODEL_VERSION="test-results",
+            results_based_game_event_move=lambda *_args, **_kwargs: (
+                2.0,
+                {"comparable": True, "performanceDeltaPct": 25.0},
+            ),
+        )
+        with (
+            patch.object(rb, "_reliability", reliability),
+            patch.object(
+                rb.production_pricing,
+                "production_fair_value",
+                return_value=(80.0, 200.0, {"fairValue": 200.0}),
+            ),
+        ):
+            result, change_pct, events = rb.production_first_apply_game_market_moves(
+                old_record,
+                new_record,
+                {},
+                [event],
+                None,
+                "2026-09-21T18:00:00Z",
+            )
+
+        self.assertEqual(result["marketPrice"], 102.0)
+        self.assertAlmostEqual(change_pct, 2.0, places=2)
+        self.assertAlmostEqual(events[0]["movePct"], 2.0, places=3)
+        self.assertEqual(events[0]["productionAnchorMovePct"], 0.0)
+        self.assertEqual(events[0]["productionAnchorPrice"], 100.0)
+        self.assertEqual(events[0]["productionTargetPrice"], 200.0)
+        self.assertEqual(events[0]["productionTargetGapPct"], 100.0)
 
 
 if __name__ == "__main__":
