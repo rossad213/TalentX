@@ -4,6 +4,7 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -111,6 +112,25 @@ class NflRunningBackReceivingTouchdownTests(unittest.TestCase):
         base = rb._original_signal_bundle(record, stats, {}, 0)
         corrected = rb.signal_bundle_with_rb_receiving_td_credit(record, stats, {}, 0)
         self.assertEqual(corrected, base)
+
+    def test_install_preserves_shared_nba_style_market_application(self) -> None:
+        def shared_market_path(*_args, **_kwargs):
+            return None
+
+        reliability = SimpleNamespace(
+            apply_game_market_moves_with_history=shared_market_path,
+        )
+        with (
+            patch.object(rb.refresh, "signal_bundle", rb._original_signal_bundle),
+            patch.object(rb.refresh, "cohort_key", rb._original_cohort_key),
+            patch.object(rb.refresh, "apply_game_market_moves", rb.refresh.apply_game_market_moves),
+            patch.object(nfl, "NFL_EXPECTATION_MODEL_VERSION", nfl.NFL_EXPECTATION_MODEL_VERSION),
+            patch.object(rb.opportunity, "install_opportunity_protection"),
+            patch.object(nfl, "install_nfl_layer", return_value=reliability),
+        ):
+            installed = rb.install_rb_receiving_td_credit()
+            self.assertIs(installed, reliability)
+            self.assertIs(rb.refresh.apply_game_market_moves, shared_market_path)
 
     def test_bijan_steelers_game_becomes_meaningfully_positive(self) -> None:
         record = self.bijan_record()
