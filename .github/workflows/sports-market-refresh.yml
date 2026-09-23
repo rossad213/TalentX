@@ -208,6 +208,12 @@ jobs:
                   output.append(record)
                   continue
               replacement = dict(prior)
+              # Keep the current catalog identity. The rollback is for NFL market
+              # state, not for profile identifiers assigned after the snapshot.
+              # Reusing historical IDs/tickers can collide with current records.
+              for identity_key in ("id", "ticker", "name"):
+                  if identity_key in record:
+                      replacement[identity_key] = record[identity_key]
               replacement["nflPre32StateRestoreVersion"] = restore_version
               output.append(replacement)
               restored += 1
