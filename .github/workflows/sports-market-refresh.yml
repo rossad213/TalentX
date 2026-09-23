@@ -1,229 +1,179 @@
 name: Sports market refresh
 
 on:
-  workflow_run:
-    workflows: ["Build current catalog baseline"]
-    types: [completed]
   push:
     branches: [main]
     paths:
-      - "scripts/hourly_price_refresh.py"
-      - "scripts/hourly_price_refresh_nfl.py"
-      - "scripts/hourly_price_refresh_nfl_opportunity.py"
-      - "scripts/hourly_price_refresh_nfl_rb.py"
-      - "scripts/nfl_production_pricing.py"
-      - "scripts/nfl_rookie_transition.py"
-      - "scripts/sync_nfl_draft_metadata.py"
-      - "scripts/repair_nfl_rookie_ipo_prices.py"
-      - "scripts/repair_nfl_persisted_opportunity_prices.py"
-      - "scripts/repair_nfl_production_prices.py"
-      - "scripts/repair_nfl_production_prices_safe.py"
-      - "scripts/repair_mlb_market_prices.py"
-      - "scripts/tennis_event_refresh.py"
-      - "scripts/tennis_event_refresh_results.py"
-      - "scripts/golf_event_refresh.py"
-      - "scripts/golf_event_refresh_results.py"
-      - "scripts/athlete_career_event_refresh.py"
-      - "scripts/restore_hourly_event_market_state.py"
-      - "scripts/explain_event_pricing_only.py"
-      - "scripts/append_game_event_history.py"
-      - "scripts/append_price_history.py"
-      - "scripts/category_market_store.py"
-      - "data/nfl_draft_metadata_overrides.json"
-      - "tests/test_hourly_price_refresh.py"
-      - "tests/test_nfl_per_game_expectations.py"
-      - "tests/test_nfl_rb_receiving_td_credit.py"
-      - "tests/test_nfl_opportunity_protection.py"
-      - "tests/test_nfl_production_pricing.py"
-      - "tests/test_nfl_rookie_ipo_system.py"
-      - "tests/test_nfl_fundamental_stability.py"
-      - "tests/test_nfl_safe_rebase.py"
-      - "tests/test_results_event_pricing.py"
-      - "tests/test_uncapped_sports_refresh.py"
-      - "tests/test_specialized_uncapped_results.py"
-      - "tests/test_game_event_history.py"
-      - "tests/test_tennis_event_refresh.py"
-      - "tests/test_golf_event_refresh.py"
-      - "tests/test_athlete_career_event_refresh.py"
-      - "tests/test_pricing_engine_v2.py"
-      - "tests/test_category_market_store.py"
       - ".github/workflows/sports-market-refresh.yml"
-  schedule:
-    - cron: "23 * * * *"
-  workflow_dispatch:
 
 permissions:
   actions: read
   contents: read
 
-concurrency:
-  group: talentx-sports-market
-  cancel-in-progress: false
-
 jobs:
-  refresh:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+  repair_nhl_only:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-          cache: pip
-      - run: python -m pip install --upgrade -r requirements.txt
-      - name: Restore Sports-owned market state
+
+      - name: Restore NHL only from true pre-intervention state
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          rm -rf _baseline _prior _published_fallback
-          mkdir -p _baseline _prior _published_fallback data/market
-          printf '[]' > data/prior_sports_state.json
+          rm -rf _current _clean out
+          mkdir -p _current _clean out/market
 
-          source_ready=0
-          baseline_id=""
-          baseline_time=""
-          prior_id=""
-          prior_time=""
+          # 717 contains the current Sports state after the first NHL repair.
+          # 706 is the final successful Sports run before the NFL rollback work began.
+          gh run download "35892549105" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _current
+          gh run download "35744646096" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _clean
 
-          # Prefer the latest successful full baseline when its artifact still exists.
-          baseline_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-current-catalog-and-pages.yml/runs?status=success&per_page=1" 2>/dev/null || printf '{}')"
-          baseline_id="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].id // empty')"
-          baseline_time="$(printf '%s' "$baseline_meta" | jq -r '.workflow_runs[0].created_at // empty')"
-          if [ -n "$baseline_id" ]; then
-            if gh run download "$baseline_id" -R "$GITHUB_REPOSITORY" -n talentx-current-catalog -D _baseline; then
-              baseline_catalog="$(find _baseline -name current_catalog.json -print -quit)"
-              if [ -n "$baseline_catalog" ]; then
-                python scripts/category_market_store.py extract --catalog "$baseline_catalog" --category sports --output data/current_catalog.json
-                source_ready=1
-                echo "Restored Sports from full baseline run $baseline_id."
-              else
-                echo "WARNING: baseline run $baseline_id has no current_catalog.json; trying recent Sports state."
-              fi
-            else
-              echo "WARNING: baseline artifact for run $baseline_id is unavailable/expired; trying recent Sports state."
-            fi
-          fi
+          current_state="$(find _current -name sports.json -print -quit)"
+          clean_state="$(find _clean -name sports.json -print -quit)"
+          current_manifest="$(find _current -name hourly_refresh_manifest.json -print -quit)"
 
-          # A valid recent Sports artifact is authoritative for Sports and keeps this
-          # workflow alive even when the old full-baseline artifact has expired.
-          prior_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/sports-market-refresh.yml/runs?status=success&per_page=1" 2>/dev/null || printf '{}')"
-          prior_id="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].id // empty')"
-          prior_time="$(printf '%s' "$prior_meta" | jq -r '.workflow_runs[0].created_at // empty')"
-          if [ -n "$prior_id" ]; then
-            if gh run download "$prior_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _prior; then
-              prior_state="$(find _prior -name sports.json -print -quit)"
-              prior_manifest="$(find _prior -name hourly_refresh_manifest.json -print -quit)"
-              if [ -n "$prior_manifest" ]; then cp "$prior_manifest" data/hourly_refresh_manifest.json; fi
-              if [ -n "$prior_state" ]; then
-                cp "$prior_state" data/prior_sports_state.json
-                if [ "$source_ready" -eq 0 ]; then
-                  cp "$prior_state" data/current_catalog.json
-                  source_ready=1
-                  echo "Recovered Sports directly from successful Sports run $prior_id."
-                elif [ -n "$prior_time" ] && { [ -z "$baseline_time" ] || [ "$prior_time" \> "$baseline_time" ]; }; then
-                  cp "$prior_state" data/current_catalog.json
-                else
-                  python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$prior_state" --category sports --mode market
-                fi
-              fi
-            else
-              echo "WARNING: latest successful Sports artifact could not be downloaded."
-            fi
-          fi
+          test -n "$current_state" || { echo "Missing current sports.json"; exit 1; }
+          test -n "$clean_state" || { echo "Missing pre-intervention sports.json"; exit 1; }
+          test -n "$current_manifest" || { echo "Missing current hourly_refresh_manifest.json"; exit 1; }
 
-          # Last-known-good published market is the final recovery source.
-          if [ "$source_ready" -eq 0 ]; then
-            published_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/publish-market.yml/runs?status=success&per_page=1" 2>/dev/null || printf '{}')"
-            published_id="$(printf '%s' "$published_meta" | jq -r '.workflow_runs[0].id // empty')"
-            if [ -n "$published_id" ] && gh run download "$published_id" -R "$GITHUB_REPOSITORY" -n talentx-published-market -D _published_fallback; then
-              published_catalog="$(find _published_fallback -name current_catalog.json -print -quit)"
-              if [ -n "$published_catalog" ]; then
-                python scripts/category_market_store.py extract --catalog "$published_catalog" --category sports --output data/current_catalog.json
-                source_ready=1
-                echo "Recovered Sports from published market run $published_id."
-              fi
-            fi
-          fi
+          python - "$current_state" "$clean_state" out/market/sports.json <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
 
-          test "$source_ready" -eq 1 || { echo "No valid Sports recovery source is available."; exit 1; }
-          echo "WEEKLY_BASELINE_RUN_ID=${baseline_id:-${prior_id:-}}" >> "$GITHUB_ENV"
-      - name: Validate Sports pricing logic
-        run: >-
-          python -m unittest
-          tests/test_hourly_price_refresh.py
-          tests/test_nfl_per_game_expectations.py
-          tests/test_nfl_rb_receiving_td_credit.py
-          tests/test_nfl_opportunity_protection.py
-          tests/test_nfl_production_pricing.py
-          tests/test_nfl_rookie_ipo_system.py
-          tests/test_nfl_fundamental_stability.py
-          tests/test_nfl_safe_rebase.py
-          tests/test_results_event_pricing.py
-          tests/test_uncapped_sports_refresh.py
-          tests/test_specialized_uncapped_results.py
-          tests/test_game_event_history.py
-          tests/test_tennis_event_refresh.py
-          tests/test_golf_event_refresh.py
-          tests/test_athlete_career_event_refresh.py
-          tests/test_pricing_engine_v2.py
-          tests/test_category_market_store.py -v
-      - name: Sync factual NFL draft metadata
-        run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
-      - name: Refresh completed-game evidence
-        run: >-
-          python scripts/hourly_price_refresh_nfl_rb.py
-          --workers 20
-          --request-timeout 10
-          --lookback-hours 96
-          --max-athletes 1800
-          --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
-      - name: Refresh verified ATP and WTA match evidence
-        run: >-
-          python scripts/tennis_event_refresh_results.py
-          --catalog data/current_catalog.json
-          --lookback-hours 120
-          --request-timeout 15
-      - name: Refresh verified PGA and LPGA tournament evidence
-        run: >-
-          python scripts/golf_event_refresh_results.py
-          --catalog data/current_catalog.json
-          --lookback-hours 240
-          --request-timeout 15
-      - name: Save authoritative Sports game-market state
-        run: cp data/current_catalog.json data/sports_event_market_state.json
-      - name: Recalculate Sports fair values
-        run: python scripts/pricing_engine_v2_catalog.py --catalog data/current_catalog.json
-      - name: Restore verified game market prices
-        run: >-
-          python scripts/restore_hourly_event_market_state.py
-          --base data/current_catalog.json
-          --snapshot data/sports_event_market_state.json
-      - name: Restore NFL production-first fundamentals
-        run: python scripts/repair_nfl_production_prices_safe.py --catalog data/current_catalog.json
-      - name: Apply NFL Rookie IPO transition
-        run: python scripts/repair_nfl_rookie_ipo_prices.py --catalog data/current_catalog.json
-      - name: Explain latest game without repricing
-        run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
-      - name: Apply verified athlete signings and team changes
-        run: >-
-          python scripts/athlete_career_event_refresh.py
-          --catalog data/current_catalog.json
-          --prior data/prior_sports_state.json
-          --events data/verified_athlete_events.json
-      - name: Append durable Sports events
-        run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
-      - name: Append dated Sports history
-        run: python scripts/append_price_history.py --catalog data/current_catalog.json
-      - name: Finalize safe MLB prices and chart history
-        run: python scripts/repair_mlb_market_prices.py --catalog data/current_catalog.json
-      - name: Save Sports category database
-        run: cp data/current_catalog.json data/market/sports.json
-      - uses: actions/upload-artifact@v4
+          current_path = Path(sys.argv[1])
+          clean_path = Path(sys.argv[2])
+          output_path = Path(sys.argv[3])
+          decoder = json.JSONDecoder()
+
+          def iter_array(path, chunk_size=1024*1024):
+              with path.open("r", encoding="utf-8") as fh:
+                  buf = ""
+                  pos = 0
+                  started = False
+                  eof = False
+                  while True:
+                      if not eof and len(buf) - pos < chunk_size:
+                          chunk = fh.read(chunk_size)
+                          if chunk:
+                              if pos:
+                                  buf = buf[pos:] + chunk
+                                  pos = 0
+                              else:
+                                  buf += chunk
+                          else:
+                              eof = True
+                      while True:
+                          n = len(buf)
+                          while pos < n and buf[pos].isspace():
+                              pos += 1
+                          if not started:
+                              if pos < n and buf[pos] == "[":
+                                  started = True
+                                  pos += 1
+                              elif eof:
+                                  return
+                              else:
+                                  break
+                          while pos < n and (buf[pos].isspace() or buf[pos] == ","):
+                              pos += 1
+                          if pos < n and buf[pos] == "]":
+                              return
+                          try:
+                              obj, end = decoder.raw_decode(buf, pos)
+                          except json.JSONDecodeError:
+                              break
+                          yield obj
+                          pos = end
+                      if eof:
+                          if buf[pos:].strip():
+                              raise RuntimeError(f"Incomplete JSON array in {path}")
+                          return
+
+          clean_nhl = {}
+          for record in iter_array(clean_path):
+              if str(record.get("leagueOrMedium") or "").strip().upper() == "NHL":
+                  rid = str(record.get("id") or "")
+                  if not rid or rid in clean_nhl:
+                      raise RuntimeError(f"Invalid/duplicate NHL id in run 706: {rid!r}")
+                  clean_nhl[rid] = record
+
+          current_nhl_ids = set()
+          non_nhl_digest = hashlib.sha256()
+          non_nhl_count = 0
+          replaced = 0
+
+          with output_path.open("w", encoding="utf-8") as out:
+              out.write("[")
+              first = True
+              for record in iter_array(current_path):
+                  league = str(record.get("leagueOrMedium") or "").strip().upper()
+                  if league == "NHL":
+                      rid = str(record.get("id") or "")
+                      current_nhl_ids.add(rid)
+                      replacement = clean_nhl.get(rid)
+                      if replacement is None:
+                          raise RuntimeError(f"Current NHL id not found in run 706: {rid}")
+                      record_to_write = replacement
+                      replaced += 1
+                  else:
+                      record_to_write = record
+                      non_nhl_count += 1
+                      canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                      non_nhl_digest.update(canonical)
+                      non_nhl_digest.update(b"\n")
+
+                  if not first:
+                      out.write(",")
+                  json.dump(record_to_write, out, ensure_ascii=False, separators=(",", ":"))
+                  first = False
+              out.write("]")
+
+          if current_nhl_ids != set(clean_nhl):
+              only_current = sorted(current_nhl_ids - set(clean_nhl))[:10]
+              only_clean = sorted(set(clean_nhl) - current_nhl_ids)[:10]
+              raise RuntimeError(
+                  f"NHL identity mismatch. only-current={only_current}, only-run706={only_clean}"
+              )
+
+          verify_digest = hashlib.sha256()
+          verify_non_nhl_count = 0
+          verify_nhl_count = 0
+          for record in iter_array(output_path):
+              if str(record.get("leagueOrMedium") or "").strip().upper() == "NHL":
+                  verify_nhl_count += 1
+              else:
+                  verify_non_nhl_count += 1
+                  canonical = json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                  verify_digest.update(canonical)
+                  verify_digest.update(b"\n")
+
+          if verify_non_nhl_count != non_nhl_count or verify_digest.digest() != non_nhl_digest.digest():
+              raise RuntimeError("A non-NHL record changed during NHL-only recovery")
+          if verify_nhl_count != len(clean_nhl):
+              raise RuntimeError(
+                  f"NHL output count mismatch: output={verify_nhl_count}, run706={len(clean_nhl)}"
+              )
+
+          print(f"Restored exactly {replaced} NHL records from pre-intervention Sports run 706.")
+          print(f"Verified {non_nhl_count} non-NHL records unchanged.")
+          print(f"Non-NHL semantic SHA256: {non_nhl_digest.hexdigest()}")
+          PY
+
+          cp "$current_manifest" out/hourly_refresh_manifest.json
+
+      - name: Upload NHL-repaired Sports market
+        uses: actions/upload-artifact@v4
         with:
           name: talentx-sports-market
           path: |
-            data/market/sports.json
-            data/hourly_refresh_manifest.json
+            out/market/sports.json
+            out/hourly_refresh_manifest.json
           retention-days: 14
+          if-no-files-found: error
