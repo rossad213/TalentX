@@ -13,6 +13,8 @@ on:
       - "tests/test_nfl_rookie_usage_handoff.py"
       - "tests/test_nfl_rb_receiving_td_credit.py"
       - "tests/test_nfl_rb_cohort_calibration.py"
+      - "tests/test_hourly_price_refresh.py"
+      - "tests/test_pricing_engine_v2.py"
       - ".github/workflows/sports-market-refresh.yml"
       - ".github/workflows/nfl-model-tests.yml"
   workflow_dispatch:
@@ -41,4 +43,6 @@ jobs:
           tests/test_nfl_rb_receiving_td_credit.py
           tests/test_nfl_rb_cohort_calibration.py
           tests/test_nfl_opportunity_protection.py
-          tests/test_nfl_per_game_expectations.py -v
+          tests/test_nfl_per_game_expectations.py
+          tests/test_hourly_price_refresh.py
+          tests/test_pricing_engine_v2.py -v

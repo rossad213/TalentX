@@ -18,6 +18,7 @@ from hourly_price_refresh import (  # noqa: E402
     extract_espn_game_stats,
     game_event_move,
     prior_processed_events,
+    retain_recent_processed_player_events,
 )
 from merge_hourly_market_state import merge_market_state  # noqa: E402
 
@@ -167,6 +168,16 @@ class HourlyGamePricingTests(unittest.TestCase):
         self.assertIn(recent_key, retained)
         self.assertNotIn("espn:old", retained)
         self.assertEqual(prior_processed_events({**manifest, "version": "1.3-game-level-event-pricing"}, now), {})
+
+    def test_player_event_marker_is_retained_while_parent_event_is_recent(self) -> None:
+        current_event = "espn:401857111"
+        recent_player = f"{current_event}|espn:3149391"
+        stale_player = "espn:old|espn:3149391"
+        retained = retain_recent_processed_player_events(
+            {recent_player, stale_player},
+            {current_event},
+        )
+        self.assertEqual(retained, {recent_player})
 
     def test_discovery_skips_a_game_after_its_event_id_is_processed(self) -> None:
         scoreboard = {
