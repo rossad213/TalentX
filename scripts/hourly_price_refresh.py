@@ -135,6 +135,23 @@ def prior_processed_events(manifest: dict[str, Any], now: datetime) -> dict[str,
     return output
 
 
+def retain_recent_processed_player_events(
+    processed_player_keys: set[str],
+    processed_event_keys: set[str],
+) -> set[str]:
+    """Keep player/event retry markers while their parent event remains in the rolling event history.
+
+    The reliability wrapper intentionally ignores the global event marker so players missed
+    during a partial run can catch up. That makes the player/event marker authoritative for
+    exactly-once pricing. Retaining the markers for still-recent events prevents the same
+    player/game pair from being priced again on the next refresh.
+    """
+    return {
+        key for key in processed_player_keys
+        if key.split("|", 1)[0] in processed_event_keys
+    }
+
+
 def prior_processed_player_events(manifest: dict[str, Any]) -> set[str]:
     if manifest.get("version") != HOURLY_MODEL_VERSION:
         return set()
@@ -1047,10 +1064,10 @@ def main() -> int:
 
     # Player-level markers prevent a successful athlete from being moved twice
     # when a teammate's evidence request fails and the game must be retried.
-    processed_player_history = {
-        key for key in processed_player_history
-        if key.split("|", 1)[0] not in processed_history
-    }
+    processed_player_history = retain_recent_processed_player_events(
+        processed_player_history,
+        set(processed_history),
+    )
 
     manifest = safe_json(CATALOG_MANIFEST, {})
     if not isinstance(manifest, dict):
