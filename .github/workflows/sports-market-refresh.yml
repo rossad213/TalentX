@@ -200,10 +200,9 @@ jobs:
           python scripts/restore_hourly_event_market_state.py
           --base data/current_catalog.json
           --snapshot data/sports_event_market_state.json
-      - name: Restore NFL production-first fundamentals
-        run: python scripts/repair_nfl_production_prices_safe.py --catalog data/current_catalog.json
-      - name: Apply NFL Rookie IPO transition
-        run: python scripts/repair_nfl_rookie_ipo_prices.py --catalog data/current_catalog.json
+      # NFL follows the same post-refresh architecture as NBA here:
+      # pricing_engine_v2 owns refreshed fair value / rookie blending, while
+      # restore_hourly_event_market_state preserves the verified market path.
       - name: Explain latest game without repricing
         run: python scripts/explain_event_pricing_only.py --catalog data/current_catalog.json
       - name: Apply verified athlete signings and team changes
