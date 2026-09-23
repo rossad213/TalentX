@@ -148,6 +148,91 @@ jobs:
           fi
 
           test "$source_ready" -eq 1 || { echo "No valid Sports recovery source is available."; exit 1; }
+
+          # One-time recovery of NFL market state from the final successful Sports
+          # artifact before the 3.2 pricing migration. Replacing the matching NFL
+          # records (rather than only reverting source code) prevents already-migrated
+          # prices/history from surviving indefinitely in the rolling Sports artifact.
+          restore_version="pre-3.2-market-state-20260920"
+          restore_done="$(python - <<'PY'
+import json
+from pathlib import Path
+path = Path("data/hourly_refresh_manifest.json")
+try:
+    payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+except (OSError, json.JSONDecodeError):
+    payload = {}
+print(payload.get("nflPre32RestoreVersion", "") if isinstance(payload, dict) else "")
+PY
+)"
+          if [ "$restore_done" != "$restore_version" ]; then
+            rm -rf _nfl_restore
+            mkdir -p _nfl_restore
+            gh run download "35550381564" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _nfl_restore
+            restore_state="$(find _nfl_restore -name sports.json -print -quit)"
+            test -n "$restore_state" || { echo "Pre-3.2 NFL restore artifact is missing sports.json."; exit 1; }
+            python - "$restore_state" data/current_catalog.json data/hourly_refresh_manifest.json "$restore_version" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+snapshot_path = Path(sys.argv[1])
+catalog_path = Path(sys.argv[2])
+manifest_path = Path(sys.argv[3])
+restore_version = sys.argv[4]
+
+snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+
+def identity(record):
+    namespace = str(record.get("sourceNamespace") or "").strip().lower()
+    source_id = str(record.get("sourceRecordId") or "").strip()
+    if namespace and source_id:
+        return ("source", namespace, source_id)
+    return ("id", str(record.get("id") or ""))
+
+old_nfl = {
+    identity(record): record
+    for record in snapshot
+    if str(record.get("leagueOrMedium") or "").strip().upper() == "NFL"
+}
+
+restored = 0
+output = []
+for record in catalog:
+    if str(record.get("leagueOrMedium") or "").strip().upper() != "NFL":
+        output.append(record)
+        continue
+    prior = old_nfl.get(identity(record))
+    if prior is None:
+        output.append(record)
+        continue
+    replacement = dict(prior)
+    replacement["nflPre32StateRestoreVersion"] = restore_version
+    output.append(replacement)
+    restored += 1
+
+catalog_path.write_text(
+    json.dumps(output, ensure_ascii=False, separators=(",", ":")),
+    encoding="utf-8",
+)
+
+try:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+except (OSError, json.JSONDecodeError):
+    manifest = {}
+if not isinstance(manifest, dict):
+    manifest = {}
+manifest["nflPre32RestoreVersion"] = restore_version
+manifest["nflPre32RestoreSourceRunId"] = "35550381564"
+manifest["nflPre32RestoredListings"] = restored
+manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+print(f"Restored {restored:,} NFL listing(s) from the final pre-3.2 Sports market state.")
+PY
+          else
+            echo "Pre-3.2 NFL market state has already been restored; keeping the rolling Sports state."
+          fi
+
           echo "WEEKLY_BASELINE_RUN_ID=${baseline_id:-${prior_id:-}}" >> "$GITHUB_ENV"
       - name: Validate Sports pricing logic
         run: >-
