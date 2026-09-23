@@ -41,6 +41,14 @@ class PricingEngineV2Tests(unittest.TestCase):
             activeMetrics={"performance":88,"achievements":25,"consistency":55,"potential":98,"availability":90,"audience":82}))
         self.assertLess(rookie['confidenceScore'],veteran['confidenceScore'])
         self.assertLess(rookie['fairValue'],veteran['fairValue'])
+    def test_established_nfl_and_nba_share_the_same_v2_valuation_path(self):
+        nfl=apply_v2(self.record(leagueOrMedium='NFL'))
+        nba=apply_v2(self.record(leagueOrMedium='NBA'))
+        self.assertEqual(nfl['talentScore'],nba['talentScore'])
+        self.assertEqual(nfl['confidenceScore'],nba['confidenceScore'])
+        self.assertEqual(nfl['marketScore'],nba['marketScore'])
+        self.assertEqual(nfl['fairValue'],nba['fairValue'])
+
     def test_top_nfl_rookie_keeps_meaningful_ipo_anchor(self):
         rookie=apply_v2(self.rookie_record('NFL',score=94,influence=100))
         self.assertGreater(rookie['fairValue'],110)
