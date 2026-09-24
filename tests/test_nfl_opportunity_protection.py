@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import hourly_price_refresh_nfl as nfl  # noqa: E402
 import hourly_price_refresh_nfl_opportunity as opportunity  # noqa: E402
+import repair_nfl_persisted_opportunity_prices as persisted  # noqa: E402
 
 
 class NflOpportunityProtectionTests(unittest.TestCase):
@@ -141,6 +142,81 @@ class NflOpportunityProtectionTests(unittest.TestCase):
         self.assertFalse(opportunity._needs_opportunity_repair(
             record, now=datetime(2026, 9, 14, 20, tzinfo=timezone.utc)
         ))
+
+    def test_pre_migration_event_cannot_rewrite_new_v2_market_epoch(self) -> None:
+        record = {
+            "id": "migrated-linebacker",
+            "leagueOrMedium": "NFL",
+            "role": "Linebacker",
+            "professionalGames": 30,
+            "marketPrice": 90.0,
+            "nflMarketMigratedAt": "2026-09-24T16:30:00Z",
+            "priceEvents": [{
+                "eventKey": "espn:legacy-game",
+                "eventId": "legacy-game",
+                "eventType": "game",
+                "league": "nfl",
+                "startedAt": "2026-09-20T17:00:00Z",
+                "expectedPerformanceScore": 1.0,
+                "performanceDeltaPct": 700.0,
+                "movePct": 40.0,
+                "priceBefore": 300.0,
+                "priceAfter": 420.0,
+                "stats": {"tackles": 3, "sacks": 1},
+            }],
+        }
+        event = record["priceEvents"][0]
+        self.assertFalse(
+            opportunity._event_needs_opportunity_repair(
+                record,
+                event,
+                now=datetime(2026, 9, 24, 18, tzinfo=timezone.utc),
+            )
+        )
+
+    def test_persisted_repair_also_ignores_pre_migration_event(self) -> None:
+        record = {
+            "leagueOrMedium": "NFL",
+            "role": "Linebacker",
+            "professionalGames": 30,
+            "nflMarketMigratedAt": "2026-09-24T16:30:00Z",
+        }
+        event = {
+            "eventType": "game",
+            "startedAt": "2026-09-20T17:00:00Z",
+            "expectedPerformanceScore": 1.0,
+            "performanceDeltaPct": 700.0,
+            "priceBefore": 300.0,
+            "priceAfter": 420.0,
+            "movePct": 40.0,
+        }
+        self.assertFalse(persisted.opportunity_signature(record, event))
+
+    def test_post_migration_event_can_still_receive_opportunity_protection(self) -> None:
+        record = {
+            "id": "migrated-linebacker",
+            "leagueOrMedium": "NFL",
+            "role": "Linebacker",
+            "professionalGames": 30,
+            "nflMarketMigratedAt": "2026-09-20T16:30:00Z",
+        }
+        event = {
+            "eventKey": "espn:new-game",
+            "eventId": "new-game",
+            "eventType": "game",
+            "league": "nfl",
+            "startedAt": "2026-09-21T17:00:00Z",
+            "expectedPerformanceScore": 1.0,
+            "performanceDeltaPct": 700.0,
+            "stats": {"tackles": 3, "sacks": 1},
+        }
+        self.assertTrue(
+            opportunity._event_needs_opportunity_repair(
+                record,
+                event,
+                now=datetime(2026, 9, 24, 18, tzinfo=timezone.utc),
+            )
+        )
 
     def test_earlier_backup_spike_is_repaired_and_later_move_is_replayed(self) -> None:
         record = {

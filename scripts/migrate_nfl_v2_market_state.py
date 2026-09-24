@@ -24,8 +24,8 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 
-MIGRATION_VERSION = "1.0-nfl-v2-market-state-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset"
+MIGRATION_VERSION = "1.1-nfl-v2-market-state-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-1"
 
 _V2_FIELDS = (
     "talentScore",
@@ -98,8 +98,9 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         if field in repriced:
             result[field] = repriced[field]
 
-    # The historical priceEvents ledger remains untouched. It is audit/history,
-    # not the starting point for the new NFL market era.
+    # The historical priceEvents ledger remains untouched for audit/history,
+    # but NFL repair code treats nflMarketMigratedAt as a hard market-epoch
+    # boundary and will never replay events that predate this reset.
     history = [
         dict(item)
         for item in result.get("priceHistory", [])

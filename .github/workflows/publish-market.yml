@@ -300,8 +300,10 @@ jobs:
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category creators --output data/market/creators.json
       - name: Validate unified market
         run: |
-          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py -v
+          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py tests/test_build_client_catalog.py -v
           python scripts/validate_current_catalog.py --minimum 10000
+          node --check app.js
+          node --check assets/sortable-market-table.js
           node --check assets/event-timeline.js
           node --check assets/chart-visual-fixes.js
           node --check assets/event-chart-safety.js

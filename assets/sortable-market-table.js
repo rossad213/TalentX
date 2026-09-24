@@ -10,7 +10,7 @@
     market:{label:'Market',type:'text',value:r=>r.marketSegment},
     price:{label:'Price',type:'number',value:r=>localPrice(r)},
     move:{label:'Move',type:'number',value:r=>displayChange(r)},
-    score:{label:'Score',type:'number',value:r=>Number(r.careerScore||0)},
+    score:{label:()=>marketScoreLabel(),type:'number',value:r=>displayedMarketScore(r)},
     confidence:{label:'Price confidence',type:'number',value:r=>Number(r.pricingConfidence??r.dataConfidence??0)}
   };
   const stageOrder=['Pre-debut','Rookie','Early Career','Emerging','Prime','Established','Veteran','Late Career','Retired','Stage under review'];
@@ -56,18 +56,23 @@
     render();
   };
 
+  function columnLabel(column){
+    return typeof column.label==='function'?column.label():column.label;
+  }
+
   function header(key){
     const column=columns[key],active=current.key===key;
     const direction=active?current.direction:'none';
     const arrow=active?(current.direction==='asc'?'▲':'▼'):'↕';
     const aria=active?(current.direction==='asc'?'ascending':'descending'):'none';
-    return `<th aria-sort="${aria}" class="market-sort-th ${active?'is-sorted':''}"><button type="button" class="market-sort-button" onclick="sortMarketColumn('${key}')" title="Sort by ${column.label}"><span>${column.label}</span><span class="market-sort-arrow" aria-hidden="true">${arrow}</span></button></th>`;
+    const label=columnLabel(column);
+    return `<th aria-sort="${aria}" class="market-sort-th ${active?'is-sorted':''}"><button type="button" class="market-sort-button" onclick="sortMarketColumn('${key}')" title="Sort by ${label}"><span>${label}</span><span class="market-sort-arrow" aria-hidden="true">${arrow}</span></button></th>`;
   }
 
   const baseMarket=market;
   market=function(){
     let html=baseMarket();
-    const labels={person:'Person',category:'Category',discipline:'Sport / genre / niche',league:'League / medium',stage:'Career stage',market:'Market',price:'Price',move:'Move',score:'Score',confidence:'Price confidence'};
+    const labels={person:'Person',category:'Category',discipline:'Sport / genre / niche',league:'League / medium',stage:'Career stage',market:'Market',price:'Price',move:'Move',score:marketScoreLabel(),confidence:'Price confidence'};
     Object.entries(labels).forEach(([key,label])=>{
       html=html.replace(`<th>${label}</th>`,header(key));
     });

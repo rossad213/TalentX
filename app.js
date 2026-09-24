@@ -118,6 +118,19 @@ function displayChange(r){
   const prior=listed/(1+recorded/100);
   return Number.isFinite(prior)&&prior>0?((current/prior)-1)*100:recorded;
 }
+
+function displayedMarketScore(r){
+  const isNfl=String(r?.leagueOrMedium||'').toUpperCase()==='NFL';
+  const raw=isNfl?(r.expectedValueScore??r.careerScore):r.careerScore;
+  const value=Number(raw);
+  return Number.isFinite(value)?value:0;
+}
+function marketScoreLabel(){
+  return (filters.league==='NFL'||filters.discipline==='American Football')?'Pricing score':'Score';
+}
+function marketScoreSortLabel(){
+  return marketScoreLabel()==='Pricing score'?'Highest pricing score':'Highest career score';
+}
 function toast(msg){
   const el=$('#toast');el.textContent=msg;el.classList.add('show');
   clearTimeout(window.__toast);window.__toast=setTimeout(()=>el.classList.remove('show'),2200);
@@ -407,7 +420,7 @@ function filteredRecords(){
   }
   const sorted=[...arr];
   const sorters={
-    'score-desc':(a,b)=>b.careerScore-a.careerScore,
+    'score-desc':(a,b)=>displayedMarketScore(b)-displayedMarketScore(a),
     'price-desc':(a,b)=>localPrice(b)-localPrice(a),
     'change-desc':(a,b)=>displayChange(b)-displayChange(a),
     'change-asc':(a,b)=>displayChange(a)-displayChange(b),
@@ -426,7 +439,7 @@ function rowHtml(r){
     <td><span class="stage-badge">${esc(r.careerStage||'Stage under review')}</span></td>
     <td><span class="segment-badge ${segmentClass(r.marketSegment)}">${esc(r.marketSegment)}</span></td>
     <td>${money(localPrice(r))}</td><td class="${displayChange(r)>=0?'positive':'negative'}">${displayChange(r)>=0?'+':''}${displayChange(r).toFixed(2)}%</td>
-    <td>${Number(r.careerScore).toFixed(1)}</td><td>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</td>
+    <td>${displayedMarketScore(r).toFixed(1)}</td><td>${Math.round(Number(r.pricingConfidence??r.dataConfidence??0)*100)}%</td>
   </tr>`;
 }
 function market(){
@@ -450,14 +463,14 @@ function market(){
     <select class="select" onchange="setFilter('stage',this.value)"><option value="All">All career stages</option>${stageOptions.map(v=>`<option ${filters.stage===v?'selected':''}>${esc(v)}</option>`).join('')}</select>
     <div class="spacer"></div>
     <select class="select" onchange="setFilter('sort',this.value)">
-      <option value="score-desc" ${filters.sort==='score-desc'?'selected':''}>Highest career score</option>
+      <option value="score-desc" ${filters.sort==='score-desc'?'selected':''}>${marketScoreSortLabel()}</option>
       <option value="price-desc" ${filters.sort==='price-desc'?'selected':''}>Highest price</option>
       <option value="change-desc" ${filters.sort==='change-desc'?'selected':''}>Top gainers</option>
       <option value="change-asc" ${filters.sort==='change-asc'?'selected':''}>Top decliners</option>
       <option value="name" ${filters.sort==='name'?'selected':''}>Name A–Z</option>
     </select>
   </div>
-  <section class="card table-card"><div class="table-wrap"><table class="market-table"><thead><tr><th>Person</th><th>Category</th><th>Sport / genre / niche</th><th>League / medium</th><th>Career stage</th><th>Market</th><th>Price</th><th>Move</th><th>Score</th><th>Price confidence</th></tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="10"><div class="empty">No records match these filters.</div></td></tr>`}</tbody></table></div>
+  <section class="card table-card"><div class="table-wrap"><table class="market-table"><thead><tr><th>Person</th><th>Category</th><th>Sport / genre / niche</th><th>League / medium</th><th>Career stage</th><th>Market</th><th>Price</th><th>Move</th><th>${marketScoreLabel()}</th><th>Price confidence</th></tr></thead><tbody>${rows.length?rows.map(rowHtml).join(''):`<tr><td colspan="10"><div class="empty">No records match these filters.</div></td></tr>`}</tbody></table></div>
   <div class="pagination"><span>Showing ${arr.length?start+1:0}–${Math.min(start+PAGE_SIZE,arr.length)} of ${arr.length.toLocaleString()}</span><div class="pagination-controls"><button onclick="changePage(-1)" ${filters.page<=1?'disabled':''}>← Previous</button><span>Page ${filters.page} of ${pages}</span><button onclick="changePage(1)" ${filters.page>=pages?'disabled':''}>Next →</button></div></div></section>`;
 }
 function changePage(delta){filters.page=Math.max(1,filters.page+delta);render();window.scrollTo({top:0,behavior:'smooth'})}

@@ -99,6 +99,27 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["priceHistory"][-1]["eventId"], MIGRATION_EVENT_ID)
         self.assertEqual(migrated["priceHistory"][-1]["price"], migrated["marketPrice"])
 
+    def test_prior_migration_version_is_reset_again_for_v1_1_cleanup(self):
+        original = self.nfl_record(
+            marketPrice=463.46,
+            nflMarketMigrationVersion="1.0-nfl-v2-market-state-reset",
+            nflMarketMigratedAt="2026-09-24T16:15:00Z",
+            lastGameMovePct=-2.43,
+        )
+        expected = apply_v2({
+            **original,
+            "lastGameMovePct": 0.0,
+            "dailyChange": 0.0,
+            "hourlyChangePct": 0.0,
+        })
+        migrated, changed = migrate_record(original, "2026-09-24T19:00:00Z")
+
+        self.assertTrue(changed)
+        self.assertEqual(migrated["marketPrice"], expected["fairValue"])
+        self.assertEqual(migrated["nflMarketMigrationVersion"], MIGRATION_VERSION)
+        self.assertEqual(migrated["nflMarketMigratedAt"], "2026-09-24T19:00:00Z")
+        self.assertEqual(migrated["nflMarketMigrationPriorMarketPrice"], 463.46)
+
     def test_migration_is_idempotent(self):
         first, changed = migrate_record(self.nfl_record(), "2026-09-24T16:15:00Z")
         second, changed_again = migrate_record(first, "2026-09-25T16:15:00Z")
