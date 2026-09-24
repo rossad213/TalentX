@@ -32,7 +32,10 @@ permissions:
   id-token: write
 
 concurrency:
-  group: talentx-pages
+  # Keep successful upstream publishes isolated from failed/skipped workflow_run
+  # triggers. Otherwise a late failed baseline run can cancel a healthy publish
+  # that was already composing the latest successful Sports artifact.
+  group: talentx-pages-${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion || github.event_name }}
   cancel-in-progress: true
 
 jobs:
