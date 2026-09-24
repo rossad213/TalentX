@@ -16,7 +16,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from repair_mlb_market_prices import repair_catalog as repair_mlb_catalog
+try:
+    from repair_mlb_market_prices import repair_catalog as repair_mlb_catalog
+except ModuleNotFoundError:
+    # When imported as scripts.build_client_catalog in unit tests, resolve the
+    # sibling module through the package path instead of the script directory.
+    from scripts.repair_mlb_market_prices import repair_catalog as repair_mlb_catalog
 
 SHARD_COUNT = 128
 
