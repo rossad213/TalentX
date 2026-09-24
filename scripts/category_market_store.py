@@ -54,6 +54,14 @@ EXTRA_MARKET_FIELDS = (
     "priceHistoryStatus",
     "hourlyEvidenceCheckedAt",
     "hourlyEvidenceWarning",
+    # NFL-only v2 migration metadata must survive a later full-baseline rebuild
+    # so migrated players are not reset a second time.
+    "nflMarketMigrationVersion",
+    "nflMarketMigratedAt",
+    "nflMarketMigrationPriorMarketPrice",
+    "nflMarketMigrationPriorLastGameMovePct",
+    "nflMarketMigrationTargetPrice",
+    "nflMarketMigrationReason",
 )
 
 TICKER_CATEGORY_CODES = {
