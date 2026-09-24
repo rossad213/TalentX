@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import hourly_price_refresh_nfl as nfl  # noqa: E402
 import hourly_price_refresh_nfl_opportunity as opportunity  # noqa: E402
+import repair_nfl_persisted_opportunity_prices as persisted  # noqa: E402
 
 
 class NflOpportunityProtectionTests(unittest.TestCase):
@@ -172,6 +173,24 @@ class NflOpportunityProtectionTests(unittest.TestCase):
                 now=datetime(2026, 9, 24, 18, tzinfo=timezone.utc),
             )
         )
+
+    def test_persisted_repair_also_ignores_pre_migration_event(self) -> None:
+        record = {
+            "leagueOrMedium": "NFL",
+            "role": "Linebacker",
+            "professionalGames": 30,
+            "nflMarketMigratedAt": "2026-09-24T16:30:00Z",
+        }
+        event = {
+            "eventType": "game",
+            "startedAt": "2026-09-20T17:00:00Z",
+            "expectedPerformanceScore": 1.0,
+            "performanceDeltaPct": 700.0,
+            "priceBefore": 300.0,
+            "priceAfter": 420.0,
+            "movePct": 40.0,
+        }
+        self.assertFalse(persisted.opportunity_signature(record, event))
 
     def test_post_migration_event_can_still_receive_opportunity_protection(self) -> None:
         record = {
