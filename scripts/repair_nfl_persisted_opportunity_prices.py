@@ -81,6 +81,11 @@ def opportunity_signature(record: dict[str, Any], event: dict[str, Any]) -> bool
     if str(event.get("eventType") or "").lower() != "game":
         return False
 
+    migrated_at = parse_time(record.get("nflMarketMigratedAt"))
+    event_time = parse_time(event.get("startedAt"))
+    if migrated_at is not None and event_time is not None and event_time <= migrated_at:
+        return False
+
     role_floor = opportunity.replacement_baseline_score(record)
     personal_expected = finite(event.get("personalExpectedPerformanceScore"))
     expected = finite(event.get("expectedPerformanceScore"))
