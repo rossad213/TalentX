@@ -11,6 +11,7 @@ on:
       - "scripts/hourly_price_refresh_nfl.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
+      - "scripts/migrate_nfl_v2_market_state.py"
       - "scripts/nfl_production_pricing.py"
       - "scripts/nfl_rookie_transition.py"
       - "scripts/sync_nfl_draft_metadata.py"
@@ -38,6 +39,7 @@ on:
       - "tests/test_nfl_rookie_ipo_system.py"
       - "tests/test_nfl_fundamental_stability.py"
       - "tests/test_nfl_safe_rebase.py"
+      - "tests/test_nfl_v2_market_state_migration.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -160,6 +162,7 @@ jobs:
           tests/test_nfl_rookie_ipo_system.py
           tests/test_nfl_fundamental_stability.py
           tests/test_nfl_safe_rebase.py
+          tests/test_nfl_v2_market_state_migration.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
@@ -171,6 +174,8 @@ jobs:
           tests/test_category_market_store.py -v
       - name: Sync factual NFL draft metadata
         run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
+      - name: Migrate legacy NFL market state to v2 once
+        run: python scripts/migrate_nfl_v2_market_state.py --catalog data/current_catalog.json
       - name: Refresh completed-game evidence
         run: >-
           python scripts/hourly_price_refresh_nfl_rb.py
