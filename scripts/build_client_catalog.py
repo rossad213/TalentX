@@ -23,7 +23,7 @@ SHARD_COUNT = 128
 INDEX_FIELDS = (
     "id", "name", "ticker", "primaryCategory", "discipline", "leagueOrMedium",
     "teamOrPlatform", "role", "country", "careerStatus", "marketSegment",
-    "careerStage", "marketPrice", "dailyChange", "careerScore",
+    "careerStage", "marketPrice", "dailyChange", "careerScore", "expectedValueScore",
     "fundamentalValue", "pricingConfidence", "dataConfidence", "avatar",
     "searchText", "modelType", "demandPremiumPct", "momentumPct", "volume",
     "lastPriceEventId", "lastGameMovePct", "lastEventMovePct", "lastPriceEventAt", "lastPriceEvent",
