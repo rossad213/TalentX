@@ -184,6 +184,13 @@ def _event_key(event: dict[str, Any]) -> str:
     return str(event.get("eventKey") or event.get("eventId") or "").strip()
 
 
+def _predates_nfl_market_epoch(record: dict[str, Any], event: dict[str, Any]) -> bool:
+    """Do not let legacy NFL events rewrite prices after the v2 market reset."""
+    migrated_at = _parse_time(record.get("nflMarketMigratedAt"))
+    event_time = _parse_time(event.get("startedAt"))
+    return migrated_at is not None and event_time is not None and event_time <= migrated_at
+
+
 def _stored_event_move(event: dict[str, Any]) -> float | None:
     move = _finite(event.get("movePct"))
     if move is not None and move > -100.0:
@@ -199,6 +206,8 @@ def _event_needs_opportunity_repair(record: dict[str, Any], event: dict[str, Any
     if str(record.get("leagueOrMedium") or "") != "NFL":
         return False
     if str(event.get("eventType") or "").lower() != "game":
+        return False
+    if _predates_nfl_market_epoch(record, event):
         return False
     league = str(event.get("league") or record.get("leagueOrMedium") or "").lower()
     if league not in {"nfl", ""}:
