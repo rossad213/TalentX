@@ -139,6 +139,24 @@ def event_info(event: dict[str, Any], league: str, start, end) -> dict[str, Any]
     }
 
 
+def scoreboard_windows(start, end, *, window_days: int = 14) -> list[tuple[Any, Any]]:
+    """Split a long history lookback into ESPN-safe scoreboard windows.
+
+    ESPN soccer scoreboards reject the one-year dates=YYYYMMDD-YYYYMMDD request
+    with HTTP 400 for many leagues. Short date windows are much more reliable and
+    still let the collector reconstruct the exact same one-year event set.
+    Windows are inclusive, so the next window begins one day after the prior end.
+    """
+    days = max(1, int(window_days))
+    windows: list[tuple[Any, Any]] = []
+    cursor = start
+    while cursor <= end:
+        chunk_end = min(end, cursor + timedelta(days=days - 1))
+        windows.append((cursor, chunk_end))
+        cursor = chunk_end + timedelta(days=1)
+    return windows
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", type=Path, required=True)
@@ -200,23 +218,46 @@ def main() -> int:
     leagues = [league for league, _indexes in ordered_leagues]
     print(f"Soccer leagues selected: {len(leagues):,}")
 
-    range_start = start.strftime("%Y%m%d")
-    range_end = now.strftime("%Y%m%d")
+    windows = scoreboard_windows(start, now, window_days=14)
+    print(f"Soccer scoreboard windows per league: {len(windows):,} (14-day max)")
 
-    def fetch_scoreboard(league: str) -> tuple[str, list[dict[str, Any]], str | None]:
-        url = ESPN_SCOREBOARD_RANGE.format(league=league, start_date=range_start, end_date=range_end)
+    def fetch_scoreboard(
+        league: str,
+        window_start,
+        window_end,
+    ) -> tuple[str, list[dict[str, Any]], str | None]:
+        range_start = window_start.strftime("%Y%m%d")
+        range_end = window_end.strftime("%Y%m%d")
+        url = ESPN_SCOREBOARD_RANGE.format(
+            league=league,
+            start_date=range_start,
+            end_date=range_end,
+        )
         try:
             payload = base.fetch_json(url, args.request_timeout)
             events = payload.get("events") if isinstance(payload, dict) else []
             return league, [event for event in (events or []) if isinstance(event, dict)], None
         except Exception as exc:  # noqa: BLE001
-            return league, [], f"scoreboard {league}: {type(exc).__name__}: {exc}"
+            return (
+                league,
+                [],
+                f"scoreboard {league} {range_start}-{range_end}: "
+                f"{type(exc).__name__}: {exc}",
+            )
 
     raw_count = 0
     match_info: dict[tuple[str, str], dict[str, Any]] = {}
     scoreboard_warnings: list[str] = []
-    with ThreadPoolExecutor(max_workers=max(1, min(args.workers, len(leagues) or 1))) as executor:
-        futures = [executor.submit(fetch_scoreboard, league) for league in leagues]
+    requests = [
+        (league, window_start, window_end)
+        for league in leagues
+        for window_start, window_end in windows
+    ]
+    with ThreadPoolExecutor(max_workers=max(1, min(args.workers, len(requests) or 1))) as executor:
+        futures = [
+            executor.submit(fetch_scoreboard, league, window_start, window_end)
+            for league, window_start, window_end in requests
+        ]
         for future in as_completed(futures):
             league, events, warning = future.result()
             raw_count += len(events)
