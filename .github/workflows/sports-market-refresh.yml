@@ -12,6 +12,8 @@ on:
       - "scripts/pricing_model.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/soccer_metric_calibration.py"
+      - "scripts/recalibrate_nhl_metrics.py"
+      - "scripts/migrate_nhl_market_state.py"
       - "scripts/migrate_soccer_global_market_state.py"
       - "scripts/reconcile_soccer_baseline_identities.py"
       - "scripts/same_category_identity_dedupe.py"
@@ -59,6 +61,8 @@ on:
       - "tests/test_athlete_career_event_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_soccer_metric_calibration.py"
+      - "tests/test_nhl_metric_recalibration.py"
+      - "tests/test_nhl_market_state_migration.py"
       - "tests/test_soccer_global_market_state_migration.py"
       - "tests/test_soccer_baseline_identity_reconciliation.py"
       - "tests/test_same_category_identity_dedupe.py"
@@ -195,6 +199,8 @@ jobs:
           tests/test_athlete_career_event_refresh.py
           tests/test_pricing_engine_v2.py
           tests/test_soccer_metric_calibration.py
+          tests/test_nhl_metric_recalibration.py
+          tests/test_nhl_market_state_migration.py
           tests/test_soccer_global_market_state_migration.py
           tests/test_soccer_baseline_identity_reconciliation.py
           tests/test_same_category_identity_dedupe.py
@@ -214,6 +220,8 @@ jobs:
       # That prevents the migration from anchoring to stale UNIVERSAL evidence.
       - name: Reset NFL market epoch to unified evidence model once
         run: python scripts/migrate_nfl_v2_market_state.py --catalog data/current_catalog.json
+      - name: Rebuild NHL skater and goalie valuation cohorts
+        run: python scripts/recalibrate_nhl_metrics.py --catalog data/current_catalog.json
       - name: Refresh verified ATP and WTA match evidence
         run: >-
           python scripts/tennis_event_refresh_results.py
@@ -235,6 +243,8 @@ jobs:
           python scripts/restore_hourly_event_market_state.py
           --base data/current_catalog.json
           --snapshot data/sports_event_market_state.json
+      - name: Reset NHL market epoch after event-path repair once
+        run: python scripts/migrate_nhl_market_state.py --catalog data/current_catalog.json
       - name: Reset Soccer market epoch to global competition model once
         run: python scripts/migrate_soccer_global_market_state.py --catalog data/current_catalog.json
       # NFL follows the same post-refresh architecture as NBA here:
