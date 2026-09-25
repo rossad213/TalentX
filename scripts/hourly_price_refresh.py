@@ -26,6 +26,7 @@ from enrich_current_catalog import (
     ESPN_OVERVIEW,
     ESPN_ATHLETE_PROFILE,
     ESPN_CORE_ATHLETE,
+    ESPN_AWARDS,
     NHL_LANDING,
     SPORT_PATH,
     cohort_key,
@@ -40,6 +41,8 @@ from enrich_current_catalog import (
     professional_games_from_stats,
     recursively_collect_numbers,
     signal_bundle,
+    award_points,
+    resolve_award_names,
 )
 from pricing_model import apply_pricing_to_records, clamp, load_overrides
 
@@ -67,7 +70,7 @@ SIGNAL_KEYS = (
 )
 
 PROCESSED_EVENT_RETENTION_DAYS = 30
-HOURLY_MODEL_VERSION = "1.4-production-efficiency-game-pricing"
+HOURLY_MODEL_VERSION = "1.5-nfl-established-window-recalibration"
 COMPLETED_EVENT_STATES = {
     "post", "final", "completed", "complete", "off", "closed", "official",
 }
