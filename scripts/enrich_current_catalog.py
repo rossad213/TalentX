@@ -777,7 +777,9 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "draftYear": record.get("draftYear"),
                 "draftRound": record.get("draftRound"),
                 "draftPick": record.get("draftPick"),
-                "professionalGames": 0,\n                "newsCount": item.get("newsCount", 0),\n                "percentiles": {},
+                "professionalGames": 0,
+                "newsCount": item.get("newsCount", 0),
+                "percentiles": {},
                 "rawSignals": {key: round(value, 4) for key, value in item["signals"].items()},
             }
             if item.get("errors"):
@@ -849,7 +851,9 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "draftYear": record.get("draftYear"),
             "draftRound": record.get("draftRound"),
             "draftPick": record.get("draftPick"),
-            "professionalGames": record.get("professionalGames", 0),\n            "newsCount": item.get("newsCount", 0),\n            "percentiles": {key: round(value, 4) for key, value in pcts.items()},
+            "professionalGames": record.get("professionalGames", 0),
+            "newsCount": item.get("newsCount", 0),
+            "percentiles": {key: round(value, 4) for key, value in pcts.items()},
             "rawSignals": {key: round(value, 4) for key, value in signals.items()},
         }
         if item.get("errors"):
