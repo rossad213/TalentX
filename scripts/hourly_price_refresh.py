@@ -724,7 +724,7 @@ def apply_hourly_metrics(
     record["pricingConfidence"] = round(confidence, 2)
     existing_evidence = record.get("pricingEvidence") if isinstance(record.get("pricingEvidence"), list) else []
     record["pricingEvidence"] = list(dict.fromkeys([*existing_evidence, *item.get("evidenceUrls", [])]))[-8:]
-    record["pricingEvidenceSummary"] = {
+    summary = {
         "cohort": f"{cohort_key(record)[0]} · {cohort_key(record)[1]}",
         "recentStatFields": len(item.get("recent", {})),
         "careerStatFields": len(item.get("career", {})),
@@ -737,6 +737,11 @@ def apply_hourly_metrics(
         "percentiles": {key: round(value, 4) for key, value in pcts.items()},
         "rawSignals": {key: round(float(signals.get(key, 0)), 4) for key in SIGNAL_KEYS},
     }
+    nfl_window = item.get("nflFundamentalEvidence")
+    if isinstance(nfl_window, dict):
+        summary["nflFundamentalEvidence"] = nfl_window
+        record["nflFundamentalEvidenceVersion"] = nfl_window.get("version")
+    record["pricingEvidenceSummary"] = summary
     record["hourlyEvidenceCheckedAt"] = refreshed_at
     if item.get("errors"):
         record["pricingEvidenceWarnings"] = item["errors"]
@@ -952,7 +957,6 @@ def main() -> int:
     print(f"Players with box-score statistics: {len(participant_ids):,}")
     print(f"Athletes selected for game-level evidence refresh: {len(selected_indexes):,}")
 
-    cohorts, leagues = stored_signal_pools(records)
     overrides = load_overrides(PRICING_OVERRIDES)
     # A displayed change describes this refresh, not a permanent random drift.
     # Untouched records keep their price and history but return to a 0.00% move.
@@ -980,6 +984,34 @@ def main() -> int:
             if completed % 200 == 0 or completed == len(futures):
                 usable = sum(1 for item in results_by_index.values() if item.get("ok"))
                 print(f"Hourly evidence requests: {completed:,}/{len(futures):,}; usable: {usable:,}", flush=True)
+
+    # Build percentile pools from the evidence collected in this run. For NFL,
+    # prefer a same-run position cohort whenever at least eight comparable
+    # players are available so old UNIVERSAL/current-only evidence cannot mix
+    # with the new established-window scale.
+    pool_records: list[dict[str, Any]] = []
+    live_pool_records: list[dict[str, Any]] = []
+    for index, original in enumerate(records):
+        pool_record = dict(original)
+        item = results_by_index.get(index)
+        if isinstance(item, dict) and item.get("ok") and isinstance(item.get("signals"), dict):
+            pool_record = dict(item.get("record") or original)
+            summary = dict(pool_record.get("pricingEvidenceSummary") or {})
+            summary["rawSignals"] = {
+                key: float(item["signals"].get(key, 0.0) or 0.0)
+                for key in SIGNAL_KEYS
+            }
+            pool_record["pricingEvidenceSummary"] = summary
+            live_pool_records.append(pool_record)
+        pool_records.append(pool_record)
+
+    cohorts, leagues = stored_signal_pools(pool_records)
+    live_cohorts, live_leagues = stored_signal_pools(live_pool_records)
+    for key, values in live_cohorts.items():
+        if key[0] == "NFL" and len(values) >= 8:
+            cohorts[key] = values
+    if len(live_leagues.get("NFL", [])) >= 8:
+        leagues["NFL"] = live_leagues["NFL"]
 
     usable = 0
     changed = 0
