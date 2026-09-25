@@ -10,25 +10,26 @@ MARKET_JOBS = ROOT / "market_jobs"
 if str(MARKET_JOBS) not in sys.path:
     sys.path.insert(0, str(MARKET_JOBS))
 
-from soccer_scoreboard_history import event_info, scoreboard_windows, soccer_completed
+from soccer_scoreboard_history import ESPN_SCOREBOARD_DAY, event_info, scoreboard_days, soccer_completed
 
 
 class SoccerScoreboardHistoryTests(unittest.TestCase):
-    def test_scoreboard_windows_split_one_year_into_short_inclusive_ranges(self):
+    def test_scoreboard_days_split_one_year_into_single_calendar_days(self):
         start = datetime(2025, 9, 25, tzinfo=timezone.utc)
         end = datetime(2026, 9, 25, tzinfo=timezone.utc)
-        windows = scoreboard_windows(start, end, window_days=14)
+        days = scoreboard_days(start, end)
 
-        self.assertGreater(len(windows), 20)
-        self.assertEqual(windows[0][0], start)
-        self.assertEqual(windows[-1][1], end)
-        for index, (window_start, window_end) in enumerate(windows):
-            self.assertLessEqual((window_end - window_start).days + 1, 14)
+        self.assertEqual(len(days), 366)
+        self.assertEqual(days[0], start)
+        self.assertEqual(days[-1], end)
+        for index, scoreboard_day in enumerate(days):
             if index:
-                self.assertEqual(
-                    window_start,
-                    windows[index - 1][1] + timedelta(days=1),
-                )
+                self.assertEqual(scoreboard_day, days[index - 1] + timedelta(days=1))
+
+    def test_scoreboard_url_uses_single_date_not_range(self):
+        url = ESPN_SCOREBOARD_DAY.format(league="eng.1", date="20260920")
+        self.assertIn("dates=20260920", url)
+        self.assertNotIn("20260920-", url)
 
     def test_status_full_time_is_completed(self):
         event = {
