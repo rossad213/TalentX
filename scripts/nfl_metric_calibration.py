@@ -4,7 +4,7 @@
 The shared sports enrichment layer supplies role-aware percentile evidence. This
 module converts that evidence into NFL metrics with cleaner semantics:
 
-* Performance measures current playing level, with modest small-sample shrinkage.
+* Performance measures current playing level from one already-stabilized evidence window.
 * Achievements are driven primarily by honors, not accumulated counting stats.
 * Audience is independent of performance/awards and never feeds recursively from
   the prior audience score.
@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-CALIBRATION_VERSION = "1.0-nfl-semantic-components"
+CALIBRATION_VERSION = "1.1-nfl-established-window-single-shrink"
 
 NFL_ROLE_AUDIENCE = {
     "quarterback": 20,
@@ -79,11 +79,12 @@ def sample_maturity(record: dict[str, Any]) -> float:
     """
     games = optional_number(record.get("professionalGames"))
     if games is not None and games > 0:
-        return round(clamp(100.0 * (1.0 - math.exp(-games / 28.0))), 2)
+        return round(clamp(100.0 * (1.0 - math.exp(-games / 16.0))), 2)
 
     years = optional_number(record.get("experienceYears"))
     if years is not None and years > 0:
-        return round(clamp(100.0 * (1.0 - math.exp(-years / 2.0))), 2)
+        equivalent_games = years * 14.0
+        return round(clamp(100.0 * (1.0 - math.exp(-equivalent_games / 16.0))), 2)
 
     stage = str(record.get("careerStage") or "").lower()
     if "rookie" in stage:
@@ -147,18 +148,19 @@ def performance_score(record: dict[str, Any], fallback: float) -> tuple[float, d
     composite = recent * 0.50 + efficiency * 0.30 + career * 0.20
     raw_score = 20.0 + 78.0 * composite
 
-    # Shrink only genuinely immature samples. By 75-100 meaningful games the
-    # adjustment is effectively gone.
-    maturity = sample_maturity(record) / 100.0
-    shrink_factor = 0.55 + 0.45 * maturity
-    calibrated = 50.0 + (raw_score - 50.0) * shrink_factor
-    return round(clamp(calibrated, 20.0, 98.0), 1), {
+    # NFL evidence is stabilized once upstream before it reaches this semantic
+    # layer. Applying another sample shrink here double-discounts players such as
+    # established 40-60 game veterans and early-season stars. Rookie and
+    # second-year uncertainty is handled by the separate IPO-transition blend.
+    maturity = sample_maturity(record)
+    return round(clamp(raw_score, 20.0, 98.0), 1), {
         "recentProductionPct": round(recent, 4),
         "efficiencyPct": round(efficiency, 4),
         "careerProductionPct": round(career, 4),
         "rawPerformanceScore": round(raw_score, 2),
-        "sampleMaturity": round(maturity * 100.0, 2),
-        "shrinkFactor": round(shrink_factor, 4),
+        "sampleMaturity": round(maturity, 2),
+        "shrinkFactor": 1.0,
+        "evidenceAlreadyStabilized": True,
     }
 
 

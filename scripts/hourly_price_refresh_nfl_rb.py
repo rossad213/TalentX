@@ -21,7 +21,7 @@ import hourly_price_refresh_nfl as nfl
 import hourly_price_refresh_nfl_opportunity as opportunity
 import repair_nfl_persisted_opportunity_prices as persisted_opportunity
 
-NFL_RB_MODEL_VERSION = "1.7-nfl-nba-style-market-path"
+NFL_RB_MODEL_VERSION = "1.8-nfl-position-normalized-established-window"
 RB_RECEIVING_TD_RECENT_WEIGHT = 8.0
 RB_RECEIVING_TD_CAREER_WEIGHT = 4.0
 
@@ -65,11 +65,14 @@ def signal_bundle_with_rb_receiving_td_credit(
     return signals
 
 
-def nfl_universal_cohort_key(record: dict[str, Any]) -> tuple[str, str]:
-    """Put every NFL player in the same production-pricing comparison pool."""
-    if str(record.get("leagueOrMedium") or "").upper() != "NFL":
-        return _original_cohort_key(record)
-    return ("NFL", "UNIVERSAL")
+def nfl_position_cohort_key(record: dict[str, Any]) -> tuple[str, str]:
+    """Use one authoritative position-aware cohort path for every NFL player.
+
+    Quarterbacks, running backs, receivers/tight ends, defenders, offensive
+    linemen and special-teamers are normalized against comparable football roles
+    before all resulting 0-100 scores enter the universal TalentX value scale.
+    """
+    return _original_cohort_key(record)
 
 
 def _finite(value: Any) -> float | None:
@@ -84,7 +87,7 @@ def install_rb_receiving_td_credit():
     """Install NFL evidence/expectation logic while preserving the shared NBA-style market path."""
     nfl.NFL_EXPECTATION_MODEL_VERSION = NFL_RB_MODEL_VERSION
     refresh.signal_bundle = signal_bundle_with_rb_receiving_td_credit
-    refresh.cohort_key = nfl_universal_cohort_key
+    refresh.cohort_key = nfl_position_cohort_key
     opportunity.install_opportunity_protection()
     reliability = nfl.install_nfl_layer()
 

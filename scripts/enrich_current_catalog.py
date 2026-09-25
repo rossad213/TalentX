@@ -316,7 +316,80 @@ def recursively_collect_numbers(payload: Any, output: dict[str, float], prefix: 
             recursively_collect_numbers(value, output, f"{prefix}{index}_")
 
 
-def award_points(payload: dict[str, Any]) -> tuple[float, list[str]]:
+def _award_title_from_payload(payload: Any) -> str:
+    """Extract a human-readable award title from one ESPN award object."""
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("displayName", "shortDisplayName", "name", "description", "title"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            text_value = value.strip()
+            if text_value and not text_value.startswith(("http://", "https://")) and len(text_value) <= 160:
+                return text_value
+    for key in ("award", "type", "category"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            title = _award_title_from_payload(nested)
+            if title:
+                return title
+    return ""
+
+
+def _award_refs(payload: Any) -> list[str]:
+    refs: list[str] = []
+    if isinstance(payload, dict):
+        ref = payload.get("$ref")
+        if isinstance(ref, str) and ref.startswith(("http://", "https://")):
+            refs.append(ref)
+        for key in ("award", "type", "category"):
+            nested = payload.get(key)
+            if isinstance(nested, dict):
+                nested_ref = nested.get("$ref")
+                if isinstance(nested_ref, str) and nested_ref.startswith(("http://", "https://")):
+                    refs.append(nested_ref)
+    return list(dict.fromkeys(refs))
+
+
+def resolve_award_names(payload: dict[str, Any], timeout: float, *, max_items: int = 12) -> list[str]:
+    """Resolve ESPN Core award references into factual award titles.
+
+    ESPN's athlete-awards collection frequently returns reference-only items. The
+    old parser could count those items but could not see titles such as MVP or
+    All-Pro, leaving awardNames empty even when raw award points were non-zero.
+    This resolver follows only the returned award references, with a strict item
+    and depth bound so enrichment stays deterministic and reasonably cheap.
+    """
+    items = payload.get("items") if isinstance(payload.get("items"), list) else []
+    names: list[str] = []
+    for item in items[:max_items]:
+        if not isinstance(item, dict):
+            continue
+        title = _award_title_from_payload(item)
+        if title:
+            names.append(title)
+            continue
+        pending = _award_refs(item)
+        visited: set[str] = set()
+        depth = 0
+        while pending and depth < 2 and not title:
+            ref = pending.pop(0)
+            if ref in visited:
+                continue
+            visited.add(ref)
+            try:
+                detail = fetch_json(ref, timeout)
+            except Exception:  # noqa: BLE001 - unresolved detail keeps count evidence intact
+                continue
+            title = _award_title_from_payload(detail)
+            if title:
+                names.append(title)
+                break
+            pending.extend(url for url in _award_refs(detail) if url not in visited)
+            depth += 1
+    return list(dict.fromkeys(name for name in names if name))[:max_items]
+
+
+def award_points(payload: dict[str, Any], resolved_names: list[str] | None = None) -> tuple[float, list[str]]:
     count = number(payload.get("count"))
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
     if count is None:
@@ -326,17 +399,24 @@ def award_points(payload: dict[str, Any]) -> tuple[float, list[str]]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        title = str(item.get("displayName") or item.get("name") or item.get("description") or "").strip()
+        title = _award_title_from_payload(item)
         if title:
             names.append(title)
-            low = title.lower()
-            if any(token in low for token in ("most valuable", "mvp", "player of the year", "cy young", "golden boot")):
-                bonus += 8
-            elif any(token in low for token in ("all-pro", "all nba", "all-star", "pro bowl", "gold glove", "silver slugger")):
-                bonus += 4
-            elif any(token in low for token in ("rookie", "champion", "championship", "world series", "super bowl")):
-                bonus += 3
-    return min(100.0, count * 3.0 + bonus), names[:12]
+
+    if resolved_names:
+        names.extend(str(value).strip() for value in resolved_names if str(value).strip())
+    names = list(dict.fromkeys(names))[:12]
+    count = max(float(count or 0.0), float(len(names)))
+
+    for title in names:
+        low = title.lower()
+        if any(token in low for token in ("most valuable", "mvp", "player of the year", "cy young", "golden boot")):
+            bonus += 8
+        elif any(token in low for token in ("all-pro", "all nba", "all-star", "pro bowl", "gold glove", "silver slugger")):
+            bonus += 4
+        elif any(token in low for token in ("rookie", "champion", "championship", "world series", "super bowl")):
+            bonus += 3
+    return min(100.0, count * 3.0 + bonus), names
 
 
 def get(stats: dict[str, float], *aliases: str) -> float:
@@ -677,7 +757,8 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
                     errors.append(f"core profile {type(exc).__name__}")
         try:
             awards_payload = fetch_json(awards_url, timeout)
-            awards_score, awards_names = award_points(awards_payload)
+            resolved_awards = resolve_award_names(awards_payload, timeout)
+            awards_score, awards_names = award_points(awards_payload, resolved_awards)
             evidence_urls.append(awards_url)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"awards {type(exc).__name__}")

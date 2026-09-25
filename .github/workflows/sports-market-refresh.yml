@@ -45,6 +45,7 @@ on:
       - "tests/test_nfl_safe_rebase.py"
       - "tests/test_nfl_v2_market_state_migration.py"
       - "tests/test_nfl_metric_calibration.py"
+      - "tests/test_nfl_established_evidence.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -169,6 +170,7 @@ jobs:
           tests/test_nfl_safe_rebase.py
           tests/test_nfl_v2_market_state_migration.py
           tests/test_nfl_metric_calibration.py
+          tests/test_nfl_established_evidence.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
@@ -180,9 +182,7 @@ jobs:
           tests/test_category_market_store.py -v
       - name: Sync factual NFL draft metadata
         run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
-      - name: Migrate legacy NFL market state to v2 once
-        run: python scripts/migrate_nfl_v2_market_state.py --catalog data/current_catalog.json
-      - name: Refresh completed-game evidence
+      - name: Refresh completed-game evidence and NFL fundamental inputs
         run: >-
           python scripts/hourly_price_refresh_nfl_rb.py
           --workers 20
@@ -190,6 +190,11 @@ jobs:
           --lookback-hours 96
           --max-athletes 1800
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
+      # The NFL model epoch is reset only after the same-run position cohorts,
+      # multi-season rate evidence, awards and rookie-transition fields exist.
+      # That prevents the migration from anchoring to stale UNIVERSAL evidence.
+      - name: Reset NFL market epoch to unified evidence model once
+        run: python scripts/migrate_nfl_v2_market_state.py --catalog data/current_catalog.json
       - name: Refresh verified ATP and WTA match evidence
         run: >-
           python scripts/tennis_event_refresh_results.py

@@ -82,13 +82,13 @@ ROOKIE_WEIGHTS = {
     "availability": 0.07,
     "audience": 0.05,
 }
-MODEL_VERSION = "4.1-event-driven-pricing"
+MODEL_VERSION = "4.2-two-year-rookie-transition"
 
 ROOKIE_SPORT_CONFIG: dict[str, dict[str, Any]] = {
     "NFL": {
         "maxPicks": 257,
         "priceCeiling": 92.0,
-        "gameBands": ((0, 1.00), (4, 0.75), (10, 0.50), (17, 0.25), (24, 0.10)),
+        "gameBands": ((0, 1.00), (4, 0.75), (10, 0.50), (17, 0.25), (24, 0.10), (34, 0.05)),
     },
     "NBA": {
         "maxPicks": 60,
@@ -468,7 +468,11 @@ def professional_games(record: dict[str, Any]) -> int:
     experience = optional_number(record.get("experienceYears"))
     if experience is None or experience <= 0:
         return 0
-    # Missing game totals after one listed year should not preserve a full IPO anchor.
+    # Missing NFL game totals during the two-year IPO transition are unknown,
+    # not evidence of a veteran-sized sample. Keep a conservative partial IPO
+    # anchor until verified professional games arrive.
+    if str(record.get("leagueOrMedium") or "") == "NFL" and experience <= 2:
+        return -1
     if experience <= 1:
         return -1
     return 10_000
@@ -484,10 +488,24 @@ def rookie_influence(record: dict[str, Any]) -> float:
     experience = optional_number(record.get("experienceYears"))
     draft_year = optional_number(record.get("draftYear"))
     current_year = datetime.now(timezone.utc).year
-    if experience is not None and experience >= 2:
-        return 0.0
-    if draft_year is not None and draft_year < current_year - 1 and (experience is None or experience <= 0):
-        return 0.0
+    # NFL rookies and second-year players remain on the IPO-transition path.
+    # Year 3 is the clean handoff to the established professional model. Draft
+    # year is authoritative when available because provider "experience" fields
+    # can count the current season inconsistently.
+    if league == "NFL":
+        if draft_year is not None:
+            draft_age = current_year - int(round(draft_year))
+            if draft_age >= 2:
+                return 0.0
+            if draft_age < 0:
+                return 0.0
+        elif experience is not None and experience >= 3:
+            return 0.0
+    else:
+        if experience is not None and experience >= 2:
+            return 0.0
+        if draft_year is not None and draft_year < current_year - 1 and (experience is None or experience <= 0):
+            return 0.0
     if games < 0:
         return 0.25
     for maximum_games, influence in config["gameBands"]:

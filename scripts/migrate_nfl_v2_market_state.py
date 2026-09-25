@@ -24,9 +24,10 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 from nfl_metric_calibration import calibrate_record as calibrate_nfl_record
+from hourly_price_refresh_nfl import NFL_FUNDAMENTAL_EVIDENCE_VERSION
 
-MIGRATION_VERSION = "1.2-nfl-semantic-component-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-2"
+MIGRATION_VERSION = "1.3-nfl-established-evidence-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-3"
 
 _V2_FIELDS = (
     "talentScore",
@@ -76,6 +77,17 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     if not _is_nfl(record):
         return dict(record), False
     if str(record.get("nflMarketMigrationVersion") or "") == MIGRATION_VERSION:
+        return dict(record), False
+
+    # Live ESPN players migrate only after this model version has built their
+    # same-run position/multi-season evidence window. Players missed by the
+    # current event lookback remain eligible for migration on a later refresh
+    # instead of being permanently reset from stale UNIVERSAL evidence.
+    if (
+        str(record.get("sourceNamespace") or "").lower() == "espn"
+        and str(record.get("careerStatus") or "Active").lower() == "active"
+        and str(record.get("nflFundamentalEvidenceVersion") or "") != NFL_FUNDAMENTAL_EVIDENCE_VERSION
+    ):
         return dict(record), False
 
     prior_market = _finite(record.get("marketPrice"))
@@ -130,7 +142,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     )
     result["nflMarketMigrationTargetPrice"] = target
     result["nflMarketMigrationReason"] = (
-        "Reset NFL market state to the semantically recalibrated v2 fair value before future NBA-style event compounding"
+        "Reset NFL market state to the unified position-normalized, established-window v2 fair value before future event compounding"
     )
     return result, True
 

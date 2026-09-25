@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-MODEL_VERSION = "5.5-nfl-semantic-components"
+MODEL_VERSION = "5.6-nfl-established-evidence-window"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -116,10 +116,17 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         games = optional_num(record.get("professionalGames"))
         years = optional_num(record.get("experienceYears"))
         if games is not None and games > 0:
-            sample = 100.0 * (1.0 - math.exp(-games / 28.0))
+            # A 40-60 game NFL sample is already highly informative. Additional
+            # veteran games still add certainty, but cannot dominate two players
+            # whose football evidence is otherwise comparable.
+            sample = 100.0 * (1.0 - math.exp(-games / 16.0))
         elif years is not None and years > 0:
             # Missing career-game totals are not equivalent to zero evidence.
-            sample = 100.0 * (1.0 - math.exp(-years / 2.0))
+            # Approximate one healthy season as fourteen representative games so
+            # established players with a missing game field are not treated like
+            # rookies (for example, a Year-3 player with a stale zero total).
+            equivalent_games = years * 14.0
+            sample = 100.0 * (1.0 - math.exp(-equivalent_games / 16.0))
         else:
             stage = str(record.get("careerStage") or "").lower()
             sample = 18.0 if "rookie" in stage else 25.0

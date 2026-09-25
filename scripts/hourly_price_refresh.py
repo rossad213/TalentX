@@ -26,6 +26,7 @@ from enrich_current_catalog import (
     ESPN_OVERVIEW,
     ESPN_ATHLETE_PROFILE,
     ESPN_CORE_ATHLETE,
+    ESPN_AWARDS,
     NHL_LANDING,
     SPORT_PATH,
     cohort_key,
@@ -40,6 +41,8 @@ from enrich_current_catalog import (
     professional_games_from_stats,
     recursively_collect_numbers,
     signal_bundle,
+    award_points,
+    resolve_award_names,
 )
 from pricing_model import apply_pricing_to_records, clamp, load_overrides
 
@@ -67,7 +70,7 @@ SIGNAL_KEYS = (
 )
 
 PROCESSED_EVENT_RETENTION_DAYS = 30
-HOURLY_MODEL_VERSION = "1.4-production-efficiency-game-pricing"
+HOURLY_MODEL_VERSION = "1.5-nfl-established-window-recalibration"
 COMPLETED_EVENT_STATES = {
     "post", "final", "completed", "complete", "off", "closed", "official",
 }
@@ -544,6 +547,18 @@ def prior_award_data(record: dict[str, Any]) -> tuple[float, list[str]]:
     return award_points, [str(name) for name in names[:12]]
 
 
+NFL_AWARD_REFRESH_DAYS = 30
+NFL_AWARD_EVIDENCE_VERSION = "1.0-resolved-core-awards"
+
+
+def _nfl_awards_due(record: dict[str, Any], *, now: datetime | None = None) -> bool:
+    checked = parse_datetime(record.get("nflAwardsCheckedAt"))
+    if checked is None:
+        return True
+    current = now or utc_now()
+    return current - checked >= timedelta(days=NFL_AWARD_REFRESH_DAYS)
+
+
 def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, Any]:
     result = dict(record)
     namespace = str(result.get("sourceNamespace") or "")
@@ -570,6 +585,18 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
             evidence_urls.append(url)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"overview {type(exc).__name__}")
+        if str(result.get("leagueOrMedium") or "").upper() == "NFL" and _nfl_awards_due(result):
+            awards_url = ESPN_AWARDS.format(sport=sport, league=league, athlete_id=athlete_id)
+            try:
+                awards_payload = fetch_json(awards_url, timeout)
+                resolved_awards = resolve_award_names(awards_payload, timeout)
+                award_score, award_names = award_points(awards_payload, resolved_awards)
+                result["nflAwardsCheckedAt"] = iso_utc(utc_now())
+                result["nflAwardEvidenceVersion"] = NFL_AWARD_EVIDENCE_VERSION
+                evidence_urls.append(awards_url)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"awards {type(exc).__name__}")
+
         if result.get("draftPick") is None and float(result.get("experienceYears") or 0) <= 1:
             profile_url = ESPN_ATHLETE_PROFILE.format(sport=sport, league=league, athlete_id=athlete_id)
             try:
@@ -697,7 +724,7 @@ def apply_hourly_metrics(
     record["pricingConfidence"] = round(confidence, 2)
     existing_evidence = record.get("pricingEvidence") if isinstance(record.get("pricingEvidence"), list) else []
     record["pricingEvidence"] = list(dict.fromkeys([*existing_evidence, *item.get("evidenceUrls", [])]))[-8:]
-    record["pricingEvidenceSummary"] = {
+    summary = {
         "cohort": f"{cohort_key(record)[0]} · {cohort_key(record)[1]}",
         "recentStatFields": len(item.get("recent", {})),
         "careerStatFields": len(item.get("career", {})),
@@ -710,6 +737,11 @@ def apply_hourly_metrics(
         "percentiles": {key: round(value, 4) for key, value in pcts.items()},
         "rawSignals": {key: round(float(signals.get(key, 0)), 4) for key in SIGNAL_KEYS},
     }
+    nfl_window = item.get("nflFundamentalEvidence")
+    if isinstance(nfl_window, dict):
+        summary["nflFundamentalEvidence"] = nfl_window
+        record["nflFundamentalEvidenceVersion"] = nfl_window.get("version")
+    record["pricingEvidenceSummary"] = summary
     record["hourlyEvidenceCheckedAt"] = refreshed_at
     if item.get("errors"):
         record["pricingEvidenceWarnings"] = item["errors"]
@@ -925,7 +957,6 @@ def main() -> int:
     print(f"Players with box-score statistics: {len(participant_ids):,}")
     print(f"Athletes selected for game-level evidence refresh: {len(selected_indexes):,}")
 
-    cohorts, leagues = stored_signal_pools(records)
     overrides = load_overrides(PRICING_OVERRIDES)
     # A displayed change describes this refresh, not a permanent random drift.
     # Untouched records keep their price and history but return to a 0.00% move.
@@ -953,6 +984,34 @@ def main() -> int:
             if completed % 200 == 0 or completed == len(futures):
                 usable = sum(1 for item in results_by_index.values() if item.get("ok"))
                 print(f"Hourly evidence requests: {completed:,}/{len(futures):,}; usable: {usable:,}", flush=True)
+
+    # Build percentile pools from the evidence collected in this run. For NFL,
+    # prefer a same-run position cohort whenever at least eight comparable
+    # players are available so old UNIVERSAL/current-only evidence cannot mix
+    # with the new established-window scale.
+    pool_records: list[dict[str, Any]] = []
+    live_pool_records: list[dict[str, Any]] = []
+    for index, original in enumerate(records):
+        pool_record = dict(original)
+        item = results_by_index.get(index)
+        if isinstance(item, dict) and item.get("ok") and isinstance(item.get("signals"), dict):
+            pool_record = dict(item.get("record") or original)
+            summary = dict(pool_record.get("pricingEvidenceSummary") or {})
+            summary["rawSignals"] = {
+                key: float(item["signals"].get(key, 0.0) or 0.0)
+                for key in SIGNAL_KEYS
+            }
+            pool_record["pricingEvidenceSummary"] = summary
+            live_pool_records.append(pool_record)
+        pool_records.append(pool_record)
+
+    cohorts, leagues = stored_signal_pools(pool_records)
+    live_cohorts, live_leagues = stored_signal_pools(live_pool_records)
+    for key, values in live_cohorts.items():
+        if key[0] == "NFL" and len(values) >= 8:
+            cohorts[key] = values
+    if len(live_leagues.get("NFL", [])) >= 8:
+        leagues["NFL"] = live_leagues["NFL"]
 
     usable = 0
     changed = 0
