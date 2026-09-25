@@ -16,6 +16,12 @@ import math
 from pathlib import Path
 from typing import Any
 
+from soccer_metric_calibration import (
+    SOCCER_METRIC_WEIGHTS,
+    calibrate_record as calibrate_soccer_record,
+    is_soccer,
+)
+
 MODEL_VERSION = "5.6-nfl-established-evidence-window"
 
 CATEGORY_METRICS = {
@@ -160,10 +166,16 @@ def evidence_confidence(record: dict[str, Any]) -> float:
     return round(clamp(confidence, 15, 99), 2)
 
 
+def pricing_metrics(record: dict[str, Any]) -> dict[str, Any]:
+    if is_soccer(record) and isinstance(record.get("soccerGlobalMetrics"), dict):
+        return record["soccerGlobalMetrics"]
+    return record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+
+
 def talent_score(record: dict[str, Any]) -> float:
     category = str(record.get("primaryCategory") or "Athlete")
-    weights = CATEGORY_METRICS.get(category, CATEGORY_METRICS["Athlete"])
-    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    weights = SOCCER_METRIC_WEIGHTS if is_soccer(record) else CATEGORY_METRICS.get(category, CATEGORY_METRICS["Athlete"])
+    metrics = pricing_metrics(record)
     fallback = clamp(record.get("careerScore", 50))
     weighted = 0.0
     total = 0.0
@@ -175,7 +187,7 @@ def talent_score(record: dict[str, Any]) -> float:
 
 
 def market_score(record: dict[str, Any], talent: float) -> float:
-    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    metrics = pricing_metrics(record)
 
     if is_nfl(record):
         # NFL market context is intentionally independent of Talent and verified
@@ -259,7 +271,7 @@ def rookie_ipo_value(record: dict[str, Any]) -> tuple[float | None, float]:
 
 
 def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
-    result = dict(record)
+    result = calibrate_soccer_record(dict(record))
     talent = talent_score(result)
     confidence = evidence_confidence(result)
     market = market_score(result, talent)
@@ -303,6 +315,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         "rookieIpoAnchor": rookie_anchor,
         "rookieInfluence": round(rookie_influence, 4),
         "fairValue": fair,
+        "soccerCalibrationVersion": result.get("soccerCalibrationVersion"),
     }
     if isinstance(result.get("rookiePricing"), dict) and rookie_anchor is not None:
         result["rookiePricing"] = {

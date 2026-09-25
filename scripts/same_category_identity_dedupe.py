@@ -24,14 +24,35 @@ def normalize_identity_name(value: Any) -> str:
 
 def _is_curated(record: dict[str, Any]) -> bool:
     namespace = str(record.get("sourceNamespace") or "").lower()
-    return any(hint in namespace for hint in CURATED_NAMESPACE_HINTS)
+    source_name = str(record.get("sourceName") or "")
+    return (
+        any(hint in namespace for hint in CURATED_NAMESPACE_HINTS)
+        or source_name == "TalentX current-first seed"
+    )
 
 
-def _score(record: dict[str, Any]) -> tuple[int, float, float, int]:
+def _is_verified_live_soccer(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("primaryCategory") or "") == "Athlete"
+        and str(record.get("discipline") or "").strip().lower() in {"soccer", "football"}
+        and str(record.get("sourceNamespace") or "").strip().lower() == "espn"
+        and bool(str(record.get("sourceRecordId") or "").strip())
+    )
+
+
+def _score(record: dict[str, Any]) -> tuple[Any, ...]:
     curated = int(_is_curated(record))
     data_confidence = float(record.get("dataConfidence") or 0)
     pricing_confidence = float(record.get("pricingConfidence") or 0)
     evidence_count = len(record.get("pricingEvidence") or []) if isinstance(record.get("pricingEvidence"), list) else 0
+
+    if str(record.get("primaryCategory") or "") == "Athlete" and str(record.get("discipline") or "").strip().lower() in {"soccer", "football"}:
+        verified_live = int(_is_verified_live_soccer(record))
+        canonical_live_id = int(str(record.get("id") or "").startswith("live-espn-soccer-"))
+        events = len(record.get("priceEvents") or []) if isinstance(record.get("priceEvents"), list) else 0
+        history = len(record.get("priceHistory") or []) if isinstance(record.get("priceHistory"), list) else 0
+        return verified_live, canonical_live_id, events + history, data_confidence, pricing_confidence, evidence_count
+
     return curated, data_confidence, pricing_confidence, evidence_count
 
 
@@ -72,14 +93,19 @@ def dedupe_same_category_identities(
         winner = max(group, key=_score)
         winner_id = str(winner.get("id") or "")
         winner_source_id = str(winner.get("sourceRecordId") or "").strip()
+        curated_overlap = (
+            sum(1 for item in group if _is_curated(item)) == 1
+            and any(not _is_curated(item) for item in group)
+        )
 
         for record in group:
             if record is winner:
                 continue
 
-            # If this was not a curated-vs-discovered overlap, only suppress the
-            # record when it shares an explicit source identity with the winner.
-            if not (_is_curated(winner) and not _is_curated(record)):
+            # Curated/current-first seed vs discovered source is already a safe
+            # identity proof regardless of which side wins. Otherwise require an
+            # explicit shared provider identity before suppressing a same-name row.
+            if not curated_overlap:
                 record_source_id = str(record.get("sourceRecordId") or "").strip()
                 if not winner_source_id or record_source_id != winner_source_id:
                     continue

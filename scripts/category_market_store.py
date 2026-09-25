@@ -62,6 +62,13 @@ EXTRA_MARKET_FIELDS = (
     "nflMarketMigrationPriorLastGameMovePct",
     "nflMarketMigrationTargetPrice",
     "nflMarketMigrationReason",
+    # Soccer-only global competition calibration market epoch.
+    "soccerMarketMigrationVersion",
+    "soccerMarketMigratedAt",
+    "soccerMarketMigrationPriorMarketPrice",
+    "soccerMarketMigrationPriorLastGameMovePct",
+    "soccerMarketMigrationTargetPrice",
+    "soccerMarketMigrationReason",
 )
 
 TICKER_CATEGORY_CODES = {
