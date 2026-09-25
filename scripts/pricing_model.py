@@ -468,7 +468,11 @@ def professional_games(record: dict[str, Any]) -> int:
     experience = optional_number(record.get("experienceYears"))
     if experience is None or experience <= 0:
         return 0
-    # Missing game totals after one listed year should not preserve a full IPO anchor.
+    # Missing NFL game totals during the two-year IPO transition are unknown,
+    # not evidence of a veteran-sized sample. Keep a conservative partial IPO
+    # anchor until verified professional games arrive.
+    if str(record.get("leagueOrMedium") or "") == "NFL" and experience <= 2:
+        return -1
     if experience <= 1:
         return -1
     return 10_000
