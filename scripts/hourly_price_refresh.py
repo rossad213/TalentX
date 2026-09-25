@@ -705,8 +705,7 @@ def apply_hourly_metrics(
         "draftYear": record.get("draftYear"),
         "draftRound": record.get("draftRound"),
         "draftPick": record.get("draftPick"),
-        "professionalGames": record.get("professionalGames", 0),
-        "percentiles": {key: round(value, 4) for key, value in pcts.items()},
+        "professionalGames": record.get("professionalGames", 0),\n        "newsCount": item.get("newsCount", 0),\n        "percentiles": {key: round(value, 4) for key, value in pcts.items()},
         "rawSignals": {key: round(float(signals.get(key, 0)), 4) for key in SIGNAL_KEYS},
     }
     record["hourlyEvidenceCheckedAt"] = refreshed_at
