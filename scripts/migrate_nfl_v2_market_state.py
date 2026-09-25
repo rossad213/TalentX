@@ -25,8 +25,8 @@ from typing import Any
 from pricing_engine_v2 import apply_v2
 from nfl_metric_calibration import calibrate_record as calibrate_nfl_record
 
-MIGRATION_VERSION = "1.2-nfl-semantic-component-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-2"
+MIGRATION_VERSION = "1.3-nfl-established-evidence-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-3"
 
 _V2_FIELDS = (
     "talentScore",
@@ -130,7 +130,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     )
     result["nflMarketMigrationTargetPrice"] = target
     result["nflMarketMigrationReason"] = (
-        "Reset NFL market state to the semantically recalibrated v2 fair value before future NBA-style event compounding"
+        "Reset NFL market state to the unified position-normalized, established-window v2 fair value before future event compounding"
     )
     return result, True
 
