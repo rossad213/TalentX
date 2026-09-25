@@ -23,7 +23,8 @@ from category_market_store import load_records, write_records
 from results_event_pricing import MODEL_VERSION as RESULTS_MODEL_VERSION
 from results_event_pricing import result_move_from_delta, result_sensitivity
 
-NFL_EXPECTATION_MODEL_VERSION = "1.2-nfl-season-history-category-safe"
+NFL_EXPECTATION_MODEL_VERSION = "1.8-nfl-established-window-position-safe"
+NFL_FUNDAMENTAL_EVIDENCE_VERSION = "1.0-established-multiseason-opportunity-weighted"
 NFL_RESULT_SCALE = 1.45
 NFL_MIGRATION_LOOKBACK_DAYS = 14
 NFL_STATS_HISTORY = (
@@ -168,6 +169,175 @@ def _season_history_games(history: dict[int, dict[str, float]]) -> int:
     return total
 
 
+
+def _nfl_season_year(now: datetime | None = None) -> int:
+    current = now or datetime.now(timezone.utc)
+    return current.year if current.month >= 7 else current.year - 1
+
+
+def _role_group(record: dict[str, Any]) -> str:
+    role = str(record.get("role") or "").lower().strip()
+    if role == "qb" or "quarterback" in role:
+        return "QB"
+    if role in {"rb", "fb"} or "running back" in role or "fullback" in role:
+        return "RB"
+    if role in {"wr", "te"} or "wide receiver" in role or "receiver" in role or "tight end" in role:
+        return "REC"
+    if any(token in role for token in ("kicker", "punter", "long snapper")):
+        return "ST"
+    if any(token in role for token in ("offensive line", "offensive tackle", "offensive guard")) or role in {"ot", "og", "c"}:
+        return "OL"
+    return "DEF"
+
+
+def _uses_rookie_transition(record: dict[str, Any], season: int) -> bool:
+    """Keep rookies and second-year players on the separate IPO transition."""
+    draft_year = _finite(record.get("draftYear"))
+    if draft_year is not None:
+        age = season - int(round(draft_year))
+        return 0 <= age <= 1
+    experience = _finite(record.get("experienceYears"))
+    return experience is not None and 0 < experience <= 2
+
+
+def _season_signal(record: dict[str, Any], stats: dict[str, Any], games: float) -> tuple[float, float]:
+    if games <= 0:
+        return 0.0, 0.0
+    per_game = nfl_per_game_stats(stats, games)
+    signals = refresh.signal_bundle(record, per_game, {}, 0.0)
+    return (
+        max(0.0, float(signals.get("recentProduction") or 0.0)),
+        float(signals.get("efficiency") or 0.0),
+    )
+
+
+def _weighted_recent_prior(values: list[tuple[int, float]]) -> float | None:
+    """Blend the two most recent completed seasons without making career length a premium."""
+    if not values:
+        return None
+    ordered = sorted(values, key=lambda pair: pair[0], reverse=True)
+    if len(ordered) == 1:
+        return ordered[0][1]
+    return ordered[0][1] * 0.65 + ordered[1][1] * 0.35
+
+
+def _efficiency_opportunities(record: dict[str, Any], stats: dict[str, Any], games: float) -> tuple[float, float]:
+    """Return current opportunities and a role-specific stabilization prior.
+
+    Rate statistics should earn authority through attempts/touches/targets rather
+    than merely through calendar games. Count-based defensive/line evidence falls
+    back to games because public box scores do not expose snaps consistently.
+    """
+    group = _role_group(record)
+    if group == "QB":
+        attempts = refresh.stat_value(stats, "passingAttempts", "passAttempts", "attempts") or 0.0
+        return attempts, 300.0
+    if group == "RB":
+        carries = refresh.stat_value(stats, "rushingAttempts", "rushAttempts", "carries", "car") or 0.0
+        receptions = refresh.stat_value(stats, "receptions", "rec") or 0.0
+        return carries + receptions, 200.0
+    if group == "REC":
+        targets = refresh.stat_value(stats, "receivingTargets", "targets") or 0.0
+        receptions = refresh.stat_value(stats, "receptions", "rec") or 0.0
+        return (targets if targets > 0 else receptions), 120.0
+    if group == "ST":
+        field_goal_attempts = refresh.stat_value(stats, "fieldGoalsAttempted", "fieldGoalAttempts") or 0.0
+        punts = refresh.stat_value(stats, "punts") or 0.0
+        return field_goal_attempts + punts, 40.0
+    return max(0.0, games), 10.0
+
+
+def _established_fundamental_signals(
+    record: dict[str, Any],
+    item: dict[str, Any],
+    history: dict[int, dict[str, float]],
+    season: int,
+) -> tuple[dict[str, float], dict[str, Any]] | None:
+    """Build one stable fundamental evidence window for established NFL players.
+
+    Completed seasons and career per-game production establish the baseline.
+    Current-season production then earns weight gradually by games, while rate
+    efficiency earns weight by real opportunities such as attempts or touches.
+    This evidence is for fundamentals only; individual games still move market
+    price separately through the verified event ledger.
+    """
+    if _uses_rookie_transition(record, season):
+        return None
+
+    current_stats = history.get(season, {})
+    current_games = _game_count(current_stats) or 0.0
+    current_production, current_efficiency = _season_signal(record, current_stats, current_games) if current_games else (0.0, 0.0)
+
+    prior_production: list[tuple[int, float]] = []
+    prior_efficiency: list[tuple[int, float]] = []
+    for year, stats in history.items():
+        if year >= season:
+            continue
+        games = _game_count(stats)
+        if games is None or games <= 0:
+            continue
+        production, efficiency = _season_signal(record, stats, games)
+        prior_production.append((year, production))
+        prior_efficiency.append((year, efficiency))
+
+    recent_prior_production = _weighted_recent_prior(prior_production)
+    recent_prior_efficiency = _weighted_recent_prior(prior_efficiency)
+
+    career = item.get("career") if isinstance(item.get("career"), dict) else {}
+    career_games = _game_count(career, record.get("professionalGames"))
+    career_production = None
+    career_efficiency = None
+    if career and career_games:
+        career_production, career_efficiency = _season_signal(record, career, career_games)
+
+    def durable_baseline(recent_prior: float | None, career_value: float | None) -> float | None:
+        if recent_prior is not None and career_value is not None:
+            return recent_prior * 0.70 + career_value * 0.30
+        return recent_prior if recent_prior is not None else career_value
+
+    production_baseline = durable_baseline(recent_prior_production, career_production)
+    efficiency_baseline = durable_baseline(recent_prior_efficiency, career_efficiency)
+    if production_baseline is None and efficiency_baseline is None:
+        return None
+
+    production_weight = current_games / (current_games + 10.0) if current_games > 0 else 0.0
+    opportunities, opportunity_prior = _efficiency_opportunities(record, current_stats, current_games)
+    efficiency_weight = opportunities / (opportunities + opportunity_prior) if opportunities > 0 else 0.0
+
+    stable_production = (
+        current_production
+        if production_baseline is None
+        else production_baseline * (1.0 - production_weight) + current_production * production_weight
+    )
+    stable_efficiency = (
+        current_efficiency
+        if efficiency_baseline is None
+        else efficiency_baseline * (1.0 - efficiency_weight) + current_efficiency * efficiency_weight
+    )
+
+    signals = dict(item.get("signals") or {})
+    signals["recentProduction"] = max(0.0, stable_production)
+    signals["efficiency"] = stable_efficiency
+    detail = {
+        "version": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+        "window": "established-multiseason",
+        "season": season,
+        "currentSeasonGames": int(round(current_games)),
+        "currentSeasonProductionWeight": round(production_weight, 4),
+        "efficiencyOpportunities": round(opportunities, 2),
+        "efficiencyOpportunityPrior": round(opportunity_prior, 2),
+        "currentSeasonEfficiencyWeight": round(efficiency_weight, 4),
+        "priorCompletedSeasonProduction": round(recent_prior_production, 4) if recent_prior_production is not None else None,
+        "careerPerGameProduction": round(career_production, 4) if career_production is not None else None,
+        "stableRecentProduction": round(stable_production, 4),
+        "priorCompletedSeasonEfficiency": round(recent_prior_efficiency, 4) if recent_prior_efficiency is not None else None,
+        "careerEfficiency": round(career_efficiency, 4) if career_efficiency is not None else None,
+        "stableEfficiency": round(stable_efficiency, 4),
+        "principle": "career/multi-season fundamentals update gradually; verified games move market price separately",
+    }
+    return signals, detail
+
+
 def nfl_aware_fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, Any]:
     """Keep normal evidence collection, then replace NFL projections with actual season history."""
     item = _original_fetch_hourly_evidence(record, timeout)
@@ -182,7 +352,7 @@ def nfl_aware_fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> d
     athlete_id = str(record.get("sourceRecordId") or "").strip()
     if not athlete_id:
         return item
-    season = datetime.now(timezone.utc).year
+    season = _nfl_season_year()
     url = NFL_STATS_HISTORY.format(athlete_id=athlete_id, season=season)
     try:
         payload = refresh.fetch_json(url, timeout)
@@ -196,9 +366,7 @@ def nfl_aware_fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> d
     if not history:
         return item
 
-    years = sorted(history)
-    current_year = years[-1]
-    current_stats = history[current_year]
+    current_stats = history.get(season) or history[max(history)]
     prior_signals = item.get("signals") if isinstance(item.get("signals"), dict) else {}
     award_points = float(prior_signals.get("awardPoints") or 0.0)
     record_copy = dict(item.get("record") or record)
@@ -209,6 +377,18 @@ def nfl_aware_fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> d
     item["record"] = record_copy
     item["recent"] = current_stats
     item["signals"] = refresh.signal_bundle(record_copy, current_stats, item.get("career") or {}, award_points)
+
+    stable = _established_fundamental_signals(record_copy, item, history, season)
+    if stable is not None:
+        item["signals"], item["nflFundamentalEvidence"] = stable
+    else:
+        item["nflFundamentalEvidence"] = {
+            "version": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+            "window": "rookie-ipo-transition",
+            "season": season,
+            "principle": "rookie and second-year players use the IPO transition instead of veteran multi-season stabilization",
+        }
+
     item["nflSeasonStats"] = history
     item["nflSeasonHistorySource"] = url
     evidence_urls = list(item.get("evidenceUrls") or [])
