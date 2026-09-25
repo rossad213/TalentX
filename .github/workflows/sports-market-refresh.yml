@@ -8,7 +8,7 @@ on:
     branches: [main]
     paths:
       - "scripts/hourly_price_refresh.py"
-      - "scripts/hourly_price_refresh_nfl.py"
+      - "scripts/enrich_current_catalog.py"\n      - "scripts/pricing_model.py"\n      - "scripts/pricing_engine_v2.py"\n      - "scripts/nfl_metric_calibration.py"\n      - "scripts/hourly_price_refresh_nfl.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
       - "scripts/migrate_nfl_v2_market_state.py"
@@ -40,7 +40,7 @@ on:
       - "tests/test_nfl_fundamental_stability.py"
       - "tests/test_nfl_safe_rebase.py"
       - "tests/test_nfl_v2_market_state_migration.py"
-      - "tests/test_results_event_pricing.py"
+      - "tests/test_nfl_metric_calibration.py"\n      - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
       - "tests/test_game_event_history.py"
@@ -163,7 +163,7 @@ jobs:
           tests/test_nfl_fundamental_stability.py
           tests/test_nfl_safe_rebase.py
           tests/test_nfl_v2_market_state_migration.py
-          tests/test_results_event_pricing.py
+          tests/test_nfl_metric_calibration.py\n          tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
           tests/test_game_event_history.py
