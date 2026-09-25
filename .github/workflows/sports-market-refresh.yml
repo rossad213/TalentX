@@ -11,6 +11,10 @@ on:
       - "scripts/enrich_current_catalog.py"
       - "scripts/pricing_model.py"
       - "scripts/pricing_engine_v2.py"
+      - "scripts/soccer_metric_calibration.py"
+      - "scripts/migrate_soccer_global_market_state.py"
+      - "scripts/reconcile_soccer_baseline_identities.py"
+      - "scripts/same_category_identity_dedupe.py"
       - "scripts/nfl_metric_calibration.py"
       - "scripts/hourly_price_refresh_nfl.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
@@ -54,6 +58,10 @@ on:
       - "tests/test_golf_event_refresh.py"
       - "tests/test_athlete_career_event_refresh.py"
       - "tests/test_pricing_engine_v2.py"
+      - "tests/test_soccer_metric_calibration.py"
+      - "tests/test_soccer_global_market_state_migration.py"
+      - "tests/test_soccer_baseline_identity_reconciliation.py"
+      - "tests/test_same_category_identity_dedupe.py"
       - "tests/test_category_market_store.py"
       - ".github/workflows/sports-market-refresh.yml"
   schedule:
@@ -88,6 +96,7 @@ jobs:
           rm -rf _baseline _prior _published_fallback
           mkdir -p _baseline _prior _published_fallback data/market
           printf '[]' > data/prior_sports_state.json
+          printf '[]' > data/baseline_sports_state.json
 
           source_ready=0
           baseline_id=""
@@ -104,6 +113,7 @@ jobs:
               baseline_catalog="$(find _baseline -name current_catalog.json -print -quit)"
               if [ -n "$baseline_catalog" ]; then
                 python scripts/category_market_store.py extract --catalog "$baseline_catalog" --category sports --output data/current_catalog.json
+                cp data/current_catalog.json data/baseline_sports_state.json
                 source_ready=1
                 echo "Restored Sports from full baseline run $baseline_id."
               else
@@ -157,6 +167,11 @@ jobs:
 
           test "$source_ready" -eq 1 || { echo "No valid Sports recovery source is available."; exit 1; }
           echo "WEEKLY_BASELINE_RUN_ID=${baseline_id:-${prior_id:-}}" >> "$GITHUB_ENV"
+      - name: Recover canonical live Soccer identities from baseline
+        run: >-
+          python scripts/reconcile_soccer_baseline_identities.py
+          --catalog data/current_catalog.json
+          --baseline data/baseline_sports_state.json
       - name: Validate Sports pricing logic
         run: >-
           python -m unittest
@@ -179,6 +194,10 @@ jobs:
           tests/test_golf_event_refresh.py
           tests/test_athlete_career_event_refresh.py
           tests/test_pricing_engine_v2.py
+          tests/test_soccer_metric_calibration.py
+          tests/test_soccer_global_market_state_migration.py
+          tests/test_soccer_baseline_identity_reconciliation.py
+          tests/test_same_category_identity_dedupe.py
           tests/test_category_market_store.py -v
       - name: Sync factual NFL draft metadata
         run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
@@ -216,6 +235,8 @@ jobs:
           python scripts/restore_hourly_event_market_state.py
           --base data/current_catalog.json
           --snapshot data/sports_event_market_state.json
+      - name: Reset Soccer market epoch to global competition model once
+        run: python scripts/migrate_soccer_global_market_state.py --catalog data/current_catalog.json
       # NFL follows the same post-refresh architecture as NBA here:
       # pricing_engine_v2 owns refreshed fair value / rookie blending, while
       # restore_hourly_event_market_state preserves the verified market path.
