@@ -10,7 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from enrich_current_catalog import award_points, resolve_award_names  # noqa: E402
-from hourly_price_refresh_nfl import _established_fundamental_signals  # noqa: E402
+from hourly_price_refresh_nfl import (  # noqa: E402
+    NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+    _established_fundamental_signals,
+    nfl_model_backfill_select_records,
+)
 from hourly_price_refresh_nfl_rb import nfl_position_cohort_key  # noqa: E402
 from pricing_model import rookie_influence  # noqa: E402
 
@@ -99,6 +103,46 @@ class NFLEstablishedEvidenceTests(unittest.TestCase):
         _, detail = self.stable_signal(second_year, history, career)
         self.assertEqual(detail["window"], "rookie-ipo-transition")
         self.assertEqual(detail["currentSeasonProductionWeight"], 1.0)
+
+    def test_model_rollout_backfills_pending_nfl_beyond_game_participant_cap(self):
+        records = [
+            {
+                "id": "allen",
+                "name": "Josh Allen",
+                "leagueOrMedium": "NFL",
+                "sourceNamespace": "espn",
+                "sourceRecordId": "1",
+                "careerStatus": "Active",
+                "marketPrice": 160,
+            },
+            {
+                "id": "dak",
+                "name": "Dak Prescott",
+                "leagueOrMedium": "NFL",
+                "sourceNamespace": "espn",
+                "sourceRecordId": "2",
+                "careerStatus": "Active",
+                "marketPrice": 170,
+                "nflFundamentalEvidenceVersion": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+            },
+            {
+                "id": "nba",
+                "name": "NBA Player",
+                "leagueOrMedium": "NBA",
+                "sourceNamespace": "espn",
+                "sourceRecordId": "3",
+                "careerStatus": "Active",
+                "marketPrice": 200,
+            },
+        ]
+        selected = nfl_model_backfill_select_records(
+            records,
+            {("espn", "3")},
+            max_athletes=1,
+        )
+        self.assertIn(0, selected)
+        self.assertIn(2, selected)
+        self.assertNotIn(1, selected)
 
     def test_nfl_cohorts_are_position_aware_not_universal(self):
         qb = {
