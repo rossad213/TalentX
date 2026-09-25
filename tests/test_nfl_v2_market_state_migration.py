@@ -12,7 +12,8 @@ from migrate_nfl_v2_market_state import (  # noqa: E402
     MIGRATION_VERSION,
     migrate_record,
 )
-from pricing_engine_v2 import apply_v2  # noqa: E402\nfrom nfl_metric_calibration import calibrate_record  # noqa: E402
+from pricing_engine_v2 import apply_v2  # noqa: E402
+from nfl_metric_calibration import calibrate_record  # noqa: E402
 
 
 class NflV2MarketStateMigrationTests(unittest.TestCase):
