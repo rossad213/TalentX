@@ -16,7 +16,7 @@ import math
 from pathlib import Path
 from typing import Any
 
-MODEL_VERSION = "5.4-uncapped-event-signal"
+MODEL_VERSION = "5.5-nfl-semantic-components"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -54,6 +54,20 @@ def clamp(value: Any, low: float = 0.0, high: float = 100.0) -> float:
     return max(low, min(high, num(value)))
 
 
+def optional_num(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result if math.isfinite(result) else None
+
+
+def is_nfl(record: dict[str, Any]) -> bool:
+    return str(record.get("leagueOrMedium") or "").strip().upper() == "NFL"
+
+
 def is_curated_non_athlete(record: dict[str, Any]) -> bool:
     category = str(record.get("primaryCategory") or "")
     return (
@@ -85,6 +99,34 @@ def is_generic_wikidata_discovery(record: dict[str, Any]) -> bool:
 
 
 def evidence_confidence(record: dict[str, Any]) -> float:
+    # NFL confidence measures certainty in the estimate, not career value.
+    # Sample maturity rises quickly and then saturates; achievements and
+    # consistency remain valuation inputs instead of being counted again here.
+    if is_nfl(record):
+        raw_data = optional_num(record.get("pricingConfidence"))
+        if raw_data is None:
+            raw_data = optional_num(record.get("dataConfidence"))
+        if raw_data is None:
+            raw_data = 0.45
+        if raw_data > 1.0:
+            raw_data /= 100.0
+        raw_data = clamp(raw_data, 0.0, 1.0)
+        data_quality = 65.0 + 35.0 * raw_data
+
+        games = optional_num(record.get("professionalGames"))
+        years = optional_num(record.get("experienceYears"))
+        if games is not None and games > 0:
+            sample = 100.0 * (1.0 - math.exp(-games / 28.0))
+        elif years is not None and years > 0:
+            # Missing career-game totals are not equivalent to zero evidence.
+            sample = 100.0 * (1.0 - math.exp(-years / 2.0))
+        else:
+            stage = str(record.get("careerStage") or "").lower()
+            sample = 18.0 if "rookie" in stage else 25.0
+
+        confidence = data_quality * 0.70 + sample * 0.30
+        return round(clamp(confidence, 15, 99), 2)
+
     games = max(0.0, num(record.get("professionalGames")))
     years = max(0.0, num(record.get("yearsActive")))
     data = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.45)) * 100)
@@ -127,6 +169,17 @@ def talent_score(record: dict[str, Any]) -> float:
 
 def market_score(record: dict[str, Any], talent: float) -> float:
     metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+
+    if is_nfl(record):
+        # NFL market context is intentionally independent of Talent and verified
+        # game moves. Talent is already valued directly, while game results move
+        # the durable market-price ledger after fair value is established.
+        audience = clamp(metrics.get("audience", record.get("audienceScore", 50)))
+        attention = clamp(metrics.get("attention", record.get("nflAttentionScore", 50)))
+        liquidity = clamp(record.get("nflLiquidityScore", record.get("tradeDemandScore", 50)))
+        score = audience * .50 + attention * .30 + liquidity * .20
+        return round(clamp(score), 2)
+
     audience = clamp(metrics.get("audience", record.get("audienceScore", talent)))
     momentum_pct = clamp(record.get("momentumPct", 0), -20, 20)
     demand_pct = clamp(record.get("demandPremiumPct", 0), -20, 20)

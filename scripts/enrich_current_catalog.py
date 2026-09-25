@@ -778,6 +778,7 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "draftRound": record.get("draftRound"),
                 "draftPick": record.get("draftPick"),
                 "professionalGames": 0,
+                "newsCount": item.get("newsCount", 0),
                 "percentiles": {},
                 "rawSignals": {key: round(value, 4) for key, value in item["signals"].items()},
             }
@@ -851,6 +852,7 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "draftRound": record.get("draftRound"),
             "draftPick": record.get("draftPick"),
             "professionalGames": record.get("professionalGames", 0),
+            "newsCount": item.get("newsCount", 0),
             "percentiles": {key: round(value, 4) for key, value in pcts.items()},
             "rawSignals": {key: round(value, 4) for key, value in signals.items()},
         }

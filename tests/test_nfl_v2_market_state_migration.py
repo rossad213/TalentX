@@ -13,6 +13,7 @@ from migrate_nfl_v2_market_state import (  # noqa: E402
     migrate_record,
 )
 from pricing_engine_v2 import apply_v2  # noqa: E402
+from nfl_metric_calibration import calibrate_record  # noqa: E402
 
 
 class NflV2MarketStateMigrationTests(unittest.TestCase):
@@ -72,7 +73,7 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
 
     def test_nfl_resets_once_to_clean_v2_fair_value(self):
         original = self.nfl_record(lastGameMovePct=-54.68, marketPrice=195.91)
-        expected = apply_v2({**original, "lastGameMovePct": 0.0, "dailyChange": 0.0, "hourlyChangePct": 0.0})
+        expected = apply_v2({**calibrate_record(original), "lastGameMovePct": 0.0, "dailyChange": 0.0, "hourlyChangePct": 0.0})
         migrated, changed = migrate_record(original, "2026-09-24T16:15:00Z")
 
         self.assertTrue(changed)
@@ -99,7 +100,7 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["priceHistory"][-1]["eventId"], MIGRATION_EVENT_ID)
         self.assertEqual(migrated["priceHistory"][-1]["price"], migrated["marketPrice"])
 
-    def test_prior_migration_version_is_reset_again_for_v1_1_cleanup(self):
+    def test_prior_migration_version_is_reset_again_for_v1_2_semantic_cleanup(self):
         original = self.nfl_record(
             marketPrice=463.46,
             nflMarketMigrationVersion="1.0-nfl-v2-market-state-reset",
@@ -107,7 +108,7 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
             lastGameMovePct=-2.43,
         )
         expected = apply_v2({
-            **original,
+            **calibrate_record(original),
             "lastGameMovePct": 0.0,
             "dailyChange": 0.0,
             "hourlyChangePct": 0.0,
