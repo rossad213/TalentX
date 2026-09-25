@@ -17,6 +17,8 @@ from hourly_price_refresh import (  # noqa: E402
     event_key,
     extract_espn_game_stats,
     game_event_move,
+    nhl_price_eligible_game,
+    nhl_regularized_production_delta,
     prior_processed_events,
     retain_recent_processed_player_events,
 )
@@ -153,6 +155,28 @@ class HourlyGamePricingTests(unittest.TestCase):
         start = now - timedelta(hours=20)
         self.assertTrue(event_in_window(start, "post", now, cutoff))
         self.assertFalse(event_in_window(start, "in", now, cutoff))
+
+    def test_nhl_only_regular_season_and_playoffs_are_price_eligible(self) -> None:
+        self.assertFalse(nhl_price_eligible_game({"gameType": 1}))
+        self.assertTrue(nhl_price_eligible_game({"gameType": 2}))
+        self.assertTrue(nhl_price_eligible_game({"gameType": 3}))
+        self.assertFalse(nhl_price_eligible_game({"gameType": 4}))
+        self.assertFalse(nhl_price_eligible_game({}))
+
+    def test_nhl_tiny_baseline_is_regularized_not_thousands_of_percent(self) -> None:
+        player = {
+            "id": "nhl-fringe",
+            "name": "NHL Fringe",
+            "primaryCategory": "Athlete",
+            "discipline": "Hockey",
+            "leagueOrMedium": "NHL",
+            "role": "C",
+        }
+        raw_delta = (12.0 / 0.02 - 1.0) * 100.0
+        regularized = nhl_regularized_production_delta(player, 12.0, 0.02)
+        self.assertGreater(raw_delta, 50000)
+        self.assertLess(abs(regularized), 250)
+        self.assertGreater(regularized, 0)
 
     def test_processed_event_ids_are_retained_and_deduplicated(self) -> None:
         now = datetime(2026, 8, 4, 20, tzinfo=timezone.utc)
