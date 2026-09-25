@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 from pricing_engine_v2 import apply_v2
+from nfl_metric_calibration import calibrate_record as calibrate_nfl_record
 
-MIGRATION_VERSION = "1.1-nfl-v2-market-state-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-1"
+MIGRATION_VERSION = "1.2-nfl-semantic-component-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-2"
 
 _V2_FIELDS = (
     "talentScore",
@@ -80,10 +81,15 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     prior_market = _finite(record.get("marketPrice"))
     prior_game_move = _finite(record.get("lastGameMovePct"))
 
+    # Recalibrate NFL-only semantic inputs before establishing the new market
+    # epoch. This corrects legacy achievement/performance/audience distortion
+    # without touching any other league.
+    calibrated = calibrate_nfl_record(record)
+
     # Build the new fundamental without allowing a stale pre-migration game move
     # to contaminate the reset price. Future verified games will populate this
     # field normally and compound from the migrated market price.
-    clean = dict(record)
+    clean = dict(calibrated)
     clean["lastGameMovePct"] = 0.0
     clean["dailyChange"] = 0.0
     clean["hourlyChangePct"] = 0.0
@@ -93,8 +99,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         return dict(record), False
     target = round(target, 2)
 
-    result = dict(record)
-    for field in _V2_FIELDS:
+    result = dict(calibrated)\n    for field in _V2_FIELDS:
         if field in repriced:
             result[field] = repriced[field]
 
@@ -124,7 +129,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     )
     result["nflMarketMigrationTargetPrice"] = target
     result["nflMarketMigrationReason"] = (
-        "Reset legacy NFL market state to clean v2 fair value before future NBA-style event compounding"
+        "Reset NFL market state to the semantically recalibrated v2 fair value before future NBA-style event compounding"
     )
     return result, True
 
