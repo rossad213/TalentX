@@ -103,3 +103,65 @@ def test_shared_source_identity_is_collapsed():
     assert len(deduped) == 1
     assert deduped[0]["id"] == "two"
     assert len(repairs) == 1
+
+
+def test_live_espn_soccer_record_wins_over_current_first_seed():
+    records = [
+        {
+            "id": "cur-aitana-bonmat",
+            "name": "Aitana Bonmatí",
+            "primaryCategory": "Athlete",
+            "discipline": "Soccer",
+            "sourceName": "TalentX current-first seed",
+            "dataConfidence": 0.99,
+            "pricingConfidence": 0.99,
+        },
+        {
+            "id": "live-espn-soccer-268537",
+            "name": "Aitana Bonmati",
+            "primaryCategory": "Athlete",
+            "discipline": "Soccer",
+            "sourceNamespace": "espn",
+            "sourceName": "ESPN current team roster endpoint",
+            "sourceRecordId": "268537",
+            "dataConfidence": 0.90,
+            "pricingConfidence": 0.90,
+        },
+    ]
+
+    deduped, repairs = dedupe_same_category_identities(records)
+
+    assert len(deduped) == 1
+    assert deduped[0]["id"] == "live-espn-soccer-268537"
+    assert repairs[0]["suppressedId"] == "cur-aitana-bonmat"
+
+
+def test_live_espn_id_wins_shared_soccer_source_identity_even_with_lower_confidence():
+    records = [
+        {
+            "id": "cur-erling-haaland",
+            "name": "Erling Haaland",
+            "primaryCategory": "Athlete",
+            "discipline": "Soccer",
+            "sourceNamespace": "espn",
+            "sourceRecordId": "253989",
+            "dataConfidence": 0.99,
+            "pricingConfidence": 0.99,
+        },
+        {
+            "id": "live-espn-soccer-253989",
+            "name": "Erling Haaland",
+            "primaryCategory": "Athlete",
+            "discipline": "Soccer",
+            "sourceNamespace": "espn",
+            "sourceRecordId": "253989",
+            "dataConfidence": 0.90,
+            "pricingConfidence": 0.90,
+        },
+    ]
+
+    deduped, repairs = dedupe_same_category_identities(records)
+
+    assert len(deduped) == 1
+    assert deduped[0]["id"] == "live-espn-soccer-253989"
+    assert repairs[0]["suppressedId"] == "cur-erling-haaland"
