@@ -14,6 +14,7 @@ from migrate_nfl_v2_market_state import (  # noqa: E402
 )
 from pricing_engine_v2 import apply_v2  # noqa: E402
 from nfl_metric_calibration import calibrate_record  # noqa: E402
+from hourly_price_refresh_nfl import NFL_FUNDAMENTAL_EVIDENCE_VERSION  # noqa: E402
 
 
 class NflV2MarketStateMigrationTests(unittest.TestCase):
@@ -120,6 +121,24 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["nflMarketMigrationVersion"], MIGRATION_VERSION)
         self.assertEqual(migrated["nflMarketMigratedAt"], "2026-09-24T19:00:00Z")
         self.assertEqual(migrated["nflMarketMigrationPriorMarketPrice"], 463.46)
+
+    def test_live_espn_player_waits_for_unified_evidence_before_reset(self):
+        pending = self.nfl_record(
+            sourceNamespace="espn",
+            careerStatus="Active",
+            nflFundamentalEvidenceVersion=None,
+        )
+        unchanged, changed = migrate_record(pending, "2026-09-25T01:00:00Z")
+        self.assertFalse(changed)
+        self.assertEqual(unchanged, pending)
+
+        ready = {
+            **pending,
+            "nflFundamentalEvidenceVersion": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+        }
+        migrated, changed_ready = migrate_record(ready, "2026-09-25T01:05:00Z")
+        self.assertTrue(changed_ready)
+        self.assertEqual(migrated["nflMarketMigrationVersion"], MIGRATION_VERSION)
 
     def test_migration_is_idempotent(self):
         first, changed = migrate_record(self.nfl_record(), "2026-09-24T16:15:00Z")
