@@ -261,12 +261,34 @@ def _established_fundamental_signals(
     This evidence is for fundamentals only; individual games still move market
     price separately through the verified event ledger.
     """
-    if _uses_rookie_transition(record, season):
-        return None
-
     current_stats = history.get(season, {})
     current_games = _game_count(current_stats) or 0.0
     current_production, current_efficiency = _season_signal(record, current_stats, current_games) if current_games else (0.0, 0.0)
+
+    if _uses_rookie_transition(record, season):
+        # Rookie/second-year players are not veteran-stabilized, but their raw
+        # production must still live on the same per-game scale as established
+        # peers before position percentiles are calculated. IPO blending handles
+        # their uncertainty separately.
+        if current_games <= 0:
+            return None
+        signals = dict(item.get("signals") or {})
+        signals["recentProduction"] = max(0.0, current_production)
+        signals["efficiency"] = current_efficiency
+        opportunities, opportunity_prior = _efficiency_opportunities(record, current_stats, current_games)
+        return signals, {
+            "version": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+            "window": "rookie-ipo-transition",
+            "season": season,
+            "currentSeasonGames": int(round(current_games)),
+            "currentSeasonProductionWeight": 1.0,
+            "efficiencyOpportunities": round(opportunities, 2),
+            "efficiencyOpportunityPrior": round(opportunity_prior, 2),
+            "currentSeasonEfficiencyWeight": 1.0,
+            "stableRecentProduction": round(current_production, 4),
+            "stableEfficiency": round(current_efficiency, 4),
+            "principle": "same per-game cohort scale; IPO transition handles small-sample uncertainty",
+        }
 
     prior_production: list[tuple[int, float]] = []
     prior_efficiency: list[tuple[int, float]] = []
@@ -384,9 +406,9 @@ def nfl_aware_fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> d
     else:
         item["nflFundamentalEvidence"] = {
             "version": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
-            "window": "rookie-ipo-transition",
+            "window": "source-fallback",
             "season": season,
-            "principle": "rookie and second-year players use the IPO transition instead of veteran multi-season stabilization",
+            "principle": "season history could not produce a comparable per-game window; preserve source evidence without inventing rates",
         }
 
     item["nflSeasonStats"] = history
