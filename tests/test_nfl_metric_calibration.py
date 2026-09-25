@@ -65,6 +65,21 @@ class NflMetricCalibrationTests(unittest.TestCase):
         p141, _ = calibrated_metrics(self.record(professionalGames=141), metrics)
         self.assertLess(abs(p141["performance"] - p95["performance"]), 1.0)
 
+    def test_established_51_vs_81_games_has_small_confidence_maturity_gap(self):
+        fifty_one = sample_maturity(self.record(professionalGames=51))
+        eighty_one = sample_maturity(self.record(professionalGames=81))
+        self.assertGreater(fifty_one, 95)
+        self.assertLess(eighty_one - fifty_one, 4)
+
+    def test_semantic_performance_does_not_apply_a_second_sample_shrink(self):
+        metrics = self.record()["activeMetrics"]
+        younger, detail = calibrated_metrics(self.record(professionalGames=40), metrics)
+        veteran, _ = calibrated_metrics(self.record(professionalGames=140), metrics)
+        self.assertEqual(younger["performance"], veteran["performance"])
+        self.assertEqual(detail["performance"]["shrinkFactor"], 1.0)
+        self.assertTrue(detail["performance"]["evidenceAlreadyStabilized"])
+
+
     def test_achievement_score_is_honors_led_not_career_volume_led(self):
         decorated = self.record(
             professionalGames=126,
