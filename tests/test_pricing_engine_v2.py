@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
-from pricing_engine_v2 import apply_v2, evidence_confidence
+from pricing_engine_v2 import apply_v2, evidence_confidence, market_score
 
 class PricingEngineV2Tests(unittest.TestCase):
     def record(self, **updates):
@@ -41,13 +41,36 @@ class PricingEngineV2Tests(unittest.TestCase):
             activeMetrics={"performance":88,"achievements":25,"consistency":55,"potential":98,"availability":90,"audience":82}))
         self.assertLess(rookie['confidenceScore'],veteran['confidenceScore'])
         self.assertLess(rookie['fairValue'],veteran['fairValue'])
-    def test_established_nfl_and_nba_share_the_same_v2_valuation_path(self):
-        nfl=apply_v2(self.record(leagueOrMedium='NFL'))
-        nba=apply_v2(self.record(leagueOrMedium='NBA'))
-        self.assertEqual(nfl['talentScore'],nba['talentScore'])
-        self.assertEqual(nfl['confidenceScore'],nba['confidenceScore'])
-        self.assertEqual(nfl['marketScore'],nba['marketScore'])
-        self.assertEqual(nfl['fairValue'],nba['fairValue'])
+    def test_nfl_confidence_matures_without_120_game_cliff(self):
+        hurts=evidence_confidence(self.record(leagueOrMedium='NFL',professionalGames=95,experienceYears=7))
+        dak=evidence_confidence(self.record(leagueOrMedium='NFL',professionalGames=141,experienceYears=11))
+        self.assertGreater(hurts,90)
+        self.assertLess(dak-hurts,2)
+
+    def test_nfl_confidence_does_not_double_count_achievements(self):
+        low=evidence_confidence(self.record(
+            leagueOrMedium='NFL',professionalGames=95,
+            activeMetrics={"performance":88,"achievements":20,"consistency":40,"potential":75,"availability":90,"audience":60}))
+        high=evidence_confidence(self.record(
+            leagueOrMedium='NFL',professionalGames=95,
+            activeMetrics={"performance":88,"achievements":99,"consistency":99,"potential":75,"availability":90,"audience":60}))
+        self.assertEqual(low,high)
+
+    def test_nfl_missing_game_total_uses_experience_fallback(self):
+        established=evidence_confidence(self.record(
+            leagueOrMedium='NFL',professionalGames=0,experienceYears=6))
+        self.assertGreater(established,90)
+
+    def test_nfl_market_score_is_independent_of_talent_and_game_event(self):
+        record=self.record(
+            leagueOrMedium='NFL',
+            activeMetrics={"performance":88,"achievements":86,"consistency":90,"potential":75,
+                           "availability":90,"audience":62,"attention":70},
+            nflLiquidityScore=55,lastGameMovePct=18)
+        low=market_score(record,20)
+        high=market_score({**record,"lastGameMovePct":-18},95)
+        self.assertEqual(low,high)
+        self.assertAlmostEqual(low,62*.50+70*.30+55*.20,places=2)
 
     def test_top_nfl_rookie_keeps_meaningful_ipo_anchor(self):
         rookie=apply_v2(self.rookie_record('NFL',score=94,influence=100))
