@@ -99,7 +99,8 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         return dict(record), False
     target = round(target, 2)
 
-    result = dict(calibrated)\n    for field in _V2_FIELDS:
+    result = dict(calibrated)
+    for field in _V2_FIELDS:
         if field in repriced:
             result[field] = repriced[field]
 
