@@ -45,6 +45,7 @@ on:
       - "tests/test_nfl_safe_rebase.py"
       - "tests/test_nfl_v2_market_state_migration.py"
       - "tests/test_nfl_metric_calibration.py"
+      - "tests/test_nfl_established_evidence.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -169,6 +170,7 @@ jobs:
           tests/test_nfl_safe_rebase.py
           tests/test_nfl_v2_market_state_migration.py
           tests/test_nfl_metric_calibration.py
+          tests/test_nfl_established_evidence.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
