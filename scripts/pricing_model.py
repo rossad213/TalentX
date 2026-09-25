@@ -18,6 +18,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from nfl_metric_calibration import calibrated_metrics as calibrated_nfl_metrics
+except ModuleNotFoundError:
+    from scripts.nfl_metric_calibration import calibrated_metrics as calibrated_nfl_metrics
+
 CATEGORY_WEIGHTS: dict[str, dict[str, float]] = {
     # Current athletic value emphasizes verified production and durable career
     # strength. Audience is handled as a small market-demand adjustment rather
@@ -275,10 +280,20 @@ def normalize_evidence_metrics(
     record: dict[str, Any],
     metrics: dict[str, float],
 ) -> dict[str, float]:
-    """Upgrade previously enriched athlete metrics to the v4 input rules."""
+    """Normalize athlete evidence while preserving league-specific semantics.
+
+    NFL records use the dedicated semantic calibration so performance,
+    achievements and audience remain distinct concepts. Every other athlete
+    league retains the existing v4 normalization path unchanged.
+    """
     output = dict(metrics)
     if category_name(record) != "Athlete":
         return output
+
+    if str(record.get("leagueOrMedium") or "").upper() == "NFL":
+        calibrated, _ = calibrated_nfl_metrics(record, output)
+        return calibrated
+
     summary = record.get("pricingEvidenceSummary")
     percentiles = summary.get("percentiles") if isinstance(summary, dict) else None
     if not isinstance(percentiles, dict):
