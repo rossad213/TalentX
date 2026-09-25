@@ -34,6 +34,7 @@ NFL_STATS_HISTORY = (
 
 _original_expected_game_signal = refresh.expected_game_signal
 _original_fetch_hourly_evidence = refresh.fetch_hourly_evidence
+_original_select_records = refresh.select_records
 _original_reliable_results_move = None
 
 _GAME_COUNT_KEYS = {"gamesplayed", "games", "appearances", "gp"}
@@ -680,11 +681,61 @@ def migrate_latest_nfl_expectations(
     return changed
 
 
+def nfl_model_backfill_select_records(
+    records: list[dict[str, Any]],
+    participant_ids: set[tuple[str, str]],
+    *,
+    max_athletes: int,
+) -> list[int]:
+    """Include every active ESPN NFL record that still needs the current evidence model.
+
+    The shared hourly selector is intentionally game-driven and capped. That is
+    correct for ordinary event refreshes, but a new NFL fundamental model cannot
+    be rolled out only to players who happened to appear in the current lookback
+    window. Pending NFL records are therefore added beyond the normal game cap
+    until each has the current fundamental-evidence version. After that one-time
+    backfill, selection automatically returns to the ordinary participant path.
+    """
+    selected = list(_original_select_records(
+        records,
+        participant_ids,
+        max_athletes=max_athletes,
+    ))
+    selected_set = set(selected)
+    pending: list[int] = []
+    for index, record in enumerate(records):
+        if index in selected_set:
+            continue
+        if str(record.get("leagueOrMedium") or "").upper() != "NFL":
+            continue
+        if str(record.get("sourceNamespace") or "").lower() != "espn":
+            continue
+        if str(record.get("careerStatus") or "Active").lower() != "active":
+            continue
+        if not str(record.get("sourceRecordId") or "").strip():
+            continue
+        if str(record.get("nflFundamentalEvidenceVersion") or "") == NFL_FUNDAMENTAL_EVIDENCE_VERSION:
+            continue
+        pending.append(index)
+
+    pending.sort(key=lambda index: (
+        -float(records[index].get("marketPrice") or 0.0),
+        str(records[index].get("name") or ""),
+    ))
+    if pending:
+        print(
+            f"NFL model backfill: adding {len(pending):,} active ESPN listing(s) "
+            f"beyond the normal game-participant cap."
+        )
+    return [*selected, *pending]
+
+
 def install_nfl_layer():
     """Install NFL-only hooks after loading the existing reliability wrapper."""
     global _original_reliable_results_move
     refresh.expected_game_signal = nfl_aware_expected_game_signal
     refresh.fetch_hourly_evidence = nfl_aware_fetch_hourly_evidence
+    refresh.select_records = nfl_model_backfill_select_records
     import hourly_price_refresh_reliable as reliable
 
     _original_reliable_results_move = reliable.results_based_game_event_move
