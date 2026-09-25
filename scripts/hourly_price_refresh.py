@@ -547,6 +547,18 @@ def prior_award_data(record: dict[str, Any]) -> tuple[float, list[str]]:
     return award_points, [str(name) for name in names[:12]]
 
 
+NFL_AWARD_REFRESH_DAYS = 30
+NFL_AWARD_EVIDENCE_VERSION = "1.0-resolved-core-awards"
+
+
+def _nfl_awards_due(record: dict[str, Any], *, now: datetime | None = None) -> bool:
+    checked = parse_datetime(record.get("nflAwardsCheckedAt"))
+    if checked is None:
+        return True
+    current = now or utc_now()
+    return current - checked >= timedelta(days=NFL_AWARD_REFRESH_DAYS)
+
+
 def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, Any]:
     result = dict(record)
     namespace = str(result.get("sourceNamespace") or "")
@@ -573,6 +585,18 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
             evidence_urls.append(url)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"overview {type(exc).__name__}")
+        if str(result.get("leagueOrMedium") or "").upper() == "NFL" and _nfl_awards_due(result):
+            awards_url = ESPN_AWARDS.format(sport=sport, league=league, athlete_id=athlete_id)
+            try:
+                awards_payload = fetch_json(awards_url, timeout)
+                resolved_awards = resolve_award_names(awards_payload, timeout)
+                award_score, award_names = award_points(awards_payload, resolved_awards)
+                result["nflAwardsCheckedAt"] = iso_utc(utc_now())
+                result["nflAwardEvidenceVersion"] = NFL_AWARD_EVIDENCE_VERSION
+                evidence_urls.append(awards_url)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"awards {type(exc).__name__}")
+
         if result.get("draftPick") is None and float(result.get("experienceYears") or 0) <= 1:
             profile_url = ESPN_ATHLETE_PROFILE.format(sport=sport, league=league, athlete_id=athlete_id)
             try:
