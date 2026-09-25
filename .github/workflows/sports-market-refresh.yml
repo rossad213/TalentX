@@ -14,6 +14,7 @@ on:
       - "scripts/soccer_metric_calibration.py"
       - "scripts/recalibrate_nhl_metrics.py"
       - "scripts/migrate_nhl_market_state.py"
+      - "scripts/reconcile_nhl_identities.py"
       - "scripts/migrate_soccer_global_market_state.py"
       - "scripts/reconcile_soccer_baseline_identities.py"
       - "scripts/same_category_identity_dedupe.py"
@@ -63,6 +64,7 @@ on:
       - "tests/test_soccer_metric_calibration.py"
       - "tests/test_nhl_metric_recalibration.py"
       - "tests/test_nhl_market_state_migration.py"
+      - "tests/test_nhl_identity_reconciliation.py"
       - "tests/test_soccer_global_market_state_migration.py"
       - "tests/test_soccer_baseline_identity_reconciliation.py"
       - "tests/test_same_category_identity_dedupe.py"
@@ -176,6 +178,8 @@ jobs:
           python scripts/reconcile_soccer_baseline_identities.py
           --catalog data/current_catalog.json
           --baseline data/baseline_sports_state.json
+      - name: Collapse duplicate NHL provider identities
+        run: python scripts/reconcile_nhl_identities.py --catalog data/current_catalog.json
       - name: Validate Sports pricing logic
         run: >-
           python -m unittest
@@ -201,6 +205,7 @@ jobs:
           tests/test_soccer_metric_calibration.py
           tests/test_nhl_metric_recalibration.py
           tests/test_nhl_market_state_migration.py
+          tests/test_nhl_identity_reconciliation.py
           tests/test_soccer_global_market_state_migration.py
           tests/test_soccer_baseline_identity_reconciliation.py
           tests/test_same_category_identity_dedupe.py
