@@ -21,6 +21,7 @@ on:
       - "tests/test_nfl_rb_cohort_calibration.py"
       - "tests/test_nfl_v2_market_state_migration.py"
       - "tests/test_nfl_metric_calibration.py"
+      - "tests/test_nfl_established_evidence.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - ".github/workflows/sports-market-refresh.yml"
@@ -54,5 +55,6 @@ jobs:
           tests/test_nfl_per_game_expectations.py
           tests/test_nfl_v2_market_state_migration.py
           tests/test_nfl_metric_calibration.py
+          tests/test_nfl_established_evidence.py
           tests/test_hourly_price_refresh.py
           tests/test_pricing_engine_v2.py -v
