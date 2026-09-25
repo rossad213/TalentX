@@ -2,9 +2,10 @@
 """Build one-year Soccer chart history from ESPN league scoreboards.
 
 Team schedule endpoints proved unreliable for historical discovery in GitHub
-Actions. ESPN scoreboards support date ranges, so this collector discovers a
-league's completed matches for the whole lookback window in one request, then
-uses the Soccer-aware summary/lineup parser to attach verified player events.
+Actions. ESPN's Soccer scoreboard endpoint rejects multi-day dates ranges for
+these leagues, so this collector discovers completed matches with one request
+per league per calendar day, then uses the Soccer-aware summary/lineup parser
+to attach verified player events.
 
 Historical reconstruction does not change today's live market price.
 """
@@ -20,9 +21,9 @@ from typing import Any
 import soccer_json_history as base
 import soccer_json_history_runner as soccer_runner
 
-ESPN_SCOREBOARD_RANGE = (
+ESPN_SCOREBOARD_DAY = (
     "https://site.api.espn.com/apis/site/v2/sports/soccer/{league}/scoreboard"
-    "?limit=1000&dates={start_date}-{end_date}"
+    "?limit=1000&dates={date}"
 )
 
 # Some high-value curated TalentX profiles predate the ESPN-backed Sports feed
@@ -139,22 +140,20 @@ def event_info(event: dict[str, Any], league: str, start, end) -> dict[str, Any]
     }
 
 
-def scoreboard_windows(start, end, *, window_days: int = 14) -> list[tuple[Any, Any]]:
-    """Split a long history lookback into ESPN-safe scoreboard windows.
+def scoreboard_days(start, end) -> list[Any]:
+    """Return every calendar day in the inclusive history lookback.
 
-    ESPN soccer scoreboards reject the one-year dates=YYYYMMDD-YYYYMMDD request
-    with HTTP 400 for many leagues. Short date windows are much more reliable and
-    still let the collector reconstruct the exact same one-year event set.
-    Windows are inclusive, so the next window begins one day after the prior end.
+    ESPN Soccer scoreboards return HTTP 400 for multi-day `dates` ranges such
+    as `dates=20250925-20251008`. Use the endpoint's single-day form instead:
+    `dates=YYYYMMDD`. Keeping this helper explicit also makes it difficult for a
+    future optimization to accidentally reintroduce unsupported ranged calls.
     """
-    days = max(1, int(window_days))
-    windows: list[tuple[Any, Any]] = []
+    days: list[Any] = []
     cursor = start
     while cursor <= end:
-        chunk_end = min(end, cursor + timedelta(days=days - 1))
-        windows.append((cursor, chunk_end))
-        cursor = chunk_end + timedelta(days=1)
-    return windows
+        days.append(cursor)
+        cursor += timedelta(days=1)
+    return days
 
 
 def main() -> int:
@@ -218,20 +217,17 @@ def main() -> int:
     leagues = [league for league, _indexes in ordered_leagues]
     print(f"Soccer leagues selected: {len(leagues):,}")
 
-    windows = scoreboard_windows(start, now, window_days=14)
-    print(f"Soccer scoreboard windows per league: {len(windows):,} (14-day max)")
+    days = scoreboard_days(start, now)
+    print(f"Soccer scoreboard days per league: {len(days):,} (single-day requests)")
 
     def fetch_scoreboard(
         league: str,
-        window_start,
-        window_end,
+        scoreboard_day,
     ) -> tuple[str, list[dict[str, Any]], str | None]:
-        range_start = window_start.strftime("%Y%m%d")
-        range_end = window_end.strftime("%Y%m%d")
-        url = ESPN_SCOREBOARD_RANGE.format(
+        date_value = scoreboard_day.strftime("%Y%m%d")
+        url = ESPN_SCOREBOARD_DAY.format(
             league=league,
-            start_date=range_start,
-            end_date=range_end,
+            date=date_value,
         )
         try:
             payload = base.fetch_json(url, args.request_timeout)
@@ -241,7 +237,7 @@ def main() -> int:
             return (
                 league,
                 [],
-                f"scoreboard {league} {range_start}-{range_end}: "
+                f"scoreboard {league} {date_value}: "
                 f"{type(exc).__name__}: {exc}",
             )
 
@@ -249,14 +245,14 @@ def main() -> int:
     match_info: dict[tuple[str, str], dict[str, Any]] = {}
     scoreboard_warnings: list[str] = []
     requests = [
-        (league, window_start, window_end)
+        (league, scoreboard_day)
         for league in leagues
-        for window_start, window_end in windows
+        for scoreboard_day in days
     ]
     with ThreadPoolExecutor(max_workers=max(1, min(args.workers, len(requests) or 1))) as executor:
         futures = [
-            executor.submit(fetch_scoreboard, league, window_start, window_end)
-            for league, window_start, window_end in requests
+            executor.submit(fetch_scoreboard, league, scoreboard_day)
+            for league, scoreboard_day in requests
         ]
         for future in as_completed(futures):
             league, events, warning = future.result()
@@ -356,7 +352,7 @@ def main() -> int:
         result["priceHistoryStatus"] = "verified-event-backfill"
         result["priceHistoryBackfilledAt"] = base.iso_utc(now)
         result["priceHistoryBackfillDays"] = max(int(result.get("priceHistoryBackfillDays") or 0), args.days)
-        result["priceHistoryBackfillModel"] = "soccer-scoreboard-range-v1"
+        result["priceHistoryBackfillModel"] = "soccer-scoreboard-daily-v2"
         result["soccerVerifiedGameEvents"] = sum(
             1 for event in rebuilt
             if isinstance(event, dict)
