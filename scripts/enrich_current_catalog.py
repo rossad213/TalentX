@@ -453,7 +453,13 @@ def role_group(record: dict[str, Any]) -> str:
     if league == "MLB":
         return "PITCHER" if any(token in role for token in ("pitcher", "starter", "relief")) else "HITTER"
     if league == "NHL":
-        return "GOALIE" if "goal" in role else "SKATER"
+        normalized_role = role.strip().lower()
+        return "GOALIE" if (
+            normalized_role in {"g", "gk", "goalie", "goaltender", "goalkeeper"}
+            or "goalie" in normalized_role
+            or "goaltend" in normalized_role
+            or "goalkeeper" in normalized_role
+        ) else "SKATER"
     if record.get("discipline") == "Soccer":
         if any(token in role for token in ("goalkeeper", "keeper")):
             return "GOALKEEPER"

@@ -75,6 +75,14 @@ COMPLETED_EVENT_STATES = {
     "post", "final", "completed", "complete", "off", "closed", "official",
 }
 
+# NHL API gameType: 1 preseason, 2 regular season, 3 playoffs. TalentX NHL
+# prices are driven only by competitive regular-season/playoff results.
+NHL_PRICE_ELIGIBLE_GAME_TYPES = {2, 3}
+NHL_GAME_SIGNAL_PRIOR = {
+    "SKATER": 3.0,
+    "GOALIE": 4.0,
+}
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -117,6 +125,36 @@ def player_event_key(athlete_key: tuple[str, str], game_key: str) -> str:
 def completed_event(state: str) -> bool:
     normalized = str(state or "").lower().strip()
     return normalized in COMPLETED_EVENT_STATES or normalized.startswith("status_final")
+
+
+def nhl_price_eligible_game(game: dict[str, Any]) -> bool:
+    """Only NHL regular-season and playoff games are price-forming."""
+    try:
+        game_type = int(game.get("gameType"))
+    except (TypeError, ValueError):
+        return False
+    return game_type in NHL_PRICE_ELIGIBLE_GAME_TYPES
+
+
+def nhl_regularized_production_delta(
+    record: dict[str, Any],
+    actual_production: float,
+    expected_production: float,
+) -> float:
+    """Regularize NHL one-game surprise when a player's baseline is tiny.
+
+    A fringe player's season baseline can be near zero, so direct division can
+    turn one ordinary point into a 5,000%+ "surprise." Add a role-level prior and
+    compare on a logarithmic ratio. The curve remains unbounded, but the same
+    verified result cannot explode solely because the denominator is tiny.
+    """
+    group = cohort_key(record)[1]
+    prior = NHL_GAME_SIGNAL_PRIOR.get(group, NHL_GAME_SIGNAL_PRIOR["SKATER"])
+    numerator = max(0.0, float(actual_production)) + prior
+    denominator = max(0.0, float(expected_production)) + prior
+    if numerator <= 0 or denominator <= 0:
+        return 0.0
+    return math.log(numerator / denominator) * 100.0
 
 
 def prior_processed_events(manifest: dict[str, Any], now: datetime) -> dict[str, dict[str, Any]]:
@@ -426,6 +464,8 @@ def discover_recent_events(
         for game in payload.get("games") or []:
             if not isinstance(game, dict):
                 continue
+            if not nhl_price_eligible_game(game):
+                continue
             game_id = str(game.get("id") or "")
             start = parse_datetime(game.get("startTimeUTC"))
             state = str(game.get("gameState") or "")
@@ -445,6 +485,7 @@ def discover_recent_events(
                 "eventKey": key,
                 "league": "NHL",
                 "sport": "hockey",
+                "gameType": int(game.get("gameType") or 0),
                 "name": f"{' vs '.join(teams)}" if teams else game_id,
                 "state": state,
                 "startedAt": iso_utc(start) if start else None,
@@ -804,10 +845,23 @@ def game_event_move(
             "expectedPerformanceScore": 0.0,
         }
 
-    production_delta = (actual_production / expected_production - 1.0) * 100.0
-    efficiency_delta: float | None = None
-    if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
-        efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0
+    league = str(record.get("leagueOrMedium") or "").upper()
+    if league == "NHL":
+        production_delta = nhl_regularized_production_delta(
+            record,
+            actual_production,
+            expected_production,
+        )
+        # NHL single-game efficiency fields are especially sparse/noisy and can
+        # suffer the same tiny-denominator problem. Production already includes
+        # goals, assists, points, shots/plus-minus or goalie saves/wins, so use
+        # the regularized production surprise as the complete game signal.
+        efficiency_delta: float | None = None
+    else:
+        production_delta = (actual_production / expected_production - 1.0) * 100.0
+        efficiency_delta = None
+        if abs(actual_efficiency) > 0.01 and abs(expected_efficiency) > 0.01:
+            efficiency_delta = (actual_efficiency / expected_efficiency - 1.0) * 100.0
     performance_delta = production_delta if efficiency_delta is None else production_delta * 0.80 + efficiency_delta * 0.20
     # Smooth surprise curve: normal variance stays small; exceptional results keep growing.
     surprise = abs(performance_delta) / 20.0

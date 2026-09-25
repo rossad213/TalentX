@@ -92,6 +92,12 @@ class PricingEngineV2Tests(unittest.TestCase):
         neutral=apply_v2(self.record(lastGameMovePct=0))
         great=apply_v2(self.record(lastGameMovePct=2.5))
         self.assertLess((great['fairValue']/neutral['fairValue']-1)*100,5)
+
+    def test_nhl_fair_value_does_not_reapply_prior_game_move(self):
+        base=self.record(leagueOrMedium='NHL',discipline='Hockey',role='C',lastGameMovePct=0)
+        moved={**base,'lastGameMovePct':18.0}
+        self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
+        self.assertEqual(market_score(base,80),market_score(moved,80))
     def test_verified_situation_change_moves_price_without_changing_talent(self):
         neutral=apply_v2(self.record(situationAdjustmentPct=0))
         favorable=apply_v2(self.record(situationAdjustmentPct=12,roleStatus='starter'))

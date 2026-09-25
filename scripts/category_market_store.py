@@ -69,6 +69,13 @@ EXTRA_MARKET_FIELDS = (
     "soccerMarketMigrationPriorLastGameMovePct",
     "soccerMarketMigrationTargetPrice",
     "soccerMarketMigrationReason",
+    # NHL-only repair epoch after goalie cohort and event-ledger fixes.
+    "nhlMarketMigrationVersion",
+    "nhlMarketMigratedAt",
+    "nhlMarketMigrationPriorMarketPrice",
+    "nhlMarketMigrationPriorLastGameMovePct",
+    "nhlMarketMigrationTargetPrice",
+    "nhlMarketMigrationReason",
 )
 
 TICKER_CATEGORY_CODES = {
