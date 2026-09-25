@@ -18,12 +18,20 @@ from pathlib import Path
 from typing import Any
 
 from enrich_current_catalog import (
-    SIGNAL_KEYS,
     clamp,
     cohort_key,
     number,
     percentile,
     potential_prior,
+)
+
+SIGNAL_KEYS = (
+    "recentProduction",
+    "careerProduction",
+    "efficiency",
+    "usage",
+    "careerUsage",
+    "awardPoints",
 )
 
 VERSION = "1.0-correct-nhl-role-cohorts"
