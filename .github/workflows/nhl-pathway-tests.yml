@@ -8,11 +8,13 @@ on:
       - "scripts/hourly_price_refresh.py"
       - "scripts/recalibrate_nhl_metrics.py"
       - "scripts/migrate_nhl_market_state.py"
+      - "scripts/reconcile_nhl_identities.py"
       - "scripts/category_market_store.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_nhl_metric_recalibration.py"
       - "tests/test_nhl_market_state_migration.py"
+      - "tests/test_nhl_identity_reconciliation.py"
       - ".github/workflows/nhl-pathway-tests.yml"
   push:
     branches: [main]
@@ -22,11 +24,13 @@ on:
       - "scripts/hourly_price_refresh.py"
       - "scripts/recalibrate_nhl_metrics.py"
       - "scripts/migrate_nhl_market_state.py"
+      - "scripts/reconcile_nhl_identities.py"
       - "scripts/category_market_store.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_nhl_metric_recalibration.py"
       - "tests/test_nhl_market_state_migration.py"
+      - "tests/test_nhl_identity_reconciliation.py"
       - ".github/workflows/nhl-pathway-tests.yml"
 
 permissions:
@@ -50,4 +54,5 @@ jobs:
           tests/test_hourly_price_refresh.py
           tests/test_nhl_metric_recalibration.py
           tests/test_nhl_market_state_migration.py
+          tests/test_nhl_identity_reconciliation.py
           -v
