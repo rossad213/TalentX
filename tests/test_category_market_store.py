@@ -127,6 +127,36 @@ class CategoryMarketStoreTests(unittest.TestCase):
         )
         self.assertEqual(merged[0]["nflMarketMigrationTargetPrice"], 82.0)
 
+    def test_market_mode_preserves_soccer_migration_marker(self):
+        base = [{
+            "id": "s1",
+            "name": "Soccer One",
+            "primaryCategory": "Athlete",
+            "discipline": "Soccer",
+            "leagueOrMedium": "Premier League",
+            "marketPrice": 100.0,
+            "fundamentalValue": 98.0,
+        }]
+        overlay = [{
+            "id": "s1",
+            "name": "Soccer One",
+            "primaryCategory": "Athlete",
+            "discipline": "Soccer",
+            "leagueOrMedium": "Premier League",
+            "marketPrice": 120.0,
+            "soccerMarketMigrationVersion": "1.0-soccer-global-competition-reset",
+            "soccerMarketMigratedAt": "2026-09-25T21:00:00Z",
+            "soccerMarketMigrationTargetPrice": 120.0,
+        }]
+        merged, touched = merge_category(base, overlay, "sports", "market")
+        self.assertEqual(touched, 1)
+        self.assertEqual(merged[0]["marketPrice"], 120.0)
+        self.assertEqual(
+            merged[0]["soccerMarketMigrationVersion"],
+            "1.0-soccer-global-competition-reset",
+        )
+        self.assertEqual(merged[0]["soccerMarketMigrationTargetPrice"], 120.0)
+
     def test_wrong_category_overlay_is_rejected(self):
         overlay = [{"id": "a1", "primaryCategory": "Athlete", "marketPrice": 101.0}]
         with self.assertRaises(ValueError):
