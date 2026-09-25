@@ -21,7 +21,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-MODEL_VERSION = "3.1-nfl-position-normalized-sample-stable-meaningful-usage-rookie-ipo"
+MODEL_VERSION = "3.2-nfl-established-window-two-year-ipo"
 
 PRICE_FLOOR = 4.0
 PRICE_SCALE = 310.0
@@ -57,7 +57,7 @@ NFL_ROOKIE_GAME_BANDS = (
     (10.0, 0.50),
     (17.0, 0.25),
     (24.0, 0.10),
-    (34.0, 0.00),
+    (34.0, 0.05),
 )
 
 # A player without meaningful NFL usage should not lose all pre-pro value merely
@@ -482,6 +482,17 @@ def _game_decay(games: float) -> float:
 def rookie_influence(record: dict[str, Any], saved_max: float) -> float:
     if saved_max <= 0:
         return 0.0
+
+    # Normal professional handoff: rookies and second-year players can retain an
+    # IPO blend, while a player with meaningful NFL evidence enters the
+    # established model in Year 3. The separate no-debut time caps still protect
+    # unusual cases where a drafted player has not accumulated real role evidence.
+    draft_year = _number(record.get("draftYear"))
+    if draft_year is not None and _has_meaningful_professional_evidence(record):
+        current_year = datetime.now(timezone.utc).year
+        if current_year - int(round(draft_year)) >= 2:
+            return 0.0
+
     games = _rookie_evidence_games(record)
     by_games = _game_decay(games)
     by_time = _draft_age_cap(record)
