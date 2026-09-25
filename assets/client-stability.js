@@ -1,6 +1,6 @@
 /* TalentX client stability + account bootstrap. */
 (() => {
-  const CATALOG_PRICING_REVISION='20260914-sports-history-v2';
+  const CATALOG_PRICING_REVISION='20260925-nfl-established-evidence-v4';
   const STORAGE_KEY='talentx_v2_state';
   let authBootstrapState='loading';
   let resolveAuthReady=null;
