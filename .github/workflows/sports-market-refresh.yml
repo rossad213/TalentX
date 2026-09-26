@@ -27,6 +27,7 @@ on:
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
       - "scripts/migrate_nfl_v2_market_state.py"
+      - "scripts/backfill_nfl_verified_event_history.py"
       - "scripts/nfl_production_pricing.py"
       - "scripts/nfl_rookie_transition.py"
       - "scripts/sync_nfl_draft_metadata.py"
@@ -58,6 +59,7 @@ on:
       - "tests/test_nfl_metric_calibration.py"
       - "tests/test_nfl_injury_sync.py"
       - "tests/test_nfl_established_evidence.py"
+      - "tests/test_nfl_verified_history_backfill.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
       - "tests/test_specialized_uncapped_results.py"
@@ -93,7 +95,7 @@ jobs:
   refresh:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 105
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -213,6 +215,7 @@ jobs:
           tests/test_nfl_metric_calibration.py
           tests/test_nfl_injury_sync.py
           tests/test_nfl_established_evidence.py
+          tests/test_nfl_verified_history_backfill.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
@@ -249,6 +252,14 @@ jobs:
       # That prevents the migration from anchoring to stale UNIVERSAL evidence.
       - name: Reset NFL market epoch to unified evidence model once
         run: python scripts/migrate_nfl_v2_market_state.py --catalog data/current_catalog.json
+      - name: Backfill verified NFL event history once
+        run: >-
+          python scripts/backfill_nfl_verified_event_history.py
+          --catalog data/current_catalog.json
+          --days 400
+          --workers 20
+          --request-timeout 10
+          --max-athletes 1800
       - name: Reset WNBA market epoch and seed dedicated event state once
         run: >-
           python scripts/migrate_wnba_market_state.py
