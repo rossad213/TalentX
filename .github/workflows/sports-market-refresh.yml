@@ -227,6 +227,18 @@ jobs:
         run: python scripts/migrate_nfl_v2_market_state.py --catalog data/current_catalog.json
       - name: Rebuild NHL skater and goalie valuation cohorts
         run: python scripts/recalibrate_nhl_metrics.py --catalog data/current_catalog.json
+      - name: Reset new NHL listings onto repaired market epoch before live games
+        run: python scripts/migrate_nhl_market_state.py --catalog data/current_catalog.json
+      - name: Refresh verified NHL regular-season and playoff games
+        run: >-
+          python scripts/hourly_price_refresh.py
+          --league-only NHL
+          --state-manifest data/nhl_event_refresh_manifest.json
+          --workers 20
+          --request-timeout 10
+          --lookback-hours 96
+          --max-athletes 1800
+          --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
       - name: Refresh verified ATP and WTA match evidence
         run: >-
           python scripts/tennis_event_refresh_results.py
@@ -248,8 +260,6 @@ jobs:
           python scripts/restore_hourly_event_market_state.py
           --base data/current_catalog.json
           --snapshot data/sports_event_market_state.json
-      - name: Reset NHL market epoch after event-path repair once
-        run: python scripts/migrate_nhl_market_state.py --catalog data/current_catalog.json
       - name: Reset Soccer market epoch to global competition model once
         run: python scripts/migrate_soccer_global_market_state.py --catalog data/current_catalog.json
       # NFL follows the same post-refresh architecture as NBA here:
