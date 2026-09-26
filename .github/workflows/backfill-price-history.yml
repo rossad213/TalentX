@@ -14,6 +14,9 @@ on:
       - "scripts/merge_historical_event_overlay.py"
       - "scripts/validate_verified_event_history.py"
       - "chart-history.js"
+      - "tests/test_nfl_chart_history.js"
+      - "assets/chart-visual-fixes.js"
+      - "assets/event-chart-safety.js"
       - "tests/test_soccer_event_history.py"
       - "tests/test_nfl_verified_history_backfill.py"
       - "tests/test_historical_event_overlay.py"
@@ -66,6 +69,7 @@ jobs:
         run: |
           python -m unittest tests/test_soccer_event_history.py tests/test_nfl_verified_history_backfill.py tests/test_historical_event_overlay.py -v
           python -m py_compile scripts/backfill_price_history.py scripts/backfill_nfl_verified_event_history.py scripts/soccer_event_history.py scripts/validate_verified_event_history.py
+          node tests/test_nfl_chart_history.js
       - name: Restore latest healthy Sports state and prior history
         env:
           GH_TOKEN: ${{ github.token }}

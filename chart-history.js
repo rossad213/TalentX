@@ -75,6 +75,72 @@
     return dedupe([...explicitPricePoints(record),...eventPoints(record)]);
   }
 
+  function nflReplayPoints(record){
+    if(String(record?.leagueOrMedium||'').toUpperCase()!=='NFL') return [];
+    if(String(record?.priceHistoryStatus||'')!=='source-backed-full-point-in-time-nfl-replay') return [];
+    const history=Array.isArray(record?.priceHistory)?record.priceHistory:[];
+    return dedupe(history.map(item=>{
+      if(!item||typeof item!=='object') return null;
+      const source=String(item.source||'');
+      const historyType=String(item.historyType||'');
+      if(source!=='verified-nfl-event-replay'&&historyType!=='verified-event-replay') return null;
+      const time=txDate(item.time??item.timestamp??item.date);
+      const value=txNumber(item.price??item.value??item.marketPrice);
+      if(!Number.isFinite(time)||!Number.isFinite(value)||value<=0) return null;
+      return {time,value,verified:true,eventId:String(item.eventId||''),phase:String(item.phase||'')};
+    }).filter(Boolean));
+  }
+
+  function nflEventAlignedSeries(record,range){
+    const replay=nflReplayPoints(record);
+    if(!replay.length) return null;
+    const now=Date.now();
+    const start=txRangeStart(range,now);
+    const eligible=replay.filter(point=>point.time<=now);
+    if(!eligible.length) return null;
+
+    const beforeStart=eligible.filter(point=>point.time<=start);
+    const inRange=eligible.filter(point=>point.time>start&&point.time<=now);
+    let opening;
+    let coverageStart;
+    if(beforeStart.length){
+      opening=beforeStart[beforeStart.length-1].value;
+      coverageStart=start;
+    }else if(inRange.length){
+      opening=inRange[0].value;
+      coverageStart=inRange[0].time;
+    }else{
+      return null;
+    }
+
+    const output=[{
+      time:start,
+      value:Number(opening.toFixed(2)),
+      verified:beforeStart.length>0,
+      coverageStatus:beforeStart.length?'complete':'partial',
+      coverageStart
+    }];
+    let last=opening;
+    for(const point of inRange){
+      last=point.value;
+      output.push({
+        ...point,
+        value:Number(point.value.toFixed(2)),
+        verified:true,
+        coverageStatus:beforeStart.length?'complete':'partial',
+        coverageStart
+      });
+    }
+    output.push({
+      time:now,
+      value:Number(last.toFixed(2)),
+      verified:true,
+      coverageStatus:beforeStart.length?'complete':'partial',
+      coverageStart
+    });
+    return dedupe(output);
+  }
+
   function stepSeries(record,range){
     const config=CHART_RANGE_CONFIG[range]||CHART_RANGE_CONFIG['1D'];
     const count=Math.max(2,Number(config.points)||48);
@@ -116,9 +182,11 @@
   }
 
   chartSeries=function(record,range=chartRange){
+    const nflReplay=nflEventAlignedSeries(record,range);
+    if(nflReplay) return nflReplay;
     return stepSeries(record,range);
   };
 
   window.talentxChartHistoryDisclosure='Charts show only dated source-backed events or recorded TalentX observations. Historical TalentX prices created during backfill are simulated model responses to verified real-world events; missing history is shown as missing rather than invented.';
-  window.talentxChartHistoryMode='source-backed-only-v3-no-reconstruction';
+  window.talentxChartHistoryMode='source-backed-only-v4-nfl-event-aligned';
 })();

@@ -31,7 +31,7 @@ import hourly_price_refresh as refresh
 import hourly_price_refresh_nfl as nfl
 import hourly_price_refresh_nfl_rb as nfl_rb
 
-BACKFILL_VERSION = "1.0-nfl-point-in-time-event-replay"
+BACKFILL_VERSION = "1.1-nfl-complete-point-in-time-chart-replay"
 BACKFILL_MODEL = (
     f"{BACKFILL_VERSION}+{nfl.NFL_EXPECTATION_MODEL_VERSION}"
 )
@@ -484,6 +484,70 @@ def reconstruct_backfill_chain(
     return rebuilt, anchor_type
 
 
+def reconstruct_full_chart_chain(
+    record: dict[str, Any],
+    generated: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    """Build one complete modeled NFL chart chain ending at today's live price.
+
+    Unlike the older pre-live-only replay, this deliberately includes verified
+    games before, between, and after recorded live events. That lets history
+    recover a missing recent game (for example a game that was once priced live
+    but later disappeared from the durable event ledger) without changing today's
+    marketPrice. The chart prices are modeled replay prices; live priceEvents
+    remain authoritative for the actual recorded market ledger.
+    """
+    current_price = positive_price(record.get("marketPrice")) or 1.0
+    by_key: dict[str, dict[str, Any]] = {}
+    anonymous: list[dict[str, Any]] = []
+    for event in generated:
+        if not isinstance(event, dict):
+            continue
+        key = event_key(event)
+        if key:
+            by_key[key] = dict(event)
+        else:
+            anonymous.append(dict(event))
+    candidates = [*anonymous, *by_key.values()]
+    candidates = [
+        event for event in candidates
+        if event_started(event) is not None
+        and finite(event.get("modelMovePct")) is not None
+        and float(event.get("modelMovePct")) > -100.0
+    ]
+    candidates.sort(key=lambda value: str(value.get("startedAt") or ""))
+
+    after = round(float(current_price), 2)
+    rebuilt: list[dict[str, Any]] = []
+    for event in reversed(candidates):
+        model_move = finite(event.get("modelMovePct"))
+        if model_move is None or model_move <= -100.0:
+            continue
+        denominator = 1.0 + model_move / 100.0
+        if denominator <= 0:
+            continue
+        before = max(0.01, round(after / denominator, 2))
+        after_rounded = max(0.01, round(after, 2))
+        actual_move = round((after_rounded / before - 1.0) * 100.0, 3)
+        replay = dict(event)
+        replay["priceBefore"] = before
+        replay["priceAfter"] = after_rounded
+        replay["movePct"] = actual_move
+        replay["chartMovePct"] = actual_move
+        replay["chartCorrelationVerified"] = True
+        replay["historicalBackfill"] = True
+        replay["verified"] = True
+        replay["priceBasis"] = (
+            "modeled historical replay anchored to current TalentX market price; "
+            "verified game/box score; point-in-time pre-game expectation; no look-ahead"
+        )
+        rebuilt.append(replay)
+        after = before
+
+    rebuilt.reverse()
+    return rebuilt, "current-market-price-full-replay"
+
+
 def replay_history_points(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     points: list[dict[str, Any]] = []
     for event in events:
@@ -511,8 +575,20 @@ def replay_history_points(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return points
 
 
-def merge_history(record: dict[str, Any], replay_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def merge_history(
+    record: dict[str, Any],
+    replay_events: list[dict[str, Any]],
+    live_events: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     existing = record.get("priceHistory") if isinstance(record.get("priceHistory"), list) else []
+    live_price_map: dict[str, tuple[float, float]] = {}
+    for event in live_events or []:
+        key = event_key(event)
+        before = positive_price(event.get("priceBefore"))
+        after = positive_price(event.get("priceAfter"))
+        if key and before is not None and after is not None:
+            live_price_map[key] = (round(before, 2), round(after, 2))
+
     preserved: list[dict[str, Any]] = []
     for item in existing:
         if not isinstance(item, dict):
@@ -521,16 +597,27 @@ def merge_history(record: dict[str, Any], replay_events: list[dict[str, Any]]) -
         history_type = str(item.get("historyType") or "")
         if source in OLD_HISTORY_SOURCES or history_type == "verified-event-replay":
             continue
-        preserved.append(dict(item))
+        point = dict(item)
+        point_id = str(point.get("eventId") or point.get("eventKey") or "")
+        prices = live_price_map.get(point_id)
+        if prices is not None:
+            phase = str(point.get("phase") or "").lower()
+            if phase == "open":
+                point["price"] = prices[0]
+            elif phase == "close":
+                point["price"] = prices[1]
+        preserved.append(point)
+
     combined = preserved + replay_history_points(replay_events)
     combined.sort(key=lambda item: str(item.get("time") or ""))
     deduped: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for item in combined:
         key = (
             str(item.get("time") or ""),
             str(item.get("eventId") or ""),
             str(item.get("phase") or ""),
+            str(item.get("source") or ""),
         )
         if key in seen:
             continue
@@ -565,18 +652,30 @@ def apply_backfill(
     }
 
     live = existing_live_events(result)
-    replay, anchor_type = reconstruct_backfill_chain(result, generated, live)
-    combined_events = [*replay, *live]
+    replay, anchor_type = reconstruct_full_chart_chain(result, generated)
+    live_keys = {event_key(event) for event in live if event_key(event)}
+    missing_replay = [
+        dict(event)
+        for event in replay
+        if event_key(event) and event_key(event) not in live_keys
+    ]
+    combined_events = [*missing_replay, *live]
     combined_events.sort(key=lambda event: str(event.get("startedAt") or ""))
     result["priceEvents"] = combined_events[-MAX_PRICE_EVENTS:]
-    result["priceHistory"] = merge_history(result, replay)
+    result["priceHistory"] = merge_history(result, replay, live)
     if result["priceHistory"]:
-        result["priceHistoryStatus"] = "verified-with-nfl-event-replay"
+        result["priceHistoryStatus"] = "source-backed-full-point-in-time-nfl-replay"
+        result["priceHistoryDisclosure"] = (
+            "NFL game facts and dates are source-backed. Chart prices are modeled "
+            "point-in-time responses to verified games, anchored to today's unchanged "
+            "TalentX market price; they are not claims of historical trades."
+        )
 
     result["nflHistoricalBackfillVersion"] = BACKFILL_VERSION
     result["nflHistoricalBackfilledAt"] = completed_at
     result["nflHistoricalBackfillDays"] = int(days)
     result["nflHistoricalBackfillEventCount"] = len(replay)
+    result["nflHistoricalBackfillImportedEventCount"] = len(missing_replay)
     result["nflHistoricalBackfillChartPointCount"] = len(replay) * 2
     result["nflHistoricalBackfillAnchor"] = anchor_type
     result["nflHistoricalBackfillModel"] = BACKFILL_MODEL
@@ -590,7 +689,7 @@ def apply_backfill(
             result[key] = value
         else:
             result.pop(key, None)
-    return result, len(replay)
+    return result, len(missing_replay)
 
 
 def load_catalog(path: Path) -> list[dict[str, Any]]:

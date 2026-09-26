@@ -151,6 +151,107 @@ class HistoricalEventOverlayTests(unittest.TestCase):
         self.assertEqual(record["nflHistoricalBackfillDays"], 1095)
         self.assertTrue(any(point.get("eventId") == "espn:live" for point in record["priceHistory"]))
 
+    def test_full_nfl_replay_imports_missing_recent_game_without_repricing_live_market(self):
+        base = [{
+            "id": "n2",
+            "primaryCategory": "Athlete",
+            "leagueOrMedium": "NFL",
+            "marketPrice": 204.39,
+            "previousMarketPrice": 200.0,
+            "dailyChange": 0.0,
+            "lastPriceEventId": "espn:week1",
+            "priceEvents": [{
+                "eventKey": "espn:week1",
+                "eventId": "week1",
+                "eventType": "game",
+                "startedAt": "2026-09-15T00:15:00Z",
+                "movePct": 0.876,
+                "priceBefore": 192.42,
+                "priceAfter": 194.11,
+                "verified": True,
+            }],
+            "priceHistory": [{
+                "time": "2026-09-15T00:15:00Z",
+                "price": 194.11,
+                "eventId": "espn:week1",
+                "phase": "close",
+                "historyType": "verified",
+            }],
+        }]
+        overlay = [{
+            "id": "n2",
+            "primaryCategory": "Athlete",
+            "leagueOrMedium": "NFL",
+            "priceHistoryStatus": "source-backed-full-point-in-time-nfl-replay",
+            "priceHistoryDisclosure": "modeled replay",
+            "nflHistoricalBackfillVersion": "1.1-nfl-complete-point-in-time-chart-replay",
+            "nflHistoricalBackfillDays": 1095,
+            "priceEvents": [{
+                "eventKey": "espn:week2",
+                "eventId": "week2",
+                "eventType": "game",
+                "startedAt": "2026-09-21T00:20:00Z",
+                "modelMovePct": 3.5,
+                "movePct": 3.5,
+                "priceBefore": 197.48,
+                "priceAfter": 204.39,
+                "verified": True,
+                "historicalBackfill": True,
+                "historicalExpectationMode": "point-in-time-pre-game",
+            }],
+            "priceHistory": [
+                {
+                    "time": "2026-09-15T00:14:59Z",
+                    "price": 195.77,
+                    "eventId": "espn:week1",
+                    "phase": "open",
+                    "historyType": "verified-event-replay",
+                    "source": "verified-nfl-event-replay",
+                },
+                {
+                    "time": "2026-09-15T00:15:00Z",
+                    "price": 197.48,
+                    "eventId": "espn:week1",
+                    "phase": "close",
+                    "historyType": "verified-event-replay",
+                    "source": "verified-nfl-event-replay",
+                },
+                {
+                    "time": "2026-09-21T00:19:59Z",
+                    "price": 197.48,
+                    "eventId": "espn:week2",
+                    "phase": "open",
+                    "historyType": "verified-event-replay",
+                    "source": "verified-nfl-event-replay",
+                },
+                {
+                    "time": "2026-09-21T00:20:00Z",
+                    "price": 204.39,
+                    "eventId": "espn:week2",
+                    "phase": "close",
+                    "historyType": "verified-event-replay",
+                    "source": "verified-nfl-event-replay",
+                },
+            ],
+        }]
+        merged, touched, imported = merge_catalog(base, overlay, "sports")
+        self.assertEqual((touched, imported), (1, 1))
+        record = merged[0]
+        self.assertEqual(record["marketPrice"], 204.39)
+        self.assertEqual(record["previousMarketPrice"], 200.0)
+        self.assertEqual(record["lastPriceEventId"], "espn:week1")
+        self.assertEqual(
+            record["priceHistoryStatus"],
+            "source-backed-full-point-in-time-nfl-replay",
+        )
+        event_keys = {event["eventKey"] for event in record["priceEvents"]}
+        self.assertEqual(event_keys, {"espn:week1", "espn:week2"})
+        replay_keys = {
+            point["eventId"] for point in record["priceHistory"]
+            if point.get("source") == "verified-nfl-event-replay"
+        }
+        self.assertEqual(replay_keys, {"espn:week1", "espn:week2"})
+
     def test_other_categories_are_untouched(self):
         base = [{"id": "x1", "primaryCategory": "Actor", "marketPrice": 88.0}]
         overlay = [{

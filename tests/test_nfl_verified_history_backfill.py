@@ -12,6 +12,7 @@ from backfill_nfl_verified_event_history import (
     apply_backfill,
     point_in_time_item,
     reconstruct_backfill_chain,
+    reconstruct_full_chart_chain,
     replay_history_points,
     needs_backfill,
 )
@@ -117,6 +118,152 @@ class NFLVerifiedHistoryBackfillTests(unittest.TestCase):
             self.assertEqual(pair[0]["price"], event["priceBefore"])
             self.assertEqual(pair[1]["price"], event["priceAfter"])
             self.assertEqual(pair[1]["movePct"], event["movePct"])
+
+    def test_full_replay_recovers_game_after_existing_live_anchor(self):
+        record = self.record(
+            marketPrice=150.0,
+            priceEvents=[{
+                "eventKey": "espn:week1",
+                "eventId": "week1",
+                "startedAt": "2026-09-14T00:15:00Z",
+                "priceBefore": 145.0,
+                "priceAfter": 146.0,
+                "movePct": 0.69,
+                "eventType": "game",
+                "verified": True,
+            }],
+        )
+        generated = [
+            {
+                "eventKey": "espn:week1",
+                "eventId": "week1",
+                "startedAt": "2026-09-14T00:15:00Z",
+                "name": "Week 1",
+                "modelMovePct": 1.0,
+                "historicalBackfill": True,
+                "historicalExpectationMode": "point-in-time-pre-game",
+            },
+            {
+                "eventKey": "espn:week2",
+                "eventId": "week2",
+                "startedAt": "2026-09-21T00:20:00Z",
+                "name": "Week 2",
+                "modelMovePct": 4.0,
+                "historicalBackfill": True,
+                "historicalExpectationMode": "point-in-time-pre-game",
+            },
+        ]
+        updated, added = apply_backfill(
+            record,
+            generated,
+            completed_at="2026-09-26T08:00:00Z",
+            days=400,
+        )
+        self.assertEqual(added, 1)
+        self.assertEqual(updated["marketPrice"], 150.0)
+        keys = {event["eventKey"] for event in updated["priceEvents"]}
+        self.assertEqual(keys, {"espn:week1", "espn:week2"})
+        self.assertEqual(
+            updated["priceHistoryStatus"],
+            "source-backed-full-point-in-time-nfl-replay",
+        )
+        replay_points = [
+            point for point in updated["priceHistory"]
+            if point.get("source") == "verified-nfl-event-replay"
+        ]
+        self.assertEqual(
+            {point["eventId"] for point in replay_points},
+            {"espn:week1", "espn:week2"},
+        )
+        latest = [point for point in replay_points if point["eventId"] == "espn:week2"]
+        close = next(point for point in latest if point["phase"] == "close")
+        self.assertEqual(close["price"], 150.0)
+
+    def test_full_replay_percentages_match_chart_and_end_at_current_price(self):
+        record = self.record(marketPrice=204.39)
+        generated = [
+            {
+                "eventKey": "espn:g1",
+                "eventId": "g1",
+                "startedAt": "2026-09-15T00:15:00Z",
+                "name": "Game 1",
+                "modelMovePct": 0.876,
+                "historicalBackfill": True,
+            },
+            {
+                "eventKey": "espn:g2",
+                "eventId": "g2",
+                "startedAt": "2026-09-21T00:20:00Z",
+                "name": "Game 2",
+                "modelMovePct": 3.5,
+                "historicalBackfill": True,
+            },
+        ]
+        replay, anchor = reconstruct_full_chart_chain(record, generated)
+        self.assertEqual(anchor, "current-market-price-full-replay")
+        self.assertEqual(replay[-1]["priceAfter"], 204.39)
+        for event in replay:
+            calculated = round(
+                (event["priceAfter"] / event["priceBefore"] - 1.0) * 100.0,
+                3,
+            )
+            self.assertEqual(event["movePct"], calculated)
+            self.assertEqual(event["chartMovePct"], calculated)
+            self.assertTrue(event["chartCorrelationVerified"])
+
+    def test_backfill_resynchronizes_stale_live_history_point(self):
+        live_event = {
+            "eventKey": "espn:dak-week2",
+            "eventId": "dak-week2",
+            "startedAt": "2026-09-20T20:25:00Z",
+            "priceBefore": 158.70,
+            "priceAfter": 163.93,
+            "movePct": 3.296,
+            "eventType": "game",
+            "verified": True,
+        }
+        record = self.record(
+            marketPrice=151.76,
+            priceEvents=[live_event],
+            priceHistory=[
+                {
+                    "time": "2026-09-20T20:24:59Z",
+                    "price": 158.70,
+                    "eventId": "espn:dak-week2",
+                    "phase": "open",
+                    "historyType": "verified",
+                },
+                {
+                    "time": "2026-09-20T20:25:00Z",
+                    "price": 157.49,
+                    "eventId": "espn:dak-week2",
+                    "phase": "close",
+                    "historyType": "verified",
+                },
+            ],
+        )
+        generated = [{
+            "eventKey": "espn:dak-week2",
+            "eventId": "dak-week2",
+            "startedAt": "2026-09-20T20:25:00Z",
+            "name": "Washington at Dallas",
+            "modelMovePct": 3.0,
+            "historicalBackfill": True,
+            "historicalExpectationMode": "point-in-time-pre-game",
+        }]
+        updated, _ = apply_backfill(
+            record,
+            generated,
+            completed_at="2026-09-26T08:00:00Z",
+            days=400,
+        )
+        live_close = next(
+            point for point in updated["priceHistory"]
+            if point.get("eventId") == "espn:dak-week2"
+            and point.get("phase") == "close"
+            and point.get("source") != "verified-nfl-event-replay"
+        )
+        self.assertEqual(live_close["price"], 163.93)
 
     def test_backfill_preserves_today_market_and_live_event_state(self):
         live_event = {

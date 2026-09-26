@@ -133,7 +133,14 @@
     const current=a[a.length-1],open=a[0],high=Math.max(...a),low=Math.min(...a);
     const axis=cleanAxis(a,current),floor=axis.floor,ceil=axis.ceil;
     const usableW=W-padL-padR,usableH=H-padT-padB;
-    const x=i=>padL+(a.length===1?usableW:(i/(a.length-1))*usableW);
+    const firstTime=Number(series[0]?.time),lastTime=Number(series[series.length-1]?.time);
+    const timeSpan=Number.isFinite(firstTime)&&Number.isFinite(lastTime)&&lastTime>firstTime?(lastTime-firstTime):0;
+    const x=i=>{
+      if(!timeSpan) return padL+(a.length===1?usableW:(i/(a.length-1))*usableW);
+      const pointTime=Number(series[i]?.time);
+      const ratio=Number.isFinite(pointTime)?Math.max(0,Math.min(1,(pointTime-firstTime)/timeSpan)):(i/(Math.max(1,a.length-1)));
+      return padL+ratio*usableW;
+    };
     const y=v=>padT+((ceil-v)/Math.max(.0001,ceil-floor))*usableH;
     const ordinaryPoints=a.map((v,i)=>`${x(i).toFixed(2)},${y(v).toFixed(2)}`).join(' ');
     const linePoints=verifiedMode?staircasePoints(a,x,y):ordinaryPoints;
@@ -193,5 +200,5 @@
     };
   }
 
-  window.talentxVerifiedEventCharts='presentation-only-v4';
+  window.talentxVerifiedEventCharts='presentation-only-v5-time-scaled';
 })();

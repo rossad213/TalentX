@@ -90,6 +90,52 @@ def is_point_in_time_nfl_event(event: dict[str, Any]) -> bool:
     )
 
 
+def is_full_nfl_chart_replay(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("leagueOrMedium") or "").strip().upper() == "NFL"
+        and str(record.get("priceHistoryStatus") or "") == "source-backed-full-point-in-time-nfl-replay"
+    )
+
+
+def merge_full_nfl_chart_history(
+    base_history: list[dict[str, Any]],
+    overlay_history: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Overlay the complete NFL chart replay without altering live market fields."""
+    preserved = [
+        dict(point)
+        for point in base_history
+        if isinstance(point, dict)
+        and str(point.get("source") or "") != "verified-nfl-event-replay"
+        and str(point.get("historyType") or "") != "verified-event-replay"
+    ]
+    replay = [
+        dict(point)
+        for point in overlay_history
+        if isinstance(point, dict)
+        and (
+            str(point.get("source") or "") == "verified-nfl-event-replay"
+            or str(point.get("historyType") or "") == "verified-event-replay"
+        )
+    ]
+    combined = preserved + replay
+    combined.sort(key=lambda item: str(item.get("time") or ""))
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for point in combined:
+        key = (
+            str(point.get("time") or ""),
+            str(point.get("eventId") or point.get("eventKey") or ""),
+            str(point.get("phase") or ""),
+            str(point.get("source") or ""),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(point)
+    return deduped[-5000:]
+
+
 def _event_datetime(event: dict[str, Any]) -> datetime | None:
     text = event_time(event)
     if not text:
@@ -276,12 +322,44 @@ def merge_catalog(base: list[dict[str, Any]], overlay: list[dict[str, Any]], cat
 
         base_events = [dict(event) for event in result.get("priceEvents", []) if isinstance(event, dict)]
         current_price = max(0.01, number(result.get("marketPrice"), 0.01))
+        full_nfl_replay = is_full_nfl_chart_replay(prior)
         specialized_nfl = (
             str(result.get("leagueOrMedium") or "").strip().upper() == "NFL"
             and any(is_point_in_time_nfl_event(event) for event in historical)
         )
 
-        if specialized_nfl:
+        if full_nfl_replay:
+            live_events = [event for event in base_events if event.get("historicalBackfill") is not True]
+            live_keys = {event_key(event) for event in live_events if event_key(event)}
+            missing_history_events = [
+                dict(event)
+                for event in historical
+                if event_key(event) and event_key(event) not in live_keys
+            ]
+            combined = sorted([*missing_history_events, *live_events], key=event_time)
+            result["priceEvents"] = combined[-MAX_PRICE_EVENTS:]
+            base_history = result.get("priceHistory") if isinstance(result.get("priceHistory"), list) else []
+            overlay_history = prior.get("priceHistory") if isinstance(prior.get("priceHistory"), list) else []
+            result["priceHistory"] = merge_full_nfl_chart_history(base_history, overlay_history)
+            result["priceHistoryStatus"] = "source-backed-full-point-in-time-nfl-replay"
+            if prior.get("priceHistoryDisclosure"):
+                result["priceHistoryDisclosure"] = prior.get("priceHistoryDisclosure")
+            added = len(missing_history_events)
+            for field in (
+                "nflHistoricalBackfillVersion",
+                "nflHistoricalBackfilledAt",
+                "nflHistoricalBackfillDays",
+                "nflHistoricalBackfillEventCount",
+                "nflHistoricalBackfillImportedEventCount",
+                "nflHistoricalBackfillChartPointCount",
+                "nflHistoricalBackfillModel",
+                "nflHistoricalBackfillFirstEventAt",
+                "nflHistoricalBackfillLastEventAt",
+                "nflHistoricalBackfillAnchor",
+            ):
+                if field in prior:
+                    result[field] = prior[field]
+        elif specialized_nfl:
             # Current Sports state owns recorded live events. Historical overlays
             # may extend farther back, but they must never reprice those live events.
             live_events = [event for event in base_events if event.get("historicalBackfill") is not True]

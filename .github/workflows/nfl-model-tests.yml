@@ -12,6 +12,10 @@ on:
       - "scripts/repair_nfl_production_prices_safe.py"
       - "scripts/migrate_nfl_v2_market_state.py"
       - "scripts/backfill_nfl_verified_event_history.py"
+      - "tests/test_nfl_chart_history.js"
+      - "assets/chart-visual-fixes.js"
+      - "assets/event-chart-safety.js"
+      - "chart-history.js"
       - "scripts/backfill_price_history.py"
       - "scripts/append_price_history.py"
       - "scripts/validate_verified_event_history.py"
@@ -71,3 +75,5 @@ jobs:
           tests/test_historical_event_overlay.py
           tests/test_hourly_price_refresh.py
           tests/test_pricing_engine_v2.py -v
+      - name: Run NFL chart replay regression
+        run: node tests/test_nfl_chart_history.js
