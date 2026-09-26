@@ -9,7 +9,7 @@ from typing import Any
 
 import nfl_production_pricing as core
 
-MODEL_VERSION = "2.1-nfl-rookie-factual-anchor-multifactor-handoff"
+MODEL_VERSION = "2.2-nfl-rookie-position-context-handoff"
 MAX_DRAFT_AGE = 4
 TIME_CAPS = {0: 1.00, 1: 0.78, 2: 0.58, 3: 0.32, 4: 0.12}
 EXP_CAPS = {0: 1.00, 1: 1.00, 2: 0.78, 3: 0.58, 4: 0.32, 5: 0.12}
@@ -160,6 +160,7 @@ def fair_value(record: dict[str, Any], current_year: int | None = None) -> tuple
         "achievements": core.achievement_score(working),
         "careerRunway": core.career_runway_score(working),
         "availability": core.availability_score(working),
+        "positionValue": core.position_value_score(working),
     }
     score = core._clamp(sum(values[k] * w for k, w in core.NFL_VALUE_WEIGHTS.items()))
     career_fair = core.price_from_score(score)
