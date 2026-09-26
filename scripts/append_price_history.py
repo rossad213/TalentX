@@ -73,6 +73,9 @@ def existing_history(record: dict[str, Any]) -> list[dict[str, Any]]:
                 **({"source": item.get("source")} if item.get("source") else {}),
                 **({"provider": item.get("provider")} if item.get("provider") else {}),
                 **({"priceBasis": item.get("priceBasis")} if item.get("priceBasis") else {}),
+                **({"movePct": item.get("movePct")} if item.get("movePct") is not None else {}),
+                **({"modelMovePct": item.get("modelMovePct")} if item.get("modelMovePct") is not None else {}),
+                **({"performanceDeltaPct": item.get("performanceDeltaPct")} if item.get("performanceDeltaPct") is not None else {}),
             }
         )
     return output
