@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Backfill verified Sports event history without changing today's market price.
+"""Backfill verified generic Sports event history without changing today's market price.
 
-Completed historical games are evaluated with the same bounded game-pricing
-model used by the live Sports refresh. The resulting events are stored in the
+NFL is deliberately excluded because it has a dedicated point-in-time historical
+replay that uses NFL-specific expectations and prevents look-ahead. Other
+completed historical games are evaluated with the generic Sports event model. The resulting events are stored in the
 same durable ``priceEvents`` format trusted by TalentX charts. Prices are
 reconstructed backward from today's known market price, so the backfill can
 extend historical charts without repricing the current market.
@@ -202,10 +203,15 @@ def main() -> int:
     records = load_catalog(args.catalog)
     now = utc_now()
 
-    # Soccer has its own team-schedule adapter. Keeping it out of this generic
-    # league/date discovery avoids tens of thousands of redundant scoreboard
-    # requests while preserving the proven MLB/NBA/NFL/NHL path.
-    generic_records = [record for record in records if str(record.get("discipline") or "") != "Soccer"]
+    # Soccer has its own team-schedule adapter and NFL has a dedicated
+    # point-in-time replay. Never feed NFL through this generic current-evidence
+    # historical evaluator, because that would reintroduce look-ahead bias.
+    generic_records = [
+        record
+        for record in records
+        if str(record.get("discipline") or "") != "Soccer"
+        and str(record.get("leagueOrMedium") or "").strip().upper() != "NFL"
+    ]
     participant_ids, athlete_events, events, warnings = discover_recent_events(
         generic_records,
         now=now,
@@ -216,8 +222,8 @@ def main() -> int:
         processed_player_keys=set(),
     )
     indexes = select_records(records, participant_ids, max_athletes=args.max_athletes)
-    print(f"Historical non-Soccer games discovered: {len(events):,}")
-    print(f"Matched non-Soccer athletes selected: {len(indexes):,}")
+    print(f"Historical generic non-Soccer/non-NFL games discovered: {len(events):,}")
+    print(f"Matched generic non-Soccer/non-NFL athletes selected: {len(indexes):,}")
     if warnings:
         print(f"Discovery warnings: {len(warnings):,}")
 
@@ -265,7 +271,7 @@ def main() -> int:
         generated_count += len(generated)
 
     args.catalog.write_text(json.dumps(updated, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    print(f"Backfilled {histories:,} non-Soccer athletes with {generated_count:,} verified historical game events.")
+    print(f"Backfilled {histories:,} non-Soccer athletes with {generated_count:,} verified generic historical game events.")
 
     if any(str(record.get("discipline") or "") == "Soccer" for record in records):
         soccer_script = Path(__file__).with_name("soccer_event_history.py")
