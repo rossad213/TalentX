@@ -146,6 +146,26 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertGreater(mature["confidenceScore"],thin["confidenceScore"]+25)
         self.assertGreater(mature["fairValue"],thin["fairValue"]*1.30)
 
+    def test_top_ten_tennis_rank_supplies_mature_confidence_floor(self):
+        ranked=self.record(
+            discipline='Tennis',leagueOrMedium='ATP',professionalGames=0,yearsActive=None,
+            pricingConfidence=.64,dataConfidence=.64,sourceRank=2,priceEvents=[],
+            activeMetrics={"performance":90,"achievements":88,"consistency":86,"potential":92,"availability":88,"audience":90})
+        unranked={**ranked,"sourceRank":None}
+        self.assertGreaterEqual(evidence_confidence(ranked),82)
+        self.assertGreater(evidence_confidence(ranked),evidence_confidence(unranked)+25)
+        self.assertGreater(apply_v2(ranked)["fairValue"],apply_v2(unranked)["fairValue"]*1.25)
+
+    def test_tennis_match_count_dedupes_same_provider_competition_across_tours(self):
+        from pricing_engine_v2 import tennis_verified_match_count
+        record=self.record(
+            discipline='Tennis',
+            priceEvents=[
+                {"eventKey":"espn-tennis:atp:182190","eventId":"182190","eventType":"game","sport":"tennis","tour":"ATP","verified":True},
+                {"eventKey":"espn-tennis:wta:182190","eventId":"182190","eventType":"game","sport":"tennis","tour":"WTA","verified":True},
+            ])
+        self.assertEqual(tennis_verified_match_count(record),1)
+
     def test_tennis_fair_value_does_not_reapply_prior_match_move(self):
         base=self.record(
             discipline='Tennis',leagueOrMedium='WTA',professionalGames=0,
