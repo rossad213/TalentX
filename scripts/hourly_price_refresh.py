@@ -949,6 +949,23 @@ def rewrite_csv(records: list[dict[str, Any]]) -> None:
         writer.writerows(records)
 
 
+def reset_display_changes(records: list[dict[str, Any]], league_filter: str = "") -> list[dict[str, Any]]:
+    """Reset displayed move only inside an isolated league refresh.
+
+    This is deliberately separate from event discovery so an NHL-only run cannot
+    zero NBA/NFL/MLB/Soccer move fields as a side effect.
+    """
+    league_filter = str(league_filter or "").strip().upper()
+    output: list[dict[str, Any]] = []
+    for record in records:
+        retained = dict(record)
+        if not league_filter or str(record.get("leagueOrMedium") or "").strip().upper() == league_filter:
+            retained["dailyChange"] = 0.0
+            retained["hourlyChangePct"] = 0.0
+        output.append(retained)
+    return output
+
+
 def validate_catalog(records: list[dict[str, Any]], original_count: int) -> None:
     errors: list[str] = []
     if len(records) != original_count:
@@ -1036,13 +1053,7 @@ def main() -> int:
     # A displayed change describes this refresh, not a permanent random drift.
     # In an isolated league run, records outside that league must remain byte-for-byte
     # market-state equivalent; only the selected league has its displayed move reset.
-    updated_records = []
-    for record in records:
-        retained = dict(record)
-        if not league_filter or str(record.get("leagueOrMedium") or "").strip().upper() == league_filter:
-            retained["dailyChange"] = 0.0
-            retained["hourlyChangePct"] = 0.0
-        updated_records.append(retained)
+    updated_records = reset_display_changes(records, league_filter)
     results_by_index: dict[int, dict[str, Any]] = {}
 
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as executor:
