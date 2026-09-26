@@ -205,7 +205,21 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
         seen.add(key)
         deduped.append(item)
     result["priceHistory"] = deduped[-MAX_HISTORY_POINTS:]
-    result["priceHistoryStatus"] = "verified" if result["priceHistory"] else "unavailable"
+    has_full_nfl_replay = (
+        str(result.get("leagueOrMedium") or "").strip().upper() == "NFL"
+        and any(
+            isinstance(item, dict)
+            and (
+                str(item.get("source") or "") == "verified-nfl-event-replay"
+                or str(item.get("historyType") or "") == "verified-event-replay"
+            )
+            for item in result["priceHistory"]
+        )
+    )
+    if has_full_nfl_replay:
+        result["priceHistoryStatus"] = "source-backed-full-point-in-time-nfl-replay"
+    else:
+        result["priceHistoryStatus"] = "verified" if result["priceHistory"] else "unavailable"
     return result, changed
 
 
