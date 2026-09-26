@@ -70,7 +70,32 @@ class PricingEngineV2Tests(unittest.TestCase):
         low=market_score(record,20)
         high=market_score({**record,"lastGameMovePct":-18},95)
         self.assertEqual(low,high)
-        self.assertAlmostEqual(low,62*.50+70*.30+55*.20,places=2)
+        self.assertAlmostEqual(low,62*.42+70*.28+55*.15+72*.15,places=2)
+
+    def test_nfl_qb_position_context_is_modest_not_dominant(self):
+        common={
+            "leagueOrMedium":"NFL",
+            "activeMetrics":{"performance":90,"achievements":80,"consistency":90,"potential":75,
+                             "availability":90,"audience":62,"attention":70},
+            "nflLiquidityScore":55,
+        }
+        qb=market_score(self.record(role="Quarterback",**common),85)
+        edge=market_score(self.record(role="Defensive End",**common),85)
+        self.assertGreater(qb,edge)
+        self.assertLess(qb-edge,3.0)
+
+    def test_nfl_active_injury_reduces_situation_not_talent(self):
+        healthy=apply_v2(self.record(
+            leagueOrMedium="NFL",role="Defensive End",
+            nflInjuryActive=False,
+        ))
+        injured=apply_v2(self.record(
+            leagueOrMedium="NFL",role="Defensive End",
+            nflInjuryActive=True,nflInjuryStatus="Physically Unable to Perform",nflInjuryType="Knee",
+        ))
+        self.assertEqual(healthy["talentScore"],injured["talentScore"])
+        self.assertLess(injured["situationScore"],healthy["situationScore"])
+        self.assertLess(injured["fairValue"],healthy["fairValue"])
 
     def test_top_nfl_rookie_keeps_meaningful_ipo_anchor(self):
         rookie=apply_v2(self.rookie_record('NFL',score=94,influence=100))

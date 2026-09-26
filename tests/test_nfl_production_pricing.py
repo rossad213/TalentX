@@ -87,20 +87,35 @@ class NFLProductionPricingTests(unittest.TestCase):
         self.assertGreater(production_fair_value(productive)[0], production_fair_value(lower)[0])
         self.assertGreater(production_fair_value(productive)[1], production_fair_value(lower)[1])
 
-    def test_role_and_position_do_not_create_price_premium(self):
-        prices = {
-            production_fair_value(self.record(role=role))[1]
-            for role in (
-                "Quarterback", "Running Back", "Wide Receiver", "Tight End",
-                "Linebacker", "Defensive End", "Cornerback", "Safety",
-            )
-        }
-        self.assertEqual(len(prices), 1)
+    def test_position_value_is_modest_and_does_not_overpower_production(self):
+        qb = production_fair_value(self.record(role="Quarterback"))[1]
+        edge = production_fair_value(self.record(role="Defensive End"))[1]
+        rb = production_fair_value(self.record(role="Running Back"))[1]
+        self.assertGreater(qb, edge)
+        self.assertGreater(edge, rb)
+        self.assertLess((qb / rb - 1.0) * 100.0, 12.0)
+
 
     def test_starter_or_reserve_label_does_not_change_price(self):
         starter = self.record(starter=True, roleStatus="starter")
         reserve = self.record(starter=False, roleStatus="reserve")
         self.assertEqual(production_fair_value(starter)[1], production_fair_value(reserve)[1])
+
+    def test_verified_out_status_temporarily_reduces_price(self):
+        healthy = self.record(activeMetrics={
+            "performance":80,"achievements":70,"consistency":76,
+            "potential":70,"availability":75,"audience":50,
+        })
+        out = self.record(
+            nflInjuryActive=True,
+            nflInjuryStatus="Out",
+            nflInjuryType="Knee",
+            activeMetrics={
+                "performance":80,"achievements":70,"consistency":76,
+                "potential":70,"availability":75,"audience":50,
+            },
+        )
+        self.assertLess(production_fair_value(out)[1], production_fair_value(healthy)[1])
 
     def test_audience_or_fame_does_not_change_nfl_fair_value(self):
         low = self.record(

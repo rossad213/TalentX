@@ -42,6 +42,7 @@ from enrich_current_catalog import (
     recursively_collect_numbers,
     signal_bundle,
     award_points,
+    resolve_award_details,
     resolve_award_names,
 )
 from pricing_model import apply_pricing_to_records, clamp, load_overrides
@@ -594,19 +595,23 @@ def select_records(
     return exact[:max_athletes] if max_athletes > 0 else exact
 
 
-def prior_award_data(record: dict[str, Any]) -> tuple[float, list[str]]:
+def prior_award_data(record: dict[str, Any]) -> tuple[float, list[str], list[dict[str, Any]]]:
     summary = record.get("pricingEvidenceSummary") if isinstance(record.get("pricingEvidenceSummary"), dict) else {}
     signals = summary.get("rawSignals") if isinstance(summary.get("rawSignals"), dict) else {}
     award_points = float(signals.get("awardPoints") or 0)
     names = summary.get("awardNames") if isinstance(summary.get("awardNames"), list) else []
-    return award_points, [str(name) for name in names[:12]]
+    details = summary.get("awardDetails") if isinstance(summary.get("awardDetails"), list) else []
+    clean_details = [dict(item) for item in details if isinstance(item, dict)]
+    return award_points, [str(name) for name in names[:20]], clean_details[:30]
 
 
 NFL_AWARD_REFRESH_DAYS = 30
-NFL_AWARD_EVIDENCE_VERSION = "1.0-resolved-core-awards"
+NFL_AWARD_EVIDENCE_VERSION = "1.1-resolved-core-awards-with-years"
 
 
 def _nfl_awards_due(record: dict[str, Any], *, now: datetime | None = None) -> bool:
+    if str(record.get("nflAwardEvidenceVersion") or "") != NFL_AWARD_EVIDENCE_VERSION:
+        return True
     checked = parse_datetime(record.get("nflAwardsCheckedAt"))
     if checked is None:
         return True
@@ -618,7 +623,7 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
     result = dict(record)
     namespace = str(result.get("sourceNamespace") or "")
     athlete_id = str(result.get("sourceRecordId") or "").strip()
-    award_score, award_names = prior_award_data(result)
+    award_score, award_names, award_details = prior_award_data(result)
     recent: dict[str, float] = {}
     career: dict[str, float] = {}
     evidence_urls: list[str] = []
@@ -644,7 +649,8 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
             awards_url = ESPN_AWARDS.format(sport=sport, league=league, athlete_id=athlete_id)
             try:
                 awards_payload = fetch_json(awards_url, timeout)
-                resolved_awards = resolve_award_names(awards_payload, timeout)
+                award_details = resolve_award_details(awards_payload, timeout)
+                resolved_awards = [str(item.get("name") or "") for item in award_details if str(item.get("name") or "")]
                 award_score, award_names = award_points(awards_payload, resolved_awards)
                 result["nflAwardsCheckedAt"] = iso_utc(utc_now())
                 result["nflAwardEvidenceVersion"] = NFL_AWARD_EVIDENCE_VERSION
@@ -698,6 +704,7 @@ def fetch_hourly_evidence(record: dict[str, Any], timeout: float) -> dict[str, A
         "career": career,
         "signals": signal_bundle(result, recent, career, award_score),
         "awards": award_names,
+        "awardDetails": award_details,
         "newsCount": news_count,
         "evidenceUrls": evidence_urls,
         "errors": errors,
@@ -784,6 +791,7 @@ def apply_hourly_metrics(
         "recentStatFields": len(item.get("recent", {})),
         "careerStatFields": len(item.get("career", {})),
         "awardNames": item.get("awards", []),
+        "awardDetails": item.get("awardDetails", []),
         "draftYear": record.get("draftYear"),
         "draftRound": record.get("draftRound"),
         "draftPick": record.get("draftPick"),

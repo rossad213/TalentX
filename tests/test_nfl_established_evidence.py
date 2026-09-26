@@ -9,7 +9,8 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from enrich_current_catalog import award_points, resolve_award_names  # noqa: E402
+from enrich_current_catalog import award_points, resolve_award_details, resolve_award_names  # noqa: E402
+from hourly_price_refresh import NFL_AWARD_EVIDENCE_VERSION  # noqa: E402
 from hourly_price_refresh_nfl import (  # noqa: E402
     NFL_FUNDAMENTAL_EVIDENCE_VERSION,
     _established_fundamental_signals,
@@ -124,6 +125,7 @@ class NFLEstablishedEvidenceTests(unittest.TestCase):
                 "careerStatus": "Active",
                 "marketPrice": 170,
                 "nflFundamentalEvidenceVersion": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+                "nflAwardEvidenceVersion": NFL_AWARD_EVIDENCE_VERSION,
             },
             {
                 "id": "nba",
@@ -143,6 +145,21 @@ class NFLEstablishedEvidenceTests(unittest.TestCase):
         self.assertIn(0, selected)
         self.assertIn(2, selected)
         self.assertNotIn(1, selected)
+
+    def test_award_evidence_version_mismatch_is_backfilled_even_with_current_fundamentals(self):
+        records = [{
+            "id": "garrett",
+            "name": "Myles Garrett",
+            "leagueOrMedium": "NFL",
+            "sourceNamespace": "espn",
+            "sourceRecordId": "3122132",
+            "careerStatus": "Active",
+            "marketPrice": 190,
+            "nflFundamentalEvidenceVersion": NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+            "nflAwardEvidenceVersion": "old-award-model",
+        }]
+        selected = nfl_model_backfill_select_records(records, set(), max_athletes=1)
+        self.assertEqual(selected, [0])
 
     def test_nfl_cohorts_are_position_aware_not_universal(self):
         qb = {
@@ -186,6 +203,27 @@ class NFLEstablishedEvidenceTests(unittest.TestCase):
         self.assertIn("AP Most Valuable Player", scored_names)
         self.assertIn("First-Team All-Pro", scored_names)
         self.assertGreater(points, 6.0)
+
+    def test_award_reference_resolution_preserves_season_year(self):
+        payload = {
+            "count": 1,
+            "items": [{"$ref": "https://example.test/award/1"}],
+        }
+
+        def fake_fetch(url: str, _timeout: float):
+            self.assertTrue(url.endswith("/1"))
+            return {
+                "displayName": "NFL Defensive Player of the Year",
+                "season": {"year": 2025},
+            }
+
+        with patch("enrich_current_catalog.fetch_json", side_effect=fake_fetch):
+            details = resolve_award_details(payload, 1.0)
+
+        self.assertEqual(details, [{
+            "name": "NFL Defensive Player of the Year",
+            "year": 2025,
+        }])
 
 
 if __name__ == "__main__":

@@ -15,9 +15,10 @@ The module intentionally leaves every non-NFL record unchanged.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from typing import Any
 
-CALIBRATION_VERSION = "1.1-nfl-established-window-single-shrink"
+CALIBRATION_VERSION = "1.2-nfl-award-recency-injury-context"
 
 NFL_ROLE_AUDIENCE = {
     "quarterback": 20,
@@ -132,6 +133,111 @@ def _award_names(record: dict[str, Any]) -> list[str]:
     return [str(value).strip() for value in names if str(value).strip()]
 
 
+def _award_details(record: dict[str, Any]) -> list[dict[str, Any]]:
+    summary = record.get("pricingEvidenceSummary")
+    if not isinstance(summary, dict):
+        return []
+    details = summary.get("awardDetails")
+    if not isinstance(details, list):
+        return []
+    return [dict(item) for item in details if isinstance(item, dict) and str(item.get("name") or "").strip()]
+
+
+def _award_title_points(name: str) -> float:
+    low = str(name or "").lower()
+    if "super bowl mvp" in low:
+        return 18.0
+    if any(token in low for token in ("most valuable player", " nfl mvp", "mvp")):
+        return 18.0
+    if any(token in low for token in ("offensive player of the year", "defensive player of the year", "opoy", "dpoy")):
+        return 16.0
+    if "first-team all-pro" in low or "first team all-pro" in low:
+        return 10.0
+    if "second-team all-pro" in low or "second team all-pro" in low:
+        return 7.0
+    if "rookie of the year" in low:
+        return 7.0
+    if "pro bowl" in low:
+        return 4.0
+    if any(token in low for token in ("super bowl champion", "super bowl championship", "champion")):
+        return 4.0
+    return 2.0
+
+
+def _award_recency_factor(year: int | None, *, current_year: int | None = None) -> float:
+    if year is None:
+        return 0.55
+    now_year = int(current_year or datetime.now(timezone.utc).year)
+    age = max(0, now_year - int(year))
+    if age <= 1:
+        return 1.0
+    if age == 2:
+        return 0.86
+    if age == 3:
+        return 0.74
+    if age == 4:
+        return 0.63
+    if age == 5:
+        return 0.54
+    return max(0.35, 0.54 - 0.03 * (age - 5))
+
+
+def _award_recency_score(record: dict[str, Any]) -> tuple[float | None, dict[str, Any]]:
+    details = _award_details(record)
+    if not details:
+        return None, {"available": False}
+    weighted_points = 0.0
+    raw_points = 0.0
+    used: list[dict[str, Any]] = []
+    for item in details:
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        parsed_year = optional_number(item.get("year"))
+        year = int(parsed_year) if parsed_year is not None and 1900 <= parsed_year <= 2100 else None
+        points = _award_title_points(name)
+        factor = _award_recency_factor(year)
+        weighted_points += points * factor
+        raw_points += points
+        used.append({"name": name, "year": year, "recencyFactor": round(factor, 3), "points": points})
+    if not used:
+        return None, {"available": False}
+    score = 100.0 * (1.0 - math.exp(-weighted_points / 22.0))
+    return round(clamp(score), 2), {
+        "available": True,
+        "weightedHonorPoints": round(weighted_points, 2),
+        "rawHonorPoints": round(raw_points, 2),
+        "resolvedAwards": used[:24],
+    }
+
+
+def injury_availability(record: dict[str, Any], fallback: float) -> tuple[float, dict[str, Any]]:
+    if not bool(record.get("nflInjuryActive")):
+        return round(clamp(fallback), 1), {"activeInjury": False}
+    status = str(record.get("nflInjuryStatus") or "").strip()
+    injury_type = str(record.get("nflInjuryType") or "").strip()
+    low = f"{status} {injury_type}".lower()
+    if any(token in low for token in ("physically unable", "pup", "injured reserve", "ir ", "reserve/injured", "out", "inactive")):
+        value = 25.0
+    elif "doubtful" in low:
+        value = 40.0
+    elif "questionable" in low:
+        value = 58.0
+    elif any(token in low for token in ("limited", "day-to-day", "day to day")):
+        value = 65.0
+    elif "probable" in low:
+        value = 70.0
+    else:
+        value = 55.0
+    return round(min(clamp(fallback), value), 1), {
+        "activeInjury": True,
+        "status": status,
+        "type": injury_type or None,
+        "availabilityCeiling": value,
+        "verifiedAt": record.get("nflInjuryVerifiedAt"),
+    }
+
+
 def performance_score(record: dict[str, Any], fallback: float) -> tuple[float, dict[str, float]]:
     pcts = _percentiles(record)
     required = ("recentProduction", "efficiency")
@@ -164,21 +270,30 @@ def performance_score(record: dict[str, Any], fallback: float) -> tuple[float, d
     }
 
 
-def _honor_quality_score(record: dict[str, Any]) -> float:
+def _honor_quality_score(record: dict[str, Any]) -> tuple[float, dict[str, Any]]:
     signals = _raw_signals(record)
     pcts = _percentiles(record)
     points = max(0.0, signals.get("awardPoints", 0.0))
     award_pct = pcts.get("awardPoints", 0.50)
 
-    # Raw award evidence distinguishes the magnitude of a resume while the
-    # cohort percentile protects against source-scale differences. This avoids
-    # the old behavior where career counting stats supplied 70% of Achievements.
+    # Career award volume remains durable, but current market value should care
+    # more about when elite honors happened. This prevents a five-year-old peak
+    # season from carrying the same present-day weight as a current DPOY/OPOY.
     magnitude = 100.0 * (1.0 - math.exp(-points / 12.0))
     percentile_support = 20.0 + 80.0 * award_pct
-    score = magnitude * 0.60 + percentile_support * 0.40
+    recency, recency_detail = _award_recency_score(record)
+    if recency is not None:
+        score = magnitude * 0.35 + percentile_support * 0.20 + recency * 0.45
+        return clamp(score), {
+            "careerAwardMagnitude": round(magnitude, 2),
+            "awardPercentileSupport": round(percentile_support, 2),
+            "recencyScore": round(recency, 2),
+            **recency_detail,
+        }
 
-    # When award titles are available, recognize genuinely major individual
-    # honors without treating every appearance-level award as equivalent.
+    # Older artifacts without resolved award years keep the previous behavior
+    # until the award evidence refresh upgrades them.
+    score = magnitude * 0.60 + percentile_support * 0.40
     names = " | ".join(name.lower() for name in _award_names(record))
     bonus = 0.0
     if any(token in names for token in ("most valuable", " mvp", "mvp ", "mvp|")):
@@ -191,16 +306,34 @@ def _honor_quality_score(record: dict[str, Any]) -> float:
         bonus += 3.0
     if "rookie of the year" in names:
         bonus += 3.0
-    return clamp(score + bonus)
+    return clamp(score + bonus), {
+        "careerAwardMagnitude": round(magnitude, 2),
+        "awardPercentileSupport": round(percentile_support, 2),
+        "recencyScore": None,
+        "available": False,
+    }
 
 
 def _postseason_score(record: dict[str, Any]) -> float:
+    details = _award_details(record)
+    if details:
+        score = 35.0
+        for item in details:
+            name = str(item.get("name") or "").lower()
+            parsed_year = optional_number(item.get("year"))
+            year = int(parsed_year) if parsed_year is not None and 1900 <= parsed_year <= 2100 else None
+            factor = _award_recency_factor(year)
+            if "super bowl mvp" in name:
+                score += 35.0 * factor
+            elif any(token in name for token in ("super bowl champion", "super bowl championship")):
+                score += 20.0 * factor
+            elif "conference championship" in name:
+                score += 8.0 * factor
+        return clamp(score)
+
     names = " | ".join(name.lower() for name in _award_names(record))
     if not names:
-        # Unknown is neutral, not zero. Missing title detail should not erase a
-        # player's resume, but it also cannot create a postseason premium.
         return 50.0
-
     score = 35.0
     if "super bowl mvp" in names:
         score += 35.0
@@ -216,7 +349,7 @@ def achievement_score(record: dict[str, Any], fallback: float) -> tuple[float, d
     if not pcts:
         return round(clamp(fallback), 1), {}
 
-    honors = _honor_quality_score(record)
+    honors, honor_detail = _honor_quality_score(record)
     postseason = _postseason_score(record)
     career_pct = pcts.get("careerProduction", 0.50)
     milestones = 20.0 + 80.0 * career_pct
@@ -227,6 +360,7 @@ def achievement_score(record: dict[str, Any], fallback: float) -> tuple[float, d
     score = honors * 0.70 + postseason * 0.20 + milestones * 0.10
     return round(clamp(score, 8.0, 99.0), 1), {
         "individualHonorsScore": round(honors, 2),
+        "honorRecency": honor_detail,
         "postseasonScore": round(postseason, 2),
         "careerMilestoneScore": round(milestones, 2),
     }
@@ -277,10 +411,12 @@ def calibrated_metrics(
     performance, performance_detail = performance_score(record, output.get("performance", 50.0))
     achievements, achievement_detail = achievement_score(record, output.get("achievements", 35.0))
     audience, audience_detail = audience_score(record, news_count)
+    availability, availability_detail = injury_availability(record, output.get("availability", 75.0))
 
     output["performance"] = performance
     output["achievements"] = achievements
     output["audience"] = audience
+    output["availability"] = availability
     output["attention"] = audience_detail["attentionScore"]
 
     detail = {
@@ -288,6 +424,7 @@ def calibrated_metrics(
         "performance": performance_detail,
         "achievements": achievement_detail,
         "audience": audience_detail,
+        "availability": availability_detail,
         "sampleMaturity": sample_maturity(record),
         "principle": "games establish certainty early; performance and achievements establish value thereafter",
     }

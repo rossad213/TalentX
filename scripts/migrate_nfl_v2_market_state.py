@@ -26,8 +26,8 @@ from pricing_engine_v2 import apply_v2
 from nfl_metric_calibration import calibrate_record as calibrate_nfl_record
 from hourly_price_refresh_nfl import NFL_FUNDAMENTAL_EVIDENCE_VERSION
 
-MIGRATION_VERSION = "1.3-nfl-established-evidence-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-3"
+MIGRATION_VERSION = "1.4-nfl-recency-availability-position-value-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-4"
 
 _V2_FIELDS = (
     "talentScore",
@@ -88,7 +88,17 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         and str(record.get("careerStatus") or "Active").lower() == "active"
         and str(record.get("nflFundamentalEvidenceVersion") or "") != NFL_FUNDAMENTAL_EVIDENCE_VERSION
     ):
-        return dict(record), False
+        games = _finite(record.get("professionalGames")) or 0.0
+        has_rookie_anchor = (
+            record.get("draftPick") is not None
+            or record.get("draftYear") is not None
+            or isinstance(record.get("rookiePricing"), dict)
+        )
+        # Zero-game drafted players cannot ever acquire an "established" window
+        # before debut. Let their current rookie/IPO evidence establish the new
+        # market epoch instead of preserving a stale legacy price indefinitely.
+        if games > 0 or not has_rookie_anchor:
+            return dict(record), False
 
     prior_market = _finite(record.get("marketPrice"))
     prior_game_move = _finite(record.get("lastGameMovePct"))
@@ -142,7 +152,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     )
     result["nflMarketMigrationTargetPrice"] = target
     result["nflMarketMigrationReason"] = (
-        "Reset NFL market state to the unified position-normalized, established-window v2 fair value before future event compounding"
+        "Reset NFL market state to recency-aware, injury-aware, position-context v2 fair value before future event compounding"
     )
     return result, True
 

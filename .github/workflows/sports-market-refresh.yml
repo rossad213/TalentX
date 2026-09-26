@@ -22,6 +22,7 @@ on:
       - "scripts/reconcile_soccer_baseline_identities.py"
       - "scripts/same_category_identity_dedupe.py"
       - "scripts/nfl_metric_calibration.py"
+      - "scripts/sync_nfl_injuries.py"
       - "scripts/hourly_price_refresh_nfl.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/hourly_price_refresh_nfl_rb.py"
@@ -55,6 +56,7 @@ on:
       - "tests/test_nfl_safe_rebase.py"
       - "tests/test_nfl_v2_market_state_migration.py"
       - "tests/test_nfl_metric_calibration.py"
+      - "tests/test_nfl_injury_sync.py"
       - "tests/test_nfl_established_evidence.py"
       - "tests/test_results_event_pricing.py"
       - "tests/test_uncapped_sports_refresh.py"
@@ -209,6 +211,7 @@ jobs:
           tests/test_nfl_safe_rebase.py
           tests/test_nfl_v2_market_state_migration.py
           tests/test_nfl_metric_calibration.py
+          tests/test_nfl_injury_sync.py
           tests/test_nfl_established_evidence.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
@@ -230,6 +233,8 @@ jobs:
           tests/test_category_market_store.py -v
       - name: Sync factual NFL draft metadata
         run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
+      - name: Sync verified NFL injury context
+        run: python scripts/sync_nfl_injuries.py --catalog data/current_catalog.json --request-timeout 12
       - name: Refresh completed-game evidence and NFL fundamental inputs
         run: >-
           python scripts/hourly_price_refresh_nfl_rb.py

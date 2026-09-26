@@ -687,7 +687,7 @@ def nfl_model_backfill_select_records(
     *,
     max_athletes: int,
 ) -> list[int]:
-    """Include every active ESPN NFL record that still needs the current evidence model.
+    """Include every active ESPN NFL record that still needs current fundamentals or award evidence.
 
     The shared hourly selector is intentionally game-driven and capped. That is
     correct for ordinary event refreshes, but a new NFL fundamental model cannot
@@ -714,7 +714,9 @@ def nfl_model_backfill_select_records(
             continue
         if not str(record.get("sourceRecordId") or "").strip():
             continue
-        if str(record.get("nflFundamentalEvidenceVersion") or "") == NFL_FUNDAMENTAL_EVIDENCE_VERSION:
+        fundamentals_current = str(record.get("nflFundamentalEvidenceVersion") or "") == NFL_FUNDAMENTAL_EVIDENCE_VERSION
+        awards_current = str(record.get("nflAwardEvidenceVersion") or "") == refresh.NFL_AWARD_EVIDENCE_VERSION
+        if fundamentals_current and awards_current:
             continue
         pending.append(index)
 

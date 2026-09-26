@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "scripts/nfl_production_pricing.py"
+      - "scripts/nfl_rookie_transition.py"
       - "scripts/nfl_rb_cohort_calibration.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/repair_nfl_persisted_opportunity_prices.py"
@@ -11,6 +12,7 @@ on:
       - "scripts/repair_nfl_production_prices_safe.py"
       - "scripts/migrate_nfl_v2_market_state.py"
       - "scripts/nfl_metric_calibration.py"
+      - "scripts/sync_nfl_injuries.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/pricing_model.py"
       - "tests/test_nfl_production_pricing.py"
@@ -21,6 +23,7 @@ on:
       - "tests/test_nfl_rb_cohort_calibration.py"
       - "tests/test_nfl_v2_market_state_migration.py"
       - "tests/test_nfl_metric_calibration.py"
+      - "tests/test_nfl_injury_sync.py"
       - "tests/test_nfl_established_evidence.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_pricing_engine_v2.py"
@@ -55,6 +58,7 @@ jobs:
           tests/test_nfl_per_game_expectations.py
           tests/test_nfl_v2_market_state_migration.py
           tests/test_nfl_metric_calibration.py
+          tests/test_nfl_injury_sync.py
           tests/test_nfl_established_evidence.py
           tests/test_hourly_price_refresh.py
           tests/test_pricing_engine_v2.py -v

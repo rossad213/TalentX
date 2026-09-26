@@ -350,28 +350,57 @@ def _award_refs(payload: Any) -> list[str]:
     return list(dict.fromkeys(refs))
 
 
-def resolve_award_names(payload: dict[str, Any], timeout: float, *, max_items: int = 12) -> list[str]:
-    """Resolve ESPN Core award references into factual award titles.
+def _award_year_from_payload(payload: Any) -> int | None:
+    """Best-effort factual season/year extraction from one ESPN award object."""
+    if not isinstance(payload, dict):
+        return None
+    for key in ("year", "seasonYear", "awardYear"):
+        parsed = number(payload.get(key))
+        if parsed is not None and 1900 <= parsed <= 2100:
+            return int(parsed)
+    season = payload.get("season")
+    if isinstance(season, dict):
+        for key in ("year", "seasonYear"):
+            parsed = number(season.get(key))
+            if parsed is not None and 1900 <= parsed <= 2100:
+                return int(parsed)
+        ref = season.get("$ref")
+        if isinstance(ref, str):
+            match = re.search(r"/seasons/(\d{4})(?:/|\?|$)", ref)
+            if match:
+                return int(match.group(1))
+    for key in ("date", "startDate", "endDate", "awardedAt", "createdAt"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            match = re.search(r"\b(19|20)\d{2}\b", value)
+            if match:
+                return int(match.group(0))
+    ref = payload.get("$ref")
+    if isinstance(ref, str):
+        match = re.search(r"/seasons/(\d{4})(?:/|\?|$)", ref)
+        if match:
+            return int(match.group(1))
+    return None
 
-    ESPN's athlete-awards collection frequently returns reference-only items. The
-    old parser could count those items but could not see titles such as MVP or
-    All-Pro, leaving awardNames empty even when raw award points were non-zero.
-    This resolver follows only the returned award references, with a strict item
-    and depth bound so enrichment stays deterministic and reasonably cheap.
+
+def resolve_award_details(payload: dict[str, Any], timeout: float, *, max_items: int = 20) -> list[dict[str, Any]]:
+    """Resolve ESPN Core award references into factual title/year pairs.
+
+    Year metadata is retained so NFL valuation can distinguish a current honor
+    from an equally prestigious award earned several seasons ago. Missing years
+    remain explicit rather than being invented.
     """
     items = payload.get("items") if isinstance(payload.get("items"), list) else []
-    names: list[str] = []
+    details: list[dict[str, Any]] = []
     for item in items[:max_items]:
         if not isinstance(item, dict):
             continue
         title = _award_title_from_payload(item)
-        if title:
-            names.append(title)
-            continue
+        year = _award_year_from_payload(item)
         pending = _award_refs(item)
         visited: set[str] = set()
         depth = 0
-        while pending and depth < 2 and not title:
+        while pending and depth < 2 and (not title or year is None):
             ref = pending.pop(0)
             if ref in visited:
                 continue
@@ -380,13 +409,33 @@ def resolve_award_names(payload: dict[str, Any], timeout: float, *, max_items: i
                 detail = fetch_json(ref, timeout)
             except Exception:  # noqa: BLE001 - unresolved detail keeps count evidence intact
                 continue
-            title = _award_title_from_payload(detail)
-            if title:
-                names.append(title)
-                break
+            if not title:
+                title = _award_title_from_payload(detail)
+            if year is None:
+                year = _award_year_from_payload(detail)
             pending.extend(url for url in _award_refs(detail) if url not in visited)
             depth += 1
-    return list(dict.fromkeys(name for name in names if name))[:max_items]
+        if title:
+            details.append({"name": title, "year": year})
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, int | None]] = set()
+    for detail in details:
+        key = (str(detail.get("name") or "").strip(), detail.get("year"))
+        if not key[0] or key in seen:
+            continue
+        seen.add(key)
+        deduped.append({"name": key[0], "year": key[1]})
+    return deduped[:max_items]
+
+
+def resolve_award_names(payload: dict[str, Any], timeout: float, *, max_items: int = 12) -> list[str]:
+    """Backward-compatible title-only view of resolved ESPN award evidence."""
+    return [
+        str(item.get("name") or "")
+        for item in resolve_award_details(payload, timeout, max_items=max_items)
+        if str(item.get("name") or "").strip()
+    ][:max_items]
 
 
 def award_points(payload: dict[str, Any], resolved_names: list[str] | None = None) -> tuple[float, list[str]]:
@@ -720,6 +769,7 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
     career: dict[str, float] = {}
     awards_score = 0.0
     awards_names: list[str] = []
+    award_details: list[dict[str, Any]] = []
     evidence_urls: list[str] = []
     if result.get("draftMetadataSource"):
         evidence_urls.append(str(result["draftMetadataSource"]))
@@ -763,7 +813,8 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
                     errors.append(f"core profile {type(exc).__name__}")
         try:
             awards_payload = fetch_json(awards_url, timeout)
-            resolved_awards = resolve_award_names(awards_payload, timeout)
+            award_details = resolve_award_details(awards_payload, timeout)
+            resolved_awards = [str(item.get("name") or "") for item in award_details if str(item.get("name") or "")]
             awards_score, awards_names = award_points(awards_payload, resolved_awards)
             evidence_urls.append(awards_url)
         except Exception as exc:  # noqa: BLE001
@@ -803,6 +854,7 @@ def enrich_one(record: dict[str, Any], timeout: float) -> dict[str, Any]:
         "career": career,
         "signals": signals,
         "awards": awards_names,
+        "awardDetails": award_details,
         "newsCount": news_count,
         "evidenceUrls": evidence_urls,
         "errors": errors,
@@ -935,6 +987,7 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "recentStatFields": len(item.get("recent", {})),
             "careerStatFields": len(item.get("career", {})),
             "awardNames": item.get("awards", []),
+            "awardDetails": item.get("awardDetails", []),
             "draftYear": record.get("draftYear"),
             "draftRound": record.get("draftRound"),
             "draftPick": record.get("draftPick"),
