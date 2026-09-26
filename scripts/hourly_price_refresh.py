@@ -461,7 +461,14 @@ def discover_recent_events(
                 events.append(info)
                 summary_jobs.append((sport, league, event_id, info))
 
+    include_nhl = any(
+        str(record.get("leagueOrMedium") or "").strip().upper() == "NHL"
+        and str(record.get("sourceNamespace") or "").strip().lower() == "nhl"
+        for record in records
+    )
     for date in dates:
+        if not include_nhl:
+            break
         url = NHL_SCORE.format(date=date)
         try:
             payload = fetch_json(url, timeout)
