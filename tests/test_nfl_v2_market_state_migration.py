@@ -140,6 +140,30 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertTrue(changed_ready)
         self.assertEqual(migrated["nflMarketMigrationVersion"], MIGRATION_VERSION)
 
+    def test_zero_game_drafted_player_can_reset_without_established_window(self):
+        rookie = self.nfl_record(
+            sourceNamespace="espn",
+            careerStatus="Active",
+            careerStage="Active Rookie",
+            professionalGames=0,
+            nflFundamentalEvidenceVersion=None,
+            draftYear=2026,
+            draftRound=4,
+            draftPick=118,
+            rookiePricing={
+                "draftSport": "NFL",
+                "rookieScore": 66,
+                "draftInfluencePct": 100,
+            },
+            marketPrice=88.0,
+            fundamentalValue=42.0,
+        )
+        migrated, changed = migrate_record(rookie, "2026-09-26T06:00:00Z")
+        self.assertTrue(changed)
+        self.assertEqual(migrated["nflMarketMigrationVersion"], MIGRATION_VERSION)
+        self.assertNotEqual(migrated["marketPrice"], 88.0)
+        self.assertEqual(migrated["marketPrice"], migrated["fundamentalValue"])
+
     def test_migration_is_idempotent(self):
         first, changed = migrate_record(self.nfl_record(), "2026-09-24T16:15:00Z")
         second, changed_again = migrate_record(first, "2026-09-25T16:15:00Z")
