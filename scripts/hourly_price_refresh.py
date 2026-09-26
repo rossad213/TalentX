@@ -976,6 +976,17 @@ def main() -> int:
     parser.add_argument("--max-athletes", type=int, default=1800)
     parser.add_argument("--max-game-move-pct", type=float, default=2.5)
     parser.add_argument("--baseline-run-id", default="")
+    parser.add_argument(
+        "--league-only",
+        default="",
+        help="Optional exact league filter. Used by category workflows for isolated event refreshes such as NHL.",
+    )
+    parser.add_argument(
+        "--state-manifest",
+        type=Path,
+        default=HOURLY_MANIFEST,
+        help="Event dedupe/state manifest path. Isolated league refreshes should use their own manifest.",
+    )
     args = parser.parse_args()
 
     if not CATALOG.exists():
@@ -987,13 +998,23 @@ def main() -> int:
     started = time.time()
     now = utc_now()
     refreshed_at = iso_utc(now)
-    prior_manifest = safe_json(HOURLY_MANIFEST, {})
+    league_filter = str(args.league_only or "").strip().upper()
+    discovery_records = records
+    if league_filter:
+        discovery_records = [
+            record for record in records
+            if str(record.get("leagueOrMedium") or "").strip().upper() == league_filter
+        ]
+        if not discovery_records:
+            raise SystemExit(f"No records found for --league-only {league_filter}")
+
+    prior_manifest = safe_json(args.state_manifest, {})
     if not isinstance(prior_manifest, dict):
         prior_manifest = {}
     processed_history = prior_processed_events(prior_manifest, now)
     processed_player_history = prior_processed_player_events(prior_manifest)
     participant_ids, athlete_events, events, discovery_warnings = discover_recent_events(
-        records,
+        discovery_records,
         now=now,
         lookback_hours=args.lookback_hours,
         timeout=args.request_timeout,
@@ -1013,12 +1034,14 @@ def main() -> int:
 
     overrides = load_overrides(PRICING_OVERRIDES)
     # A displayed change describes this refresh, not a permanent random drift.
-    # Untouched records keep their price and history but return to a 0.00% move.
+    # In an isolated league run, records outside that league must remain byte-for-byte
+    # market-state equivalent; only the selected league has its displayed move reset.
     updated_records = []
     for record in records:
         retained = dict(record)
-        retained["dailyChange"] = 0.0
-        retained["hourlyChangePct"] = 0.0
+        if not league_filter or str(record.get("leagueOrMedium") or "").strip().upper() == league_filter:
+            retained["dailyChange"] = 0.0
+            retained["hourlyChangePct"] = 0.0
         updated_records.append(retained)
     results_by_index: dict[int, dict[str, Any]] = {}
 
@@ -1186,20 +1209,34 @@ def main() -> int:
     manifest = safe_json(CATALOG_MANIFEST, {})
     if not isinstance(manifest, dict):
         manifest = {}
-    manifest.update(
-        {
-            "hourlyPriceRefreshAt": refreshed_at,
-            "hourlyBaselineRunId": str(args.baseline_run_id or ""),
-            "hourlyEventsFound": len(events),
-            "hourlyEventsProcessed": len(processed_now),
-            "hourlyAthletesSelected": len(selected_indexes),
-            "hourlyEvidenceUsable": usable,
-            "hourlyPricesChanged": changed,
-            "hourlyRefreshMode": "Completed games are processed once from player box scores; season and career evidence remains the valuation anchor.",
-            "hourlyMaximumGameMovePct": args.max_game_move_pct,
-            "hourlyRefreshManifest": "data/hourly_refresh_manifest.json",
-        }
-    )
+    if league_filter:
+        prefix = league_filter.lower()
+        manifest.update(
+            {
+                f"{prefix}EventRefreshAt": refreshed_at,
+                f"{prefix}EventsFound": len(events),
+                f"{prefix}EventsProcessed": len(processed_now),
+                f"{prefix}AthletesSelected": len(selected_indexes),
+                f"{prefix}EvidenceUsable": usable,
+                f"{prefix}PricesChanged": changed,
+                f"{prefix}EventRefreshManifest": str(args.state_manifest),
+            }
+        )
+    else:
+        manifest.update(
+            {
+                "hourlyPriceRefreshAt": refreshed_at,
+                "hourlyBaselineRunId": str(args.baseline_run_id or ""),
+                "hourlyEventsFound": len(events),
+                "hourlyEventsProcessed": len(processed_now),
+                "hourlyAthletesSelected": len(selected_indexes),
+                "hourlyEvidenceUsable": usable,
+                "hourlyPricesChanged": changed,
+                "hourlyRefreshMode": "Completed games are processed once from player box scores; season and career evidence remains the valuation anchor.",
+                "hourlyMaximumGameMovePct": args.max_game_move_pct,
+                "hourlyRefreshManifest": "data/hourly_refresh_manifest.json",
+            }
+        )
     CATALOG_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     hourly_manifest = {
@@ -1233,7 +1270,8 @@ def main() -> int:
             "Drafted rookies automatically reduce their IPO influence as professional games accumulate."
         ),
     }
-    HOURLY_MANIFEST.write_text(json.dumps(hourly_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    args.state_manifest.parent.mkdir(parents=True, exist_ok=True)
+    args.state_manifest.write_text(json.dumps(hourly_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     prices = [float(record.get("marketPrice") or 0) for record in updated_records]
     print(f"Usable hourly evidence: {usable:,}")
