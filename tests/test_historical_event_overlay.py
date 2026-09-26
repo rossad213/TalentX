@@ -83,6 +83,74 @@ class HistoricalEventOverlayTests(unittest.TestCase):
         self.assertEqual(imported, 0)
         self.assertEqual(merged[0]["priceEvents"][0]["name"], "Live authoritative game")
 
+
+    def test_nfl_point_in_time_overlay_preserves_live_prices_and_chart_move(self):
+        base = [{
+            "id": "n1",
+            "primaryCategory": "Athlete",
+            "leagueOrMedium": "NFL",
+            "marketPrice": 151.5,
+            "previousMarketPrice": 150.0,
+            "dailyChange": 1.0,
+            "lastPriceEventId": "espn:live",
+            "priceHistory": [{
+                "time": "2026-09-20T17:00:00Z",
+                "price": 151.5,
+                "eventId": "espn:live",
+                "phase": "close",
+                "historyType": "verified",
+            }],
+            "priceEvents": [{
+                "eventKey": "espn:live",
+                "eventId": "live",
+                "eventType": "game",
+                "startedAt": "2026-09-20T17:00:00Z",
+                "movePct": 1.0,
+                "priceBefore": 150.0,
+                "priceAfter": 151.5,
+                "verified": True,
+            }],
+        }]
+        overlay = [{
+            "id": "n1",
+            "primaryCategory": "Athlete",
+            "leagueOrMedium": "NFL",
+            "nflHistoricalBackfillVersion": "1.0-nfl-point-in-time-event-replay",
+            "nflHistoricalBackfillDays": 1095,
+            "priceEvents": [{
+                "eventKey": "espn:hist",
+                "eventId": "hist",
+                "eventType": "game",
+                "startedAt": "2025-09-01T17:00:00Z",
+                "modelMovePct": 2.0,
+                "movePct": 2.0,
+                "priceBefore": 147.06,
+                "priceAfter": 150.0,
+                "verified": True,
+                "historicalBackfill": True,
+                "historicalExpectationMode": "point-in-time-pre-game",
+            }],
+        }]
+        merged, touched, imported = merge_catalog(base, overlay, "sports")
+        self.assertEqual((touched, imported), (1, 1))
+        record = merged[0]
+        self.assertEqual(record["marketPrice"], 151.5)
+        self.assertEqual(record["previousMarketPrice"], 150.0)
+        self.assertEqual(record["lastPriceEventId"], "espn:live")
+        events = {event["eventKey"]: event for event in record["priceEvents"]}
+        self.assertEqual(events["espn:live"]["priceBefore"], 150.0)
+        self.assertEqual(events["espn:live"]["priceAfter"], 151.5)
+        self.assertEqual(events["espn:hist"]["priceAfter"], 150.0)
+        calculated = round(
+            (events["espn:hist"]["priceAfter"] / events["espn:hist"]["priceBefore"] - 1.0) * 100.0,
+            3,
+        )
+        self.assertEqual(events["espn:hist"]["movePct"], calculated)
+        self.assertEqual(events["espn:hist"]["chartMovePct"], calculated)
+        self.assertTrue(events["espn:hist"]["chartCorrelationVerified"])
+        self.assertEqual(record["nflHistoricalBackfillDays"], 1095)
+        self.assertTrue(any(point.get("eventId") == "espn:live" for point in record["priceHistory"]))
+
     def test_other_categories_are_untouched(self):
         base = [{"id": "x1", "primaryCategory": "Actor", "marketPrice": 88.0}]
         overlay = [{
