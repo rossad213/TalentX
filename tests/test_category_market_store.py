@@ -127,6 +127,36 @@ class CategoryMarketStoreTests(unittest.TestCase):
         )
         self.assertEqual(merged[0]["nflMarketMigrationTargetPrice"], 82.0)
 
+    def test_market_mode_preserves_wnba_migration_marker(self):
+        base = [{
+            "id": "w1",
+            "name": "WNBA One",
+            "primaryCategory": "Athlete",
+            "discipline": "Basketball",
+            "leagueOrMedium": "WNBA",
+            "marketPrice": 100.0,
+            "fundamentalValue": 98.0,
+        }]
+        overlay = [{
+            "id": "w1",
+            "name": "WNBA One",
+            "primaryCategory": "Athlete",
+            "discipline": "Basketball",
+            "leagueOrMedium": "WNBA",
+            "marketPrice": 98.0,
+            "wnbaMarketMigrationVersion": "1.0-wnba-event-ledger-isolation",
+            "wnbaMarketMigratedAt": "2026-09-26T05:30:00Z",
+            "wnbaMarketMigrationTargetPrice": 98.0,
+        }]
+        merged, touched = merge_category(base, overlay, "sports", "market")
+        self.assertEqual(touched, 1)
+        self.assertEqual(merged[0]["marketPrice"], 98.0)
+        self.assertEqual(
+            merged[0]["wnbaMarketMigrationVersion"],
+            "1.0-wnba-event-ledger-isolation",
+        )
+        self.assertEqual(merged[0]["wnbaMarketMigrationTargetPrice"], 98.0)
+
     def test_market_mode_preserves_soccer_migration_marker(self):
         base = [{
             "id": "s1",
