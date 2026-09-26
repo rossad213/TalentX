@@ -81,6 +81,13 @@ def is_nhl(record: dict[str, Any]) -> bool:
     )
 
 
+def is_basketball(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("primaryCategory") or "") == "Athlete"
+        and str(record.get("leagueOrMedium") or "").strip().upper() in {"NBA", "WNBA"}
+    )
+
+
 def is_curated_non_athlete(record: dict[str, Any]) -> bool:
     category = str(record.get("primaryCategory") or "")
     return (
@@ -214,12 +221,11 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     # silently flatten that result here. Because marketScore is a normalized
     # 0–100 context score rather than the live market price itself, compress the
     # event contribution logarithmically instead of imposing a hard ceiling.
-    # NHL verified game moves already live in the durable market-price ledger.
-    # Reusing the previous game's move inside fair value compounds the same event
-    # again on every rebuild (the corruption that pushed fringe players hundreds
-    # of dollars above their own fair value). Other categories retain their
-    # existing behavior.
-    event_pct = 0.0 if is_nhl(record) else num(record.get("lastGameMovePct", 0))
+    # NHL and basketball verified game moves already live in the durable
+    # market-price ledger. Reusing the previous game's move inside fair value
+    # compounds the same event again on rebuilds. Keep event outcomes in the
+    # observable market ledger while fundamentals remain evidence-driven.
+    event_pct = 0.0 if (is_nhl(record) or is_basketball(record)) else num(record.get("lastGameMovePct", 0))
     event_signal = math.copysign(math.log1p(abs(event_pct)) * 2.5, event_pct) if event_pct else 0.0
     current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_signal
     score = audience * .38 + talent * .37 + clamp(current_signal) * .25

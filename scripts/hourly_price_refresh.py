@@ -157,8 +157,12 @@ def nhl_regularized_production_delta(
     return math.log(numerator / denominator) * 100.0
 
 
-def prior_processed_events(manifest: dict[str, Any], now: datetime) -> dict[str, dict[str, Any]]:
-    if manifest.get("version") != HOURLY_MODEL_VERSION:
+def prior_processed_events(
+    manifest: dict[str, Any],
+    now: datetime,
+    expected_version: str = HOURLY_MODEL_VERSION,
+) -> dict[str, dict[str, Any]]:
+    if manifest.get("version") != expected_version:
         return {}
     cutoff = now - timedelta(days=PROCESSED_EVENT_RETENTION_DAYS)
     output: dict[str, dict[str, Any]] = {}
@@ -193,8 +197,11 @@ def retain_recent_processed_player_events(
     }
 
 
-def prior_processed_player_events(manifest: dict[str, Any]) -> set[str]:
-    if manifest.get("version") != HOURLY_MODEL_VERSION:
+def prior_processed_player_events(
+    manifest: dict[str, Any],
+    expected_version: str = HOURLY_MODEL_VERSION,
+) -> set[str]:
+    if manifest.get("version") != expected_version:
         return set()
     items = manifest.get("processedPlayerEvents") if isinstance(manifest.get("processedPlayerEvents"), list) else []
     return {
@@ -454,7 +461,14 @@ def discover_recent_events(
                 events.append(info)
                 summary_jobs.append((sport, league, event_id, info))
 
+    include_nhl = any(
+        str(record.get("leagueOrMedium") or "").strip().upper() == "NHL"
+        and str(record.get("sourceNamespace") or "").strip().lower() == "nhl"
+        for record in records
+    )
     for date in dates:
+        if not include_nhl:
+            break
         url = NHL_SCORE.format(date=date)
         try:
             payload = fetch_json(url, timeout)
@@ -1004,6 +1018,11 @@ def main() -> int:
         default=HOURLY_MANIFEST,
         help="Event dedupe/state manifest path. Isolated league refreshes should use their own manifest.",
     )
+    parser.add_argument(
+        "--state-version",
+        default="",
+        help="Stable event-ledger version for the selected league. This decouples game dedupe from unrelated model-version changes.",
+    )
     args = parser.parse_args()
 
     if not CATALOG.exists():
@@ -1025,11 +1044,12 @@ def main() -> int:
         if not discovery_records:
             raise SystemExit(f"No records found for --league-only {league_filter}")
 
+    state_version = str(args.state_version or HOURLY_MODEL_VERSION).strip() or HOURLY_MODEL_VERSION
     prior_manifest = safe_json(args.state_manifest, {})
     if not isinstance(prior_manifest, dict):
         prior_manifest = {}
-    processed_history = prior_processed_events(prior_manifest, now)
-    processed_player_history = prior_processed_player_events(prior_manifest)
+    processed_history = prior_processed_events(prior_manifest, now, state_version)
+    processed_player_history = prior_processed_player_events(prior_manifest, state_version)
     participant_ids, athlete_events, events, discovery_warnings = discover_recent_events(
         discovery_records,
         now=now,
@@ -1251,7 +1271,7 @@ def main() -> int:
     CATALOG_MANIFEST.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
     hourly_manifest = {
-        "version": HOURLY_MODEL_VERSION,
+        "version": state_version,
         "generatedAt": refreshed_at,
         "weeklyBaselineRunId": str(args.baseline_run_id or ""),
         "elapsedSeconds": round(time.time() - started, 1),
