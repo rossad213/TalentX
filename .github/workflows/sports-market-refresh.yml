@@ -234,6 +234,8 @@ jobs:
           tests/test_soccer_baseline_identity_reconciliation.py
           tests/test_same_category_identity_dedupe.py
           tests/test_category_market_store.py -v
+      - name: Run NFL chart replay regression
+        run: node tests/test_nfl_chart_history.js
       - name: Sync factual NFL draft metadata
         run: python scripts/sync_nfl_draft_metadata.py --catalog data/current_catalog.json
       - name: Sync verified NFL injury context
