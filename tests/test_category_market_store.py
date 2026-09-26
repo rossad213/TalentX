@@ -157,6 +157,41 @@ class CategoryMarketStoreTests(unittest.TestCase):
         )
         self.assertEqual(merged[0]["wnbaMarketMigrationTargetPrice"], 98.0)
 
+    def test_market_mode_preserves_mlb_migration_marker(self):
+        base = [{
+            "id": "m1",
+            "name": "MLB One",
+            "primaryCategory": "Athlete",
+            "discipline": "Baseball",
+            "leagueOrMedium": "MLB",
+            "marketPrice": 139.0,
+            "fundamentalValue": 205.0,
+        }]
+        overlay = [{
+            "id": "m1",
+            "name": "MLB One",
+            "primaryCategory": "Athlete",
+            "discipline": "Baseball",
+            "leagueOrMedium": "MLB",
+            "marketPrice": 205.0,
+            "mlbMarketRepairVersion": "2.0-mlb-current-fundamental-market-epoch",
+            "mlbMarketRepairedAt": "2026-09-26T18:00:00Z",
+            "mlbMarketMigrationTargetPrice": 205.0,
+            "mlbGamePricingStatus": "protected-clean-fundamental-anchor-no-live-game-repricing",
+        }]
+        merged, touched = merge_category(base, overlay, "sports", "market")
+        self.assertEqual(touched, 1)
+        self.assertEqual(merged[0]["marketPrice"], 205.0)
+        self.assertEqual(
+            merged[0]["mlbMarketRepairVersion"],
+            "2.0-mlb-current-fundamental-market-epoch",
+        )
+        self.assertEqual(merged[0]["mlbMarketMigrationTargetPrice"], 205.0)
+        self.assertEqual(
+            merged[0]["mlbGamePricingStatus"],
+            "protected-clean-fundamental-anchor-no-live-game-repricing",
+        )
+
     def test_market_mode_preserves_soccer_migration_marker(self):
         base = [{
             "id": "s1",
