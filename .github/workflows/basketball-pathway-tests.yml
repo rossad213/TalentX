@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "scripts/hourly_price_refresh.py"
+      - "scripts/basketball_event_refresh.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/migrate_wnba_market_state.py"
       - "scripts/category_market_store.py"
@@ -16,6 +17,7 @@ on:
     branches: [main]
     paths:
       - "scripts/hourly_price_refresh.py"
+      - "scripts/basketball_event_refresh.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/migrate_wnba_market_state.py"
       - "scripts/category_market_store.py"
