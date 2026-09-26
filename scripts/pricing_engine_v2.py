@@ -22,7 +22,7 @@ from soccer_metric_calibration import (
     is_soccer,
 )
 
-MODEL_VERSION = "5.6-nfl-established-evidence-window"
+MODEL_VERSION = "5.7-nfl-recency-availability-position-value"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -86,6 +86,53 @@ def is_basketball(record: dict[str, Any]) -> bool:
         str(record.get("primaryCategory") or "") == "Athlete"
         and str(record.get("leagueOrMedium") or "").strip().upper() in {"NBA", "WNBA"}
     )
+
+
+NFL_POSITION_MARKET_VALUE = {
+    "quarterback": 100.0,
+    "edge": 88.0,
+    "defensive end": 86.0,
+    "wide receiver": 84.0,
+    "receiver": 84.0,
+    "offensive tackle": 82.0,
+    "cornerback": 80.0,
+    "defensive tackle": 74.0,
+    "linebacker": 72.0,
+    "tight end": 70.0,
+    "running back": 68.0,
+    "safety": 66.0,
+    "guard": 62.0,
+    "center": 62.0,
+    "kicker": 42.0,
+    "punter": 38.0,
+    "long snapper": 32.0,
+}
+
+
+def nfl_position_market_value(record: dict[str, Any]) -> float:
+    """Modest economic/scarcity context; never a replacement for production."""
+    role = str(record.get("role") or "").lower()
+    for token, value in NFL_POSITION_MARKET_VALUE.items():
+        if token in role:
+            return value
+    return 72.0
+
+
+def nfl_injury_situation_ceiling(record: dict[str, Any]) -> float | None:
+    if not bool(record.get("nflInjuryActive")):
+        return None
+    text = f"{record.get('nflInjuryStatus') or ''} {record.get('nflInjuryType') or ''}".lower()
+    if any(token in text for token in ("physically unable", "pup", "injured reserve", "reserve/injured", "out", "inactive")):
+        return 24.0
+    if "doubtful" in text:
+        return 34.0
+    if "questionable" in text:
+        return 44.0
+    if any(token in text for token in ("limited", "day-to-day", "day to day")):
+        return 50.0
+    if "probable" in text:
+        return 55.0
+    return 42.0
 
 
 def is_curated_non_athlete(record: dict[str, Any]) -> bool:
@@ -204,13 +251,14 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     metrics = pricing_metrics(record)
 
     if is_nfl(record):
-        # NFL market context is intentionally independent of Talent and verified
-        # game moves. Talent is already valued directly, while game results move
-        # the durable market-price ledger after fair value is established.
+        # NFL market context stays independent of Talent and verified game moves.
+        # A modest position-value component reflects scarcity/economic leverage
+        # (especially elite quarterbacks) without overpowering production.
         audience = clamp(metrics.get("audience", record.get("audienceScore", 50)))
         attention = clamp(metrics.get("attention", record.get("nflAttentionScore", 50)))
         liquidity = clamp(record.get("nflLiquidityScore", record.get("tradeDemandScore", 50)))
-        score = audience * .50 + attention * .30 + liquidity * .20
+        position_value = nfl_position_market_value(record)
+        score = audience * .42 + attention * .28 + liquidity * .15 + position_value * .15
         return round(clamp(score), 2)
 
     audience = clamp(metrics.get("audience", record.get("audienceScore", talent)))
@@ -248,6 +296,10 @@ def situation_score(record: dict[str, Any]) -> float:
             score -= 6
         if "injured" in status or "suspended" in status:
             score -= 10
+        if is_nfl(record):
+            injury_ceiling = nfl_injury_situation_ceiling(record)
+            if injury_ceiling is not None:
+                score = min(score, injury_ceiling)
     else:
         if role_status in {"lead", "headliner", "featured"}:
             score += 5
