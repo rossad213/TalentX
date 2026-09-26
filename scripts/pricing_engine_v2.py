@@ -22,7 +22,7 @@ from soccer_metric_calibration import (
     is_soccer,
 )
 
-MODEL_VERSION = "5.7-nfl-recency-availability-position-value"
+MODEL_VERSION = "5.8-tennis-verified-match-confidence"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -86,6 +86,34 @@ def is_basketball(record: dict[str, Any]) -> bool:
         str(record.get("primaryCategory") or "") == "Athlete"
         and str(record.get("leagueOrMedium") or "").strip().upper() in {"NBA", "WNBA"}
     )
+
+
+def is_tennis(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("primaryCategory") or "") == "Athlete"
+        and str(record.get("discipline") or "").strip().lower() == "tennis"
+    )
+
+
+def tennis_verified_match_count(record: dict[str, Any]) -> int:
+    """Count unique source-backed Tennis matches already attached to the listing."""
+    keys: set[str] = set()
+    for event in record.get("priceEvents", []) if isinstance(record.get("priceEvents"), list) else []:
+        if not isinstance(event, dict) or event.get("verified") is False:
+            continue
+        if str(event.get("eventType") or "").strip().lower() != "game":
+            continue
+        tennis_event = (
+            str(event.get("sport") or "").strip().lower() == "tennis"
+            or str(event.get("tour") or "").strip().upper() in {"ATP", "WTA"}
+            or str(event.get("eventKey") or "").startswith("espn-tennis:")
+        )
+        if not tennis_event:
+            continue
+        key = str(event.get("eventKey") or event.get("eventId") or "").strip()
+        if key:
+            keys.add(key)
+    return len(keys)
 
 
 NFL_POSITION_MARKET_VALUE = {
@@ -166,6 +194,28 @@ def is_generic_wikidata_discovery(record: dict[str, Any]) -> bool:
 
 
 def evidence_confidence(record: dict[str, Any]) -> float:
+    if is_tennis(record):
+        # Tennis listings often lack a team-sport-style professionalGames field,
+        # even when hundreds of verified ATP/WTA matches are attached. Treat the
+        # verified match ledger as the professional sample instead of assigning
+        # an established player near-rookie confidence.
+        matches = tennis_verified_match_count(record)
+        data = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.45)) * 100)
+        metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+        consistency = clamp(metrics.get("consistency", 55))
+        achievements = clamp(metrics.get("achievements", 35))
+        sustained = consistency * .55 + achievements * .45
+
+        if matches > 0:
+            # Roughly 60 verified singles matches represent one robust full
+            # season of evidence; additional matches add certainty with
+            # diminishing returns rather than creating extra talent value.
+            sample = 100.0 * (1.0 - math.exp(-matches / 60.0))
+            confidence = data * .45 + sample * .35 + sustained * .20
+            return round(clamp(confidence, 20, 96), 2)
+        # No verified match ledger yet: fall through to the conservative generic
+        # pathway rather than inventing sample maturity.
+
     # NFL confidence measures certainty in the estimate, not career value.
     # Sample maturity rises quickly and then saturates; achievements and
     # consistency remain valuation inputs instead of being counted again here.
@@ -273,7 +323,7 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     # market-price ledger. Reusing the previous game's move inside fair value
     # compounds the same event again on rebuilds. Keep event outcomes in the
     # observable market ledger while fundamentals remain evidence-driven.
-    event_pct = 0.0 if (is_nhl(record) or is_basketball(record)) else num(record.get("lastGameMovePct", 0))
+    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record)) else num(record.get("lastGameMovePct", 0))
     event_signal = math.copysign(math.log1p(abs(event_pct)) * 2.5, event_pct) if event_pct else 0.0
     current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_signal
     score = audience * .38 + talent * .37 + clamp(current_signal) * .25

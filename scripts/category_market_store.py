@@ -97,6 +97,13 @@ EXTRA_MARKET_FIELDS = (
     "wnbaMarketMigrationPriorLastGameMovePct",
     "wnbaMarketMigrationTargetPrice",
     "wnbaMarketMigrationReason",
+    # Tennis-only verified-match confidence market epoch.
+    "tennisMarketMigrationVersion",
+    "tennisMarketMigratedAt",
+    "tennisMarketMigrationPriorMarketPrice",
+    "tennisMarketMigrationPriorFundamentalValue",
+    "tennisMarketMigrationTargetPrice",
+    "tennisMarketMigrationReason",
 )
 
 TICKER_CATEGORY_CODES = {
