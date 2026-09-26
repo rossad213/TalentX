@@ -22,7 +22,7 @@ from soccer_metric_calibration import (
     is_soccer,
 )
 
-MODEL_VERSION = "5.8-tennis-verified-match-confidence"
+MODEL_VERSION = "5.9-tennis-ranking-confidence-floor"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -96,7 +96,11 @@ def is_tennis(record: dict[str, Any]) -> bool:
 
 
 def tennis_verified_match_count(record: dict[str, Any]) -> int:
-    """Count unique source-backed Tennis matches already attached to the listing."""
+    """Count unique source-backed Tennis matches already attached to the listing.
+
+    Prefer provider competition/event IDs so the same ESPN match exposed on both
+    ATP and WTA scoreboard surfaces is counted once rather than twice.
+    """
     keys: set[str] = set()
     for event in record.get("priceEvents", []) if isinstance(record.get("priceEvents"), list) else []:
         if not isinstance(event, dict) or event.get("verified") is False:
@@ -110,10 +114,29 @@ def tennis_verified_match_count(record: dict[str, Any]) -> int:
         )
         if not tennis_event:
             continue
-        key = str(event.get("eventKey") or event.get("eventId") or "").strip()
+        event_id = str(event.get("eventId") or event.get("competitionId") or "").strip()
+        key = f"event:{event_id}" if event_id else str(event.get("eventKey") or "").strip()
         if key:
             keys.add(key)
     return len(keys)
+
+
+def tennis_ranking_confidence_floor(record: dict[str, Any]) -> float:
+    """Evidence floor from an official current ATP/WTA ranking snapshot."""
+    rank = optional_num(record.get("sourceRank"))
+    if rank is None or rank <= 0:
+        rank = optional_num(record.get("rosterSourceRank"))
+    if rank is None or rank <= 0:
+        return 0.0
+    if rank <= 10:
+        return 82.0
+    if rank <= 25:
+        return 78.0
+    if rank <= 50:
+        return 74.0
+    if rank <= 100:
+        return 70.0
+    return 64.0
 
 
 NFL_POSITION_MARKET_VALUE = {
@@ -206,15 +229,19 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         achievements = clamp(metrics.get("achievements", 35))
         sustained = consistency * .55 + achievements * .45
 
+        rank_floor = tennis_ranking_confidence_floor(record)
         if matches > 0:
-            # Roughly 60 verified singles matches represent one robust full
-            # season of evidence; additional matches add certainty with
-            # diminishing returns rather than creating extra talent value.
+            # Verified match history adds sample maturity. Official ranking
+            # evidence provides a floor because a current ATP/WTA rank itself is
+            # the outcome of a large body of professional match results.
             sample = 100.0 * (1.0 - math.exp(-matches / 60.0))
             confidence = data * .45 + sample * .35 + sustained * .20
+            confidence = max(confidence, rank_floor)
             return round(clamp(confidence, 20, 96), 2)
-        # No verified match ledger yet: fall through to the conservative generic
-        # pathway rather than inventing sample maturity.
+        if rank_floor > 0:
+            return round(clamp(max(data * .45 + sustained * .20, rank_floor), 20, 96), 2)
+        # No verified match ledger or official rank yet: fall through to the
+        # conservative generic pathway rather than inventing sample maturity.
 
     # NFL confidence measures certainty in the estimate, not career value.
     # Sample maturity rises quickly and then saturates; achievements and

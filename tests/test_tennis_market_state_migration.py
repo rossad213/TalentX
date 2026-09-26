@@ -22,6 +22,7 @@ class TennisMarketMigrationTests(unittest.TestCase):
             "primaryCategory": "Athlete",
             "discipline": "Tennis",
             "leagueOrMedium": "ATP",
+            "sourceRank": 2,
             "careerStage": "Established",
             "careerStatus": "Active",
             "careerScore": 86,
@@ -68,7 +69,7 @@ class TennisMarketMigrationTests(unittest.TestCase):
         migrated, changed = migrate_record(original, "2026-09-26T21:00:00Z")
         self.assertTrue(changed)
         self.assertEqual(migrated["tennisMarketMigrationVersion"], MIGRATION_VERSION)
-        self.assertGreater(migrated["confidenceScore"], 75)
+        self.assertGreaterEqual(migrated["confidenceScore"], 82)
         self.assertGreater(migrated["marketPrice"], original["fundamentalValue"] * 1.30)
         self.assertEqual(migrated["marketPrice"], migrated["fundamentalValue"])
         self.assertEqual(migrated["lastGameMovePct"], 0.0)
