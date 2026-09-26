@@ -366,18 +366,18 @@ def _award_year_from_payload(payload: Any) -> int | None:
                 return int(parsed)
         ref = season.get("$ref")
         if isinstance(ref, str):
-            match = re.search(r"/seasons/(\\d{4})(?:/|\\?|$)", ref)
+            match = re.search(r"/seasons/(\d{4})(?:/|\?|$)", ref)
             if match:
                 return int(match.group(1))
     for key in ("date", "startDate", "endDate", "awardedAt", "createdAt"):
         value = payload.get(key)
         if isinstance(value, str):
-            match = re.search(r"\\b(19|20)\\d{2}\\b", value)
+            match = re.search(r"\b(19|20)\d{2}\b", value)
             if match:
                 return int(match.group(0))
     ref = payload.get("$ref")
     if isinstance(ref, str):
-        match = re.search(r"/seasons/(\\d{4})(?:/|\\?|$)", ref)
+        match = re.search(r"/seasons/(\d{4})(?:/|\?|$)", ref)
         if match:
             return int(match.group(1))
     return None
