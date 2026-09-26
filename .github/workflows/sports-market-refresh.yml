@@ -45,6 +45,7 @@ on:
       - "scripts/explain_event_pricing_only.py"
       - "scripts/append_game_event_history.py"
       - "scripts/append_price_history.py"
+      - "tests/test_append_price_history.py"
       - "scripts/category_market_store.py"
       - "data/nfl_draft_metadata_overrides.json"
       - "tests/test_hourly_price_refresh.py"
@@ -216,6 +217,7 @@ jobs:
           tests/test_nfl_injury_sync.py
           tests/test_nfl_established_evidence.py
           tests/test_nfl_verified_history_backfill.py
+          tests/test_append_price_history.py
           tests/test_results_event_pricing.py
           tests/test_uncapped_sports_refresh.py
           tests/test_specialized_uncapped_results.py
