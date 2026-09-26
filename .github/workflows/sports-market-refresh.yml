@@ -83,6 +83,7 @@ on:
       - "tests/test_soccer_baseline_identity_reconciliation.py"
       - "tests/test_same_category_identity_dedupe.py"
       - "tests/test_category_market_store.py"
+      - "tests/test_mlb_market_repair.py"
       - ".github/workflows/sports-market-refresh.yml"
   schedule:
     - cron: "23 * * * *"
@@ -243,7 +244,8 @@ jobs:
           tests/test_soccer_global_market_state_migration.py
           tests/test_soccer_baseline_identity_reconciliation.py
           tests/test_same_category_identity_dedupe.py
-          tests/test_category_market_store.py -v
+          tests/test_category_market_store.py
+          tests/test_mlb_market_repair.py -v
       - name: Run NFL chart replay regression
         run: node tests/test_nfl_chart_history.js
       - name: Sync factual NFL draft metadata
@@ -354,7 +356,7 @@ jobs:
         run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
       - name: Append dated Sports history
         run: python scripts/append_price_history.py --catalog data/current_catalog.json
-      - name: Finalize safe MLB prices and chart history
+      - name: Migrate and protect MLB market epoch
         run: python scripts/repair_mlb_market_prices.py --catalog data/current_catalog.json
       - name: Save Sports category database
         run: cp data/current_catalog.json data/market/sports.json
