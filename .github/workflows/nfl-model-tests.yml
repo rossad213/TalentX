@@ -11,6 +11,7 @@ on:
       - "scripts/repair_nfl_production_prices.py"
       - "scripts/repair_nfl_production_prices_safe.py"
       - "scripts/migrate_nfl_v2_market_state.py"
+      - "scripts/backfill_nfl_verified_event_history.py"
       - "scripts/nfl_metric_calibration.py"
       - "scripts/sync_nfl_injuries.py"
       - "scripts/pricing_engine_v2.py"
@@ -25,6 +26,7 @@ on:
       - "tests/test_nfl_metric_calibration.py"
       - "tests/test_nfl_injury_sync.py"
       - "tests/test_nfl_established_evidence.py"
+      - "tests/test_nfl_verified_history_backfill.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - ".github/workflows/sports-market-refresh.yml"
@@ -60,5 +62,6 @@ jobs:
           tests/test_nfl_metric_calibration.py
           tests/test_nfl_injury_sync.py
           tests/test_nfl_established_evidence.py
+          tests/test_nfl_verified_history_backfill.py
           tests/test_hourly_price_refresh.py
           tests/test_pricing_engine_v2.py -v
