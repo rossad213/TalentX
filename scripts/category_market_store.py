@@ -62,6 +62,20 @@ EXTRA_MARKET_FIELDS = (
     "nflMarketMigrationPriorLastGameMovePct",
     "nflMarketMigrationTargetPrice",
     "nflMarketMigrationReason",
+    # NFL verified historical event replay metadata. The event/history arrays
+    # themselves live in MARKET_STATE_FIELDS; these markers keep the expensive
+    # point-in-time backfill idempotent across future baseline rebuilds.
+    "nflHistoricalBackfillVersion",
+    "nflHistoricalBackfilledAt",
+    "nflHistoricalBackfillDays",
+    "nflHistoricalBackfillEventCount",
+    "nflHistoricalBackfillChartPointCount",
+    "nflHistoricalBackfillAnchor",
+    "nflHistoricalBackfillModel",
+    "nflHistoricalBackfillFirstEventAt",
+    "nflHistoricalBackfillLastEventAt",
+    "nflHistoricalBackfillCheckedAt",
+    "nflHistoricalBackfillWarning",
     # Soccer-only global competition calibration market epoch.
     "soccerMarketMigrationVersion",
     "soccerMarketMigratedAt",
