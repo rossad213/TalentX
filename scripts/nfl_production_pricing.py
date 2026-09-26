@@ -21,7 +21,7 @@ import math
 from datetime import datetime, timezone
 from typing import Any
 
-MODEL_VERSION = "3.2-nfl-established-window-two-year-ipo"
+MODEL_VERSION = "3.3-nfl-recency-availability-position-value"
 
 PRICE_FLOOR = 4.0
 PRICE_SCALE = 310.0
@@ -40,10 +40,11 @@ NFL_PRODUCTION_WEIGHTS = {
 }
 
 NFL_VALUE_WEIGHTS = {
-    "production": 0.70,
+    "production": 0.65,
     "achievements": 0.15,
     "careerRunway": 0.10,
     "availability": 0.05,
+    "positionValue": 0.05,
 }
 
 NFL_FALLBACK_WEIGHTS = {
@@ -292,10 +293,16 @@ def production_score(record: dict[str, Any]) -> float | None:
 
 
 def achievement_score(record: dict[str, Any]) -> float:
+    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+    calibrated = _number(metrics.get("achievements"))
+    # Once the NFL semantic calibrator has run, its recency-aware honor score is
+    # authoritative. Falling back to raw award percentile here would undo the
+    # recency correction and recreate old-achievement inflation.
+    if calibrated is not None and str(record.get("nflMetricCalibrationVersion") or ""):
+        return round(_clamp(calibrated), 2)
     percentiles = _percentiles(record)
     if "awardPoints" in percentiles:
         return round(_clamp(percentiles["awardPoints"]), 2)
-    metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
     return round(_clamp(metrics.get("achievements", 35.0)), 2)
 
 
@@ -341,14 +348,33 @@ def career_runway_score(record: dict[str, Any]) -> float:
 def availability_score(record: dict[str, Any]) -> float:
     metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
     explicit = _number(metrics.get("availability"))
-    if explicit is not None:
-        return round(_clamp(explicit), 2)
+    base = _clamp(explicit if explicit is not None else (75.0 if str(record.get("careerStatus") or "").lower() in {"", "active"} else 60.0))
     status = str(record.get("careerStatus") or "").lower()
     if "injured" in status:
-        return 45.0
+        base = min(base, 45.0)
     if "suspended" in status:
-        return 40.0
-    return 75.0 if status in {"", "active"} else 60.0
+        base = min(base, 40.0)
+
+    if bool(record.get("nflInjuryActive")):
+        injury = f"{record.get('nflInjuryStatus') or ''} {record.get('nflInjuryType') or ''}".lower()
+        if any(token in injury for token in ("physically unable", "pup", "injured reserve", "reserve/injured", "out", "inactive")):
+            base = min(base, 25.0)
+        elif "doubtful" in injury:
+            base = min(base, 40.0)
+        elif "questionable" in injury:
+            base = min(base, 58.0)
+        elif any(token in injury for token in ("limited", "day-to-day", "day to day")):
+            base = min(base, 65.0)
+        elif "probable" in injury:
+            base = min(base, 70.0)
+        else:
+            base = min(base, 55.0)
+    return round(_clamp(base), 2)
+
+
+def position_value_score(record: dict[str, Any]) -> float:
+    """Small NFL economic/scarcity input; production still owns 65% of value."""
+    return round(_clamp(_rookie_position_value(record)), 2)
 
 
 def price_from_score(score: float) -> float:
@@ -508,12 +534,14 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
     achievements = achievement_score(record)
     runway = career_runway_score(record)
     availability = availability_score(record)
+    position_value = position_value_score(record)
 
     inputs = {
         "production": production,
         "achievements": achievements,
         "careerRunway": runway,
         "availability": availability,
+        "positionValue": position_value,
     }
     score = sum(inputs[key] * weight for key, weight in NFL_VALUE_WEIGHTS.items())
     score = _clamp(score)
@@ -539,7 +567,7 @@ def production_fair_value(record: dict[str, Any]) -> tuple[float | None, float |
         "fairValue": round(fair, 2),
         "pricingPrinciple": (
             "position-normalized production-led NFL value; early-season fundamentals are sample-stabilized; "
-            "modest achievement, career-runway, and availability context; no fame or starter premium; "
+            "modest achievement, career-runway, availability, and position-scarcity context; no fame or starter premium; "
             "Rookie IPO fades with verified meaningful professional role evidence and time since draft"
         ),
         "modelVersion": MODEL_VERSION,
