@@ -152,9 +152,19 @@ class PricingEngineV2Tests(unittest.TestCase):
             pricingConfidence=.64,dataConfidence=.64,sourceRank=2,priceEvents=[],
             activeMetrics={"performance":90,"achievements":88,"consistency":86,"potential":92,"availability":88,"audience":90})
         unranked={**ranked,"sourceRank":None}
-        self.assertGreaterEqual(evidence_confidence(ranked),82)
-        self.assertGreater(evidence_confidence(ranked),evidence_confidence(unranked)+25)
-        self.assertGreater(apply_v2(ranked)["fairValue"],apply_v2(unranked)["fairValue"]*1.25)
+        self.assertGreaterEqual(evidence_confidence(ranked),90)
+        self.assertGreater(evidence_confidence(ranked),evidence_confidence(unranked)+30)
+        self.assertGreater(apply_v2(ranked)["fairValue"],apply_v2(unranked)["fairValue"]*1.30)
+
+    def test_tennis_rank_floors_scale_smoothly_across_top_100(self):
+        common=self.record(
+            discipline='Tennis',leagueOrMedium='WTA',professionalGames=0,yearsActive=None,
+            pricingConfidence=.64,dataConfidence=.64,priceEvents=[],
+            activeMetrics={"performance":84,"achievements":80,"consistency":82,"potential":82,"availability":88,"audience":82})
+        expected={1:90,20:86,40:82,80:78,150:72}
+        for rank,floor in expected.items():
+            with self.subTest(rank=rank):
+                self.assertGreaterEqual(evidence_confidence({**common,"sourceRank":rank}),floor)
 
     def test_tennis_match_count_dedupes_same_provider_competition_across_tours(self):
         from pricing_engine_v2 import tennis_verified_match_count

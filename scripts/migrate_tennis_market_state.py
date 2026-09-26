@@ -18,8 +18,8 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 
-MIGRATION_VERSION = "1.1-tennis-ranking-confidence-floor"
-MIGRATION_EVENT_ID = "model:tennis-ranking-confidence-v2"
+MIGRATION_VERSION = "1.2-tennis-mature-ranking-scale"
+MIGRATION_EVENT_ID = "model:tennis-mature-ranking-scale-v3"
 
 _V2_FIELDS = (
     "talentScore",
@@ -62,12 +62,12 @@ def migration_point(history: list[dict[str, Any]], price: float, stamp: str) -> 
         {
             "time": stamp,
             "eventId": MIGRATION_EVENT_ID,
-            "label": "Tennis ranking + verified-match confidence market rebase",
+            "label": "Tennis mature-ranking market-scale rebase",
             "phase": "close",
             "price": round(price, 2),
             "historyType": "verified",
             "eventType": "model_migration",
-            "priceBasis": "one-time Tennis market-scale correction from official ranking and verified match evidence",
+            "priceBasis": "one-time Tennis market-scale correction from mature ATP/WTA ranking evidence and verified matches",
         },
     ]
 
@@ -116,7 +116,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     )
     result["tennisMarketMigrationTargetPrice"] = target
     result["tennisMarketMigrationReason"] = (
-        "Rebase Tennis after adding official ATP/WTA ranking evidence to verified match confidence"
+        "Rebase Tennis after calibrating official ATP/WTA rankings to mature cross-sport evidence confidence"
     )
     return result, True
 
