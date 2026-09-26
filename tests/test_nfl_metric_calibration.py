@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -110,6 +111,57 @@ class NflMetricCalibrationTests(unittest.TestCase):
         decorated_metrics, _ = calibrated_metrics(decorated, decorated["activeMetrics"])
         accumulator_metrics, _ = calibrated_metrics(accumulator, accumulator["activeMetrics"])
         self.assertGreater(decorated_metrics["achievements"], accumulator_metrics["achievements"])
+
+    def test_recent_major_award_outweighs_same_old_award(self):
+        year = datetime.now(timezone.utc).year
+        recent = self.record(
+            pricingEvidenceSummary={
+                "percentiles": {
+                    "recentProduction": 0.90,
+                    "careerProduction": 0.90,
+                    "efficiency": 0.90,
+                    "awardPoints": 0.95,
+                },
+                "rawSignals": {"awardPoints": 16.0},
+                "awardNames": ["NFL Defensive Player of the Year"],
+                "awardDetails": [{"name": "NFL Defensive Player of the Year", "year": year - 1}],
+            },
+        )
+        old = self.record(
+            pricingEvidenceSummary={
+                "percentiles": {
+                    "recentProduction": 0.90,
+                    "careerProduction": 0.90,
+                    "efficiency": 0.90,
+                    "awardPoints": 0.95,
+                },
+                "rawSignals": {"awardPoints": 16.0},
+                "awardNames": ["NFL Defensive Player of the Year"],
+                "awardDetails": [{"name": "NFL Defensive Player of the Year", "year": year - 5}],
+            },
+        )
+        recent_metrics, recent_detail = calibrated_metrics(recent, recent["activeMetrics"])
+        old_metrics, _ = calibrated_metrics(old, old["activeMetrics"])
+        self.assertGreater(recent_metrics["achievements"], old_metrics["achievements"])
+        self.assertGreater(
+            recent_detail["achievements"]["honorRecency"]["recencyScore"],
+            0,
+        )
+
+    def test_active_pup_status_reduces_availability_without_reducing_performance(self):
+        healthy = self.record()
+        injured = self.record(
+            nflInjuryActive=True,
+            nflInjuryStatus="Physically Unable to Perform",
+            nflInjuryType="Knee",
+            nflInjuryVerifiedAt="2026-09-26T06:00:00Z",
+        )
+        healthy_metrics, _ = calibrated_metrics(healthy, healthy["activeMetrics"])
+        injured_metrics, detail = calibrated_metrics(injured, injured["activeMetrics"])
+        self.assertEqual(injured_metrics["performance"], healthy_metrics["performance"])
+        self.assertLess(injured_metrics["availability"], healthy_metrics["availability"])
+        self.assertEqual(injured_metrics["availability"], 25.0)
+        self.assertTrue(detail["availability"]["activeInjury"])
 
     def test_audience_does_not_reuse_prior_audience_or_performance(self):
         high_old = self.record(activeMetrics={
