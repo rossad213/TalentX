@@ -20,7 +20,8 @@ from hourly_price_refresh import (  # noqa: E402
     nhl_price_eligible_game,
     nhl_regularized_production_delta,
     prior_processed_events,
-    retain_recent_processed_player_events,\n    reset_display_changes,
+    retain_recent_processed_player_events,
+    reset_display_changes,
 )
 from merge_hourly_market_state import merge_market_state  # noqa: E402
 
