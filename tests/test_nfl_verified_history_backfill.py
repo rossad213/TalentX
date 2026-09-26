@@ -15,6 +15,7 @@ from backfill_nfl_verified_event_history import (
     replay_history_points,
     needs_backfill,
 )
+from scripts.validate_verified_event_history import preserve_point_in_time_nfl_chain
 
 
 class NFLVerifiedHistoryBackfillTests(unittest.TestCase):
@@ -200,6 +201,27 @@ class NFLVerifiedHistoryBackfillTests(unittest.TestCase):
             for point in updated["priceHistory"]
         ))
 
+    def test_validator_preserves_specialized_nfl_chart_prices(self):
+        events = [{
+            "eventKey": "espn:g1",
+            "eventId": "g1",
+            "startedAt": "2025-09-01T17:00:00Z",
+            "priceBefore": 100.0,
+            "priceAfter": 102.0,
+            "movePct": 99.0,
+            "modelMovePct": 2.0,
+            "verified": True,
+            "historicalBackfill": True,
+            "historicalExpectationMode": "point-in-time-pre-game",
+            "priceBasis": "modeled historical replay; verified game/box score; no look-ahead",
+        }]
+        preserved = preserve_point_in_time_nfl_chain(events)
+        self.assertEqual(preserved[0]["priceBefore"], 100.0)
+        self.assertEqual(preserved[0]["priceAfter"], 102.0)
+        self.assertEqual(preserved[0]["movePct"], 2.0)
+        self.assertEqual(preserved[0]["chartMovePct"], 2.0)
+        self.assertTrue(preserved[0]["chartCorrelationVerified"])
+
     def test_non_nfl_and_completed_version_are_not_selected(self):
         self.assertFalse(needs_backfill({
             "primaryCategory": "Athlete",
@@ -207,8 +229,13 @@ class NFLVerifiedHistoryBackfillTests(unittest.TestCase):
             "sourceNamespace": "espn",
             "sourceRecordId": "1",
         }))
-        self.assertFalse(needs_backfill(self.record(nflHistoricalBackfillVersion=BACKFILL_VERSION)))
-        self.assertTrue(needs_backfill(self.record()))
+        complete = self.record(
+            nflHistoricalBackfillVersion=BACKFILL_VERSION,
+            nflHistoricalBackfillDays=400,
+        )
+        self.assertFalse(needs_backfill(complete, requested_days=400))
+        self.assertTrue(needs_backfill(complete, requested_days=1095))
+        self.assertTrue(needs_backfill(self.record(), requested_days=400))
 
 
 if __name__ == "__main__":

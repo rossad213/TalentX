@@ -140,6 +140,43 @@ def is_source_backed_historical(record: dict[str, Any], event: dict[str, Any], n
     return True, "source-backed-exact-date"
 
 
+def is_point_in_time_nfl_replay(record: dict[str, Any], events: list[dict[str, Any]]) -> bool:
+    if str(record.get("leagueOrMedium") or "").strip().upper() != "NFL":
+        return False
+    return any(
+        event.get("historicalBackfill") is True
+        and str(event.get("historicalExpectationMode") or "") == "point-in-time-pre-game"
+        for event in events
+        if isinstance(event, dict)
+    )
+
+
+def preserve_point_in_time_nfl_chain(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate chart percentages without rebasing an already anchored NFL replay."""
+    output: list[dict[str, Any]] = []
+    for event in events:
+        result = dict(event)
+        if (
+            result.get("historicalBackfill") is True
+            and str(result.get("historicalExpectationMode") or "") == "point-in-time-pre-game"
+        ):
+            before = number(result.get("priceBefore"), 0.0)
+            after = number(result.get("priceAfter"), 0.0)
+            if before <= 0 or after <= 0:
+                continue
+            move = round((after / before - 1.0) * 100.0, 3)
+            result["movePct"] = move
+            result["chartMovePct"] = move
+            result["chartCorrelationVerified"] = True
+            result["eventEvidenceStatus"] = "source-backed"
+            result["priceBasis"] = result.get("priceBasis") or (
+                "modeled historical replay; verified game/box score; no look-ahead"
+            )
+        output.append(result)
+    output.sort(key=lambda item: event_time(item))
+    return output[-MAX_EVENTS:]
+
+
 def reconstruct_chain(current_price: float, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     after = max(0.01, current_price)
     rebuilt: list[dict[str, Any]] = []
@@ -238,18 +275,30 @@ def main() -> int:
                 event["sourceUrl"] = source_url_for(result, event)
                 event["eventEvidenceStatus"] = "source-backed"
                 event["dateEvidenceStatus"] = "exact-source-date"
-                event["priceBasis"] = "talentx-simulated-event-backfill"
+                if str(event.get("historicalExpectationMode") or "") != "point-in-time-pre-game":
+                    event["priceBasis"] = "talentx-simulated-event-backfill"
                 retained_historical += 1
             kept.append(event)
 
         kept.sort(key=lambda item: event_time(item))
         if args.rewrite:
-            rebuilt = reconstruct_chain(max(0.01, number(result.get("marketPrice"), 0.01)), kept)
+            if is_point_in_time_nfl_replay(result, kept):
+                rebuilt = preserve_point_in_time_nfl_chain(kept)
+                result["priceHistoryStatus"] = "source-backed-point-in-time-nfl-replay"
+                result["priceHistoryDisclosure"] = (
+                    "NFL event facts and dates are source-backed; historical TalentX prices are "
+                    "modeled point-in-time responses anchored to recorded market history without look-ahead."
+                )
+            else:
+                rebuilt = reconstruct_chain(max(0.01, number(result.get("marketPrice"), 0.01)), kept)
+                if any(event.get("historicalBackfill") is True for event in rebuilt):
+                    result["priceHistoryStatus"] = "source-backed-exact-date-backfill"
+                    result["priceHistoryDisclosure"] = (
+                        "Historical event facts and dates are source-backed; historical TalentX prices "
+                        "are simulated model responses reconstructed from the current price."
+                    )
             result["priceEvents"] = rebuilt
             result["priceHistory"] = history_from_events(rebuilt)
-            if any(event.get("historicalBackfill") is True for event in rebuilt):
-                result["priceHistoryStatus"] = "source-backed-exact-date-backfill"
-                result["priceHistoryDisclosure"] = "Historical event facts and dates are source-backed; historical TalentX prices are simulated model responses reconstructed from the current price."
 
         cat = str(result.get("primaryCategory") or "Unknown")
         bucket = coverage.setdefault(cat, {"profiles": 0, "with1": 0, "with3": 0, "with5": 0, "with10": 0, "events": 0})

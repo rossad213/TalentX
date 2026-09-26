@@ -96,10 +96,20 @@ def is_nfl_espn(record: dict[str, Any]) -> bool:
     )
 
 
-def needs_backfill(record: dict[str, Any], *, force: bool = False) -> bool:
-    return is_nfl_espn(record) and (
-        force or str(record.get("nflHistoricalBackfillVersion") or "") != BACKFILL_VERSION
-    )
+def needs_backfill(
+    record: dict[str, Any],
+    *,
+    force: bool = False,
+    requested_days: int | None = None,
+) -> bool:
+    if not is_nfl_espn(record):
+        return False
+    if force or str(record.get("nflHistoricalBackfillVersion") or "") != BACKFILL_VERSION:
+        return True
+    if requested_days is None:
+        return False
+    completed_days = int(finite(record.get("nflHistoricalBackfillDays")) or 0)
+    return completed_days < max(1, int(requested_days))
 
 
 def _completed_state(event: dict[str, Any]) -> bool:
@@ -603,7 +613,7 @@ def main() -> int:
     records = load_catalog(args.catalog)
     target_indexes = [
         index for index, record in enumerate(records)
-        if needs_backfill(record, force=args.force)
+        if needs_backfill(record, force=args.force, requested_days=args.days)
     ]
     if not target_indexes:
         print(f"NFL verified history backfill {BACKFILL_VERSION} already complete; no work required.")
