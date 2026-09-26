@@ -76,6 +76,13 @@ EXTRA_MARKET_FIELDS = (
     "nhlMarketMigrationPriorLastGameMovePct",
     "nhlMarketMigrationTargetPrice",
     "nhlMarketMigrationReason",
+    # WNBA-only clean market epoch after isolating basketball event dedupe.
+    "wnbaMarketMigrationVersion",
+    "wnbaMarketMigratedAt",
+    "wnbaMarketMigrationPriorMarketPrice",
+    "wnbaMarketMigrationPriorLastGameMovePct",
+    "wnbaMarketMigrationTargetPrice",
+    "wnbaMarketMigrationReason",
 )
 
 TICKER_CATEGORY_CODES = {
