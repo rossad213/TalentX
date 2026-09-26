@@ -129,6 +129,35 @@ class PricingEngineV2Tests(unittest.TestCase):
             moved={**base,'lastGameMovePct':18.0}
             self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
             self.assertEqual(market_score(base,80),market_score(moved,80))
+    def test_tennis_verified_matches_raise_confidence_without_changing_talent(self):
+        base=self.record(
+            discipline='Tennis',leagueOrMedium='ATP',professionalGames=0,yearsActive=None,
+            pricingConfidence=.64,dataConfidence=.64,
+            activeMetrics={"performance":88,"achievements":84,"consistency":85,"potential":82,"availability":88,"audience":85},
+            priceEvents=[])
+        verified_events=[
+            {"eventKey":f"espn-tennis:atp:{i}","eventType":"game","sport":"tennis","tour":"ATP","verified":True}
+            for i in range(180)
+        ]
+        thin=apply_v2(base)
+        mature=apply_v2({**base,"priceEvents":verified_events})
+        self.assertEqual(thin["talentScore"],mature["talentScore"])
+        self.assertGreater(mature["confidenceScore"],75)
+        self.assertGreater(mature["confidenceScore"],thin["confidenceScore"]+25)
+        self.assertGreater(mature["fairValue"],thin["fairValue"]*1.30)
+
+    def test_tennis_fair_value_does_not_reapply_prior_match_move(self):
+        base=self.record(
+            discipline='Tennis',leagueOrMedium='WTA',professionalGames=0,
+            pricingConfidence=.64,
+            priceEvents=[
+                {"eventKey":"espn-tennis:wta:1","eventType":"game","sport":"tennis","tour":"WTA","verified":True}
+            ],
+            lastGameMovePct=0)
+        moved={**base,'lastGameMovePct':18.0}
+        self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
+        self.assertEqual(market_score(base,80),market_score(moved,80))
+
     def test_verified_situation_change_moves_price_without_changing_talent(self):
         neutral=apply_v2(self.record(situationAdjustmentPct=0))
         favorable=apply_v2(self.record(situationAdjustmentPct=12,roleStatus='starter'))
