@@ -7,10 +7,12 @@ on:
       - "scripts/basketball_event_refresh.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/migrate_wnba_market_state.py"
+      - "scripts/reconcile_basketball_identities.py"
       - "scripts/category_market_store.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_wnba_market_state_migration.py"
+      - "tests/test_basketball_identity_reconciliation.py"
       - ".github/workflows/sports-market-refresh.yml"
       - ".github/workflows/basketball-pathway-tests.yml"
   push:
@@ -20,10 +22,12 @@ on:
       - "scripts/basketball_event_refresh.py"
       - "scripts/pricing_engine_v2.py"
       - "scripts/migrate_wnba_market_state.py"
+      - "scripts/reconcile_basketball_identities.py"
       - "scripts/category_market_store.py"
       - "tests/test_hourly_price_refresh.py"
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_wnba_market_state_migration.py"
+      - "tests/test_basketball_identity_reconciliation.py"
       - ".github/workflows/sports-market-refresh.yml"
       - ".github/workflows/basketball-pathway-tests.yml"
 
@@ -47,4 +51,5 @@ jobs:
           tests/test_pricing_engine_v2.py
           tests/test_hourly_price_refresh.py
           tests/test_wnba_market_state_migration.py
+          tests/test_basketball_identity_reconciliation.py
           -v
