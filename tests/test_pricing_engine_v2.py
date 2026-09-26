@@ -98,6 +98,12 @@ class PricingEngineV2Tests(unittest.TestCase):
         moved={**base,'lastGameMovePct':18.0}
         self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
         self.assertEqual(market_score(base,80),market_score(moved,80))
+    def test_basketball_fair_value_does_not_reapply_prior_game_move(self):
+        for league in ('NBA','WNBA'):
+            base=self.record(leagueOrMedium=league,discipline='Basketball',role='G',lastGameMovePct=0)
+            moved={**base,'lastGameMovePct':18.0}
+            self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
+            self.assertEqual(market_score(base,80),market_score(moved,80))
     def test_verified_situation_change_moves_price_without_changing_talent(self):
         neutral=apply_v2(self.record(situationAdjustmentPct=0))
         favorable=apply_v2(self.record(situationAdjustmentPct=12,roleStatus='starter'))
