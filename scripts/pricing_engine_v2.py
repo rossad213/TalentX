@@ -22,7 +22,7 @@ from soccer_metric_calibration import (
     is_soccer,
 )
 
-MODEL_VERSION = "5.9-tennis-ranking-confidence-floor"
+MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -128,15 +128,20 @@ def tennis_ranking_confidence_floor(record: dict[str, Any]) -> float:
         rank = optional_num(record.get("rosterSourceRank"))
     if rank is None or rank <= 0:
         return 0.0
+    # A current ATP/WTA ranking is itself the result of a rolling body of
+    # professional match evidence. Top-ranked players should therefore receive
+    # mature evidence certainty comparable to established stars in other sports,
+    # rather than being discounted like thin-sample team-sport listings merely
+    # because Tennis has no team-style professionalGames field.
     if rank <= 10:
-        return 82.0
+        return 90.0
     if rank <= 25:
-        return 78.0
+        return 86.0
     if rank <= 50:
-        return 74.0
+        return 82.0
     if rank <= 100:
-        return 70.0
-    return 64.0
+        return 78.0
+    return 72.0
 
 
 NFL_POSITION_MARKET_VALUE = {
