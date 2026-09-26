@@ -84,11 +84,13 @@ def game_event(event: Any) -> bool:
         return False
     event_type = str(event.get("eventType") or "").strip().lower()
     key = event_key(event).lower()
-    provider = str(event.get("provider") or "").strip().lower()
+    non_game_types = {
+        "career", "signing", "trade", "award", "injury", "milestone",
+        "team-change", "model-migration", "market-repair",
+    }
     return (
         event_type == "game"
-        or key.startswith("espn:")
-        or (provider == "espn" and event_type not in {"career", "signing", "trade"})
+        or (key.startswith("espn:") and event_type not in non_game_types)
     )
 
 
