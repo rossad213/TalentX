@@ -20,6 +20,7 @@ from hourly_price_refresh import (  # noqa: E402
     nhl_price_eligible_game,
     nhl_regularized_production_delta,
     prior_processed_events,
+    prior_processed_player_events,
     retain_recent_processed_player_events,
     reset_display_changes,
 )
@@ -205,6 +206,26 @@ class HourlyGamePricingTests(unittest.TestCase):
         self.assertIn(recent_key, retained)
         self.assertNotIn("espn:old", retained)
         self.assertEqual(prior_processed_events({**manifest, "version": "1.3-game-level-event-pricing"}, now), {})
+
+    def test_league_state_version_is_independent_of_global_model_version(self) -> None:
+        now = datetime(2026, 8, 4, 20, tzinfo=timezone.utc)
+        manifest = {
+            "version": "1.0-wnba-event-pricing",
+            "processedEvents": [
+                {"key": "espn:401857111", "startedAt": "2026-08-03T23:00:00Z"},
+            ],
+            "processedPlayerEvents": ["espn:401857111|espn:3149391"],
+        }
+        self.assertIn(
+            "espn:401857111",
+            prior_processed_events(manifest, now, "1.0-wnba-event-pricing"),
+        )
+        self.assertIn(
+            "espn:401857111|espn:3149391",
+            prior_processed_player_events(manifest, "1.0-wnba-event-pricing"),
+        )
+        self.assertEqual(prior_processed_events(manifest, now, HOURLY_MODEL_VERSION), {})
+        self.assertEqual(prior_processed_player_events(manifest, HOURLY_MODEL_VERSION), set())
 
     def test_player_event_marker_is_retained_while_parent_event_is_recent(self) -> None:
         current_event = "espn:401857111"
