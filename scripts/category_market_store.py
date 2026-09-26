@@ -104,6 +104,14 @@ EXTRA_MARKET_FIELDS = (
     "tennisMarketMigrationPriorFundamentalValue",
     "tennisMarketMigrationTargetPrice",
     "tennisMarketMigrationReason",
+    # MLB-only clean market epoch after retiring the legacy v1 market anchor.
+    "mlbMarketRepairVersion",
+    "mlbMarketRepairedAt",
+    "mlbMarketMigrationPriorMarketPrice",
+    "mlbMarketMigrationPriorFundamentalValue",
+    "mlbMarketMigrationTargetPrice",
+    "mlbMarketMigrationReason",
+    "mlbGamePricingStatus",
 )
 
 TICKER_CATEGORY_CODES = {
