@@ -151,6 +151,68 @@ def is_point_in_time_nfl_replay(record: dict[str, Any], events: list[dict[str, A
     )
 
 
+def is_full_nfl_chart_replay(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("leagueOrMedium") or "").strip().upper() == "NFL"
+        and str(record.get("priceHistoryStatus") or "") == "source-backed-full-point-in-time-nfl-replay"
+        and isinstance(record.get("priceHistory"), list)
+        and any(
+            isinstance(point, dict)
+            and (
+                str(point.get("source") or "") == "verified-nfl-event-replay"
+                or str(point.get("historyType") or "") == "verified-event-replay"
+            )
+            for point in record.get("priceHistory") or []
+        )
+    )
+
+
+def preserve_full_nfl_chart_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the complete chart replay while validating each event percentage."""
+    output: list[dict[str, Any]] = []
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    passthrough: list[dict[str, Any]] = []
+    for point in history:
+        if not isinstance(point, dict):
+            continue
+        is_replay = (
+            str(point.get("source") or "") == "verified-nfl-event-replay"
+            or str(point.get("historyType") or "") == "verified-event-replay"
+        )
+        if not is_replay:
+            passthrough.append(dict(point))
+            continue
+        event_id = str(point.get("eventId") or point.get("eventKey") or "")
+        phase = str(point.get("phase") or "").lower()
+        if not event_id or phase not in {"open", "close"}:
+            continue
+        grouped.setdefault(event_id, {})[phase] = dict(point)
+
+    for event_id, pair in grouped.items():
+        open_point = pair.get("open")
+        close_point = pair.get("close")
+        if open_point is None or close_point is None:
+            continue
+        before = number(open_point.get("price"), 0.0)
+        after = number(close_point.get("price"), 0.0)
+        if before <= 0 or after <= 0:
+            continue
+        move = round((after / before - 1.0) * 100.0, 3)
+        for point in (open_point, close_point):
+            point["movePct"] = move
+            point["historyType"] = "verified-event-replay"
+            point["source"] = "verified-nfl-event-replay"
+            point["priceBasis"] = point.get("priceBasis") or (
+                "modeled historical replay anchored to current TalentX market price; "
+                "verified game/box score; point-in-time pre-game expectation; no look-ahead"
+            )
+            output.append(point)
+
+    combined = passthrough + output
+    combined.sort(key=lambda item: str(item.get("time") or ""))
+    return combined[-MAX_HISTORY:]
+
+
 def preserve_point_in_time_nfl_chain(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Validate chart percentages without rebasing an already anchored NFL replay."""
     output: list[dict[str, Any]] = []
@@ -282,13 +344,26 @@ def main() -> int:
 
         kept.sort(key=lambda item: event_time(item))
         if args.rewrite:
-            if is_point_in_time_nfl_replay(result, kept):
+            if is_full_nfl_chart_replay(result):
+                rebuilt = preserve_point_in_time_nfl_chain(kept)
+                result["priceEvents"] = rebuilt
+                result["priceHistory"] = preserve_full_nfl_chart_history(
+                    result.get("priceHistory") if isinstance(result.get("priceHistory"), list) else []
+                )
+                result["priceHistoryStatus"] = "source-backed-full-point-in-time-nfl-replay"
+                result["priceHistoryDisclosure"] = (
+                    "NFL game facts and dates are source-backed. Chart prices are modeled point-in-time "
+                    "responses to verified games, anchored to today's unchanged TalentX market price."
+                )
+            elif is_point_in_time_nfl_replay(result, kept):
                 rebuilt = preserve_point_in_time_nfl_chain(kept)
                 result["priceHistoryStatus"] = "source-backed-point-in-time-nfl-replay"
                 result["priceHistoryDisclosure"] = (
                     "NFL event facts and dates are source-backed; historical TalentX prices are "
                     "modeled point-in-time responses anchored to recorded market history without look-ahead."
                 )
+                result["priceEvents"] = rebuilt
+                result["priceHistory"] = history_from_events(rebuilt)
             else:
                 rebuilt = reconstruct_chain(max(0.01, number(result.get("marketPrice"), 0.01)), kept)
                 if any(event.get("historicalBackfill") is True for event in rebuilt):
@@ -297,8 +372,8 @@ def main() -> int:
                         "Historical event facts and dates are source-backed; historical TalentX prices "
                         "are simulated model responses reconstructed from the current price."
                     )
-            result["priceEvents"] = rebuilt
-            result["priceHistory"] = history_from_events(rebuilt)
+                result["priceEvents"] = rebuilt
+                result["priceHistory"] = history_from_events(rebuilt)
 
         cat = str(result.get("primaryCategory") or "Unknown")
         bucket = coverage.setdefault(cat, {"profiles": 0, "with1": 0, "with3": 0, "with5": 0, "with10": 0, "events": 0})
