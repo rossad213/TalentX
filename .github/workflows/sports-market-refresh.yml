@@ -142,7 +142,6 @@ jobs:
               prior_state="$(find _prior -name sports.json -print -quit)"
               for manifest_name in \
                 hourly_refresh_manifest.json \
-                nfl_event_refresh_manifest.json \
                 nba_event_refresh_manifest.json \
                 wnba_event_refresh_manifest.json \
                 nhl_event_refresh_manifest.json
@@ -233,8 +232,6 @@ jobs:
           --lookback-hours 96
           --max-athletes 1800
           --league-only NFL
-          --state-manifest data/nfl_event_refresh_manifest.json
-          --state-version 1.0-nfl-event-pricing
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
       # The NFL model epoch is reset only after the same-run position cohorts,
       # multi-season rate evidence, awards and rookie-transition fields exist.
@@ -331,7 +328,6 @@ jobs:
           path: |
             data/market/sports.json
             data/hourly_refresh_manifest.json
-            data/nfl_event_refresh_manifest.json
             data/nba_event_refresh_manifest.json
             data/wnba_event_refresh_manifest.json
             data/nhl_event_refresh_manifest.json
