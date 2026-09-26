@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "scripts/nfl_production_pricing.py"
+      - "scripts/nfl_rookie_transition.py"
       - "scripts/nfl_rb_cohort_calibration.py"
       - "scripts/hourly_price_refresh_nfl_opportunity.py"
       - "scripts/repair_nfl_persisted_opportunity_prices.py"
