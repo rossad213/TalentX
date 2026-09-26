@@ -9,6 +9,7 @@ on:
       - "scripts/merge_historical_event_overlay.py"
       - "scripts/category_market_store.py"
       - "scripts/reconcile_nhl_identities.py"
+      - "scripts/reconcile_basketball_identities.py"
       - "scripts/build_client_catalog.py"
   workflow_run:
     workflows:
@@ -292,6 +293,7 @@ jobs:
           # category-owned Sports state is already clean. Reconcile by stable
           # provider player ID after every live/history overlay has been applied.
           python scripts/reconcile_nhl_identities.py --catalog data/current_catalog.json
+          python scripts/reconcile_basketball_identities.py --catalog data/current_catalog.json
 
           # Global identity/display constraints only make sense after all category
           # databases and optional history have been recombined.
@@ -306,7 +308,7 @@ jobs:
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category creators --output data/market/creators.json
       - name: Validate unified market
         run: |
-          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py tests/test_nhl_identity_reconciliation.py tests/test_build_client_catalog.py -v
+          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py tests/test_nhl_identity_reconciliation.py tests/test_basketball_identity_reconciliation.py tests/test_build_client_catalog.py -v
           python scripts/validate_current_catalog.py --minimum 10000
           node --check app.js
           node --check assets/sortable-market-table.js
