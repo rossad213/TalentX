@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - "scripts/hourly_price_refresh.py"
+      - "scripts/basketball_event_refresh.py"
       - "scripts/enrich_current_catalog.py"
       - "scripts/pricing_model.py"
       - "scripts/pricing_engine_v2.py"
@@ -245,7 +246,7 @@ jobs:
           --state-manifest data/wnba_event_refresh_manifest.json
       - name: Refresh verified WNBA completed games
         run: >-
-          python scripts/hourly_price_refresh.py
+          python scripts/basketball_event_refresh.py
           --league-only WNBA
           --state-manifest data/wnba_event_refresh_manifest.json
           --state-version 1.0-wnba-event-pricing
@@ -256,7 +257,7 @@ jobs:
           --baseline-run-id "$WEEKLY_BASELINE_RUN_ID"
       - name: Refresh verified NBA completed games
         run: >-
-          python scripts/hourly_price_refresh.py
+          python scripts/basketball_event_refresh.py
           --league-only NBA
           --state-manifest data/nba_event_refresh_manifest.json
           --state-version 1.0-nba-event-pricing
