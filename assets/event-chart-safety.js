@@ -152,6 +152,15 @@
 
   chartSeries=function(record,range=chartRange){
     if(EVENT_CATEGORIES.has(String(record?.primaryCategory||''))){
+      // Complete NFL point-in-time replay lives in priceHistory by design. Use
+      // that event-aligned series instead of the mutable live priceEvents ledger,
+      // which may contain older pricing-model versions or omit a recovered game.
+      if(
+        String(record?.leagueOrMedium||'').toUpperCase()==='NFL'&&
+        record?.priceHistoryStatus==='source-backed-full-point-in-time-nfl-replay'
+      ){
+        return priorChartSeries(record,range);
+      }
       // While MLB game repricing is intentionally protected, its verified dated
       // priceHistory is the authoritative chart source. Preserved non-game events
       // (draft/signing/team change) must not override that history and make recent
@@ -191,5 +200,5 @@
 
   window.talentxEventCoverage=coverage;
   window.talentxDurablePriceEvents=durableEvents;
-  window.talentxEventChartSafety='durable-events-with-verified-mlb-history-v7';
+  window.talentxEventChartSafety='durable-events-with-nfl-replay-v8';
 })();
