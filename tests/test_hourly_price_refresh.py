@@ -278,7 +278,7 @@ class HourlyGamePricingTests(unittest.TestCase):
             if "summary" in url:
                 return summary
             if "api-web.nhle.com" in url:
-                return {"games": []}
+                raise AssertionError("WNBA-only discovery must not query NHL endpoints")
             raise AssertionError(f"Unexpected URL: {url}")
 
         records = [{**self.aja, "sourceLeagueSlug": "wnba"}]
