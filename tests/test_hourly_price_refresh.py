@@ -20,7 +20,7 @@ from hourly_price_refresh import (  # noqa: E402
     nhl_price_eligible_game,
     nhl_regularized_production_delta,
     prior_processed_events,
-    retain_recent_processed_player_events,
+    retain_recent_processed_player_events,\n    reset_display_changes,
 )
 from merge_hourly_market_state import merge_market_state  # noqa: E402
 
@@ -155,6 +155,18 @@ class HourlyGamePricingTests(unittest.TestCase):
         start = now - timedelta(hours=20)
         self.assertTrue(event_in_window(start, "post", now, cutoff))
         self.assertFalse(event_in_window(start, "in", now, cutoff))
+
+    def test_nhl_only_display_reset_does_not_touch_other_sports(self) -> None:
+        records = [
+            {"id": "nhl", "leagueOrMedium": "NHL", "dailyChange": 4.2, "hourlyChangePct": 4.2},
+            {"id": "nba", "leagueOrMedium": "NBA", "dailyChange": -1.5, "hourlyChangePct": -1.5},
+            {"id": "nfl", "leagueOrMedium": "NFL", "dailyChange": 2.1, "hourlyChangePct": 2.1},
+        ]
+        updated = reset_display_changes(records, "NHL")
+        self.assertEqual(updated[0]["dailyChange"], 0.0)
+        self.assertEqual(updated[0]["hourlyChangePct"], 0.0)
+        self.assertEqual(updated[1], records[1])
+        self.assertEqual(updated[2], records[2])
 
     def test_nhl_only_regular_season_and_playoffs_are_price_eligible(self) -> None:
         self.assertFalse(nhl_price_eligible_game({"gameType": 1}))
