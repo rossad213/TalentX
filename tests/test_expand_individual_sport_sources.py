@@ -55,11 +55,26 @@ class IndividualSportDiscoveryTests(unittest.TestCase):
             for index, discipline in enumerate(SPORT_CONFIG, start=1)
         }
         records, summary = top_up_records([], candidates, 5, "2026-08-06T00:00:00Z")
-        self.assertEqual(len(records), 25)
-        self.assertEqual(len({record["id"] for record in records}), 25)
-        self.assertEqual(len({record["ticker"] for record in records}), 25)
-        for discipline in SPORT_CONFIG:
-            self.assertEqual(summary["countsAfter"][discipline], 5)
+        enabled = [name for name, config in SPORT_CONFIG.items() if config.get("discoveryEnabled", True)]
+        self.assertEqual(len(records), 5 * len(enabled))
+        self.assertEqual(len({record["id"] for record in records}), len(records))
+        self.assertEqual(len({record["ticker"] for record in records}), len(records))
+        for discipline, config in SPORT_CONFIG.items():
+            expected = 0 if config.get("discoveryEnabled") is False else 5
+            self.assertEqual(summary["countsAfter"][discipline], expected)
+
+    def test_motorsport_requires_official_series_sources(self):
+        current = datetime.now(timezone.utc).year
+        row = candidate("Film Director With Racing Hobby", "Q404", "Motorsport", birth_year=current - 40)
+        self.assertFalse(candidate_is_eligible(row, 2, current - RECENT_ACTIVITY_YEARS))
+        records, summary = top_up_records(
+            [],
+            {discipline: ([row] if discipline == "Motorsport" else []) for discipline in SPORT_CONFIG},
+            5,
+            "2026-09-26T00:00:00Z",
+        )
+        self.assertFalse(any(record.get("discipline") == "Motorsport" for record in records))
+        self.assertEqual(summary["changes"]["Motorsport"]["added"], 0)
 
     def test_existing_stronger_record_is_preserved_and_enriched(self):
         existing = [{
