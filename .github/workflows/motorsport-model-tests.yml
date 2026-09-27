@@ -1,0 +1,52 @@
+name: Motorsport model tests
+
+on:
+  pull_request:
+    paths:
+      - "scripts/motorsport_event_refresh.py"
+      - "scripts/reconcile_motorsport_identities.py"
+      - "scripts/migrate_motorsport_market_state.py"
+      - "scripts/pricing_engine_v2.py"
+      - "scripts/results_event_pricing.py"
+      - "data/individual_sport_rosters.json"
+      - "tests/test_motorsport_identity_reconciliation.py"
+      - "tests/test_motorsport_event_refresh.py"
+      - "tests/test_motorsport_market_migration.py"
+      - "tests/test_pricing_engine_v2.py"
+      - ".github/workflows/motorsport-model-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/motorsport_event_refresh.py"
+      - "scripts/reconcile_motorsport_identities.py"
+      - "scripts/migrate_motorsport_market_state.py"
+      - "scripts/pricing_engine_v2.py"
+      - "data/individual_sport_rosters.json"
+      - "tests/test_motorsport_identity_reconciliation.py"
+      - "tests/test_motorsport_event_refresh.py"
+      - "tests/test_motorsport_market_migration.py"
+      - "tests/test_pricing_engine_v2.py"
+      - ".github/workflows/motorsport-model-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install --upgrade -r requirements.txt
+      - name: Run Motorsport regression suite
+        run: >-
+          python -m unittest
+          tests/test_motorsport_identity_reconciliation.py
+          tests/test_motorsport_event_refresh.py
+          tests/test_motorsport_market_migration.py
+          tests/test_pricing_engine_v2.py -v
