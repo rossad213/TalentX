@@ -408,6 +408,14 @@ def refresh_manifest(
 
 def finalize_catalog(catalog: Path, csv_path: Path, manifest_path: Path) -> tuple[int, int]:
     records = load_records(catalog)
+    # The unified current catalog is a Current-only contract. Category workflows
+    # may temporarily retain explicit Under Review/Legacy rows for diagnosis, but
+    # those rows must never leak into the public current-market artifact.
+    records = [
+        record for record in records
+        if not str(record.get("marketSegment") or "").strip()
+        or str(record.get("marketSegment") or "").strip() == "Current"
+    ]
     records, identity_repairs = resolve_cross_category_identities(records)
     repairs = dedupe_tickers(records)
     write_records(catalog, records)

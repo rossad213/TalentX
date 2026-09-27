@@ -294,6 +294,32 @@ class CategoryMarketStoreTests(unittest.TestCase):
         self.assertEqual(len(resolved), 2)
         self.assertEqual(repairs, [])
 
+    def test_finalize_drops_explicit_non_current_rows(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            catalog = root / "current_catalog.json"
+            csv_path = root / "current_catalog.csv"
+            manifest = root / "catalog_manifest.json"
+            records = [
+                {
+                    "id": "a1", "name": "Current Athlete", "ticker": "CURR",
+                    "primaryCategory": "Athlete", "discipline": "Motorsport",
+                    "marketSegment": "Current", "marketPrice": 100.0,
+                },
+                {
+                    "id": "a2", "name": "Review Athlete", "ticker": "REVW",
+                    "primaryCategory": "Athlete", "discipline": "Motorsport",
+                    "marketSegment": "Under Review", "marketPrice": 60.0,
+                },
+            ]
+            catalog.write_text(json.dumps(records), encoding="utf-8")
+
+            count, repaired = finalize_catalog(catalog, csv_path, manifest)
+            self.assertEqual(count, 1)
+            self.assertEqual(repaired, 0)
+            finalized = json.loads(catalog.read_text(encoding="utf-8"))
+            self.assertEqual([item["id"] for item in finalized], ["a1"])
+
     def test_finalize_refreshes_csv_manifest_and_tickers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
