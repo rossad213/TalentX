@@ -11,6 +11,8 @@ on:
       - "scripts/reconcile_nhl_identities.py"
       - "scripts/reconcile_basketball_identities.py"
       - "scripts/reconcile_tennis_identities.py"
+      - "scripts/reconcile_music_identities.py"
+      - "tests/test_music_identity_reconciliation.py"
       - "scripts/build_client_catalog.py"
   workflow_run:
     workflows:
@@ -61,6 +63,7 @@ jobs:
           base_ready=0
           baseline_id=""
           baseline_time=""
+          preferred_identity_catalog=""
 
           # Prefer the latest successful full baseline, but do not take the public
           # market down if that old artifact has expired.
@@ -73,6 +76,7 @@ jobs:
               if [ -n "$baseline_catalog" ]; then
                 baseline_data="$(dirname "$baseline_catalog")"
                 cp -R "$baseline_data"/. data/
+                preferred_identity_catalog="$baseline_catalog"
                 base_ready=1
                 echo "Composing from full baseline run $baseline_id."
               else
@@ -97,6 +101,7 @@ jobs:
             test -n "$published_catalog" || { echo "Published market artifact missing current_catalog.json"; exit 1; }
             published_data="$(dirname "$published_catalog")"
             cp -R "$published_data"/. data/
+            preferred_identity_catalog="$published_catalog"
             baseline_time="$published_time"
             base_ready=1
             echo "Recovered composition base from published market run $published_id."
@@ -296,6 +301,7 @@ jobs:
           python scripts/reconcile_nhl_identities.py --catalog data/current_catalog.json
           python scripts/reconcile_basketball_identities.py --catalog data/current_catalog.json
           python scripts/reconcile_tennis_identities.py --catalog data/current_catalog.json
+          python scripts/reconcile_music_identities.py --catalog data/current_catalog.json --preferred-catalog "$preferred_identity_catalog"
 
           # Global identity/display constraints only make sense after all category
           # databases and optional history have been recombined.
@@ -310,7 +316,7 @@ jobs:
           python scripts/category_market_store.py extract --catalog data/current_catalog.json --category creators --output data/market/creators.json
       - name: Validate unified market
         run: |
-          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py tests/test_nhl_identity_reconciliation.py tests/test_basketball_identity_reconciliation.py tests/test_tennis_identity_reconciliation.py tests/test_build_client_catalog.py -v
+          python -m unittest tests/test_category_market_store.py tests/test_historical_event_overlay.py tests/test_nhl_identity_reconciliation.py tests/test_basketball_identity_reconciliation.py tests/test_tennis_identity_reconciliation.py tests/test_music_identity_reconciliation.py tests/test_build_client_catalog.py -v
           python scripts/validate_current_catalog.py --minimum 10000
           node --check app.js
           node --check assets/sortable-market-table.js
