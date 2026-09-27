@@ -223,8 +223,13 @@ def move_record_to_actor(record: dict[str, Any], info: dict[str, Any] | None, re
         "role": role,
         "categoryResolution": reason,
         "categoryResolutionDescription": description,
+        "categoryOriginSourceNamespace": str(record.get("sourceNamespace") or ""),
+        "sourceNamespace": "wikidata-actor-resolved-from-music",
         "pricingDataStatus": "Source-discovered screen career; profession performance evidence partial",
+        "description": f"{role} in {discipline}. Reclassified from Music using source-backed screen-career evidence.",
     })
+    for field in ("musicCategoryVerified", "musicCategoryVerification", "musicBrainzArtistIds", "verifiedMusicOccupations"):
+        updated.pop(field, None)
     updated["searchText"] = " ".join([
         str(updated.get("name") or ""), "Actor", discipline,
         "Film & Television", role, str(updated.get("country") or ""),

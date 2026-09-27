@@ -21,6 +21,7 @@ DISCOVERY_NAMESPACES = {
     "wikidata-music-expanded",
     "wikidata-music-strict",
     "wikidata-actor-only",
+    "wikidata-actor-resolved-from-music",
     "wikidata-creator",
 }
 

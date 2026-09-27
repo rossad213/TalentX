@@ -226,7 +226,20 @@ def filter_records(records: list[dict[str, Any]], evidence: dict[str, dict[str, 
                 continue
             occupations = set((info or {}).get("occupations") or set())
             role, discipline = actor_role(occupations)
-            record.update({"primaryCategory": "Actor", "discipline": discipline, "leagueOrMedium": "Film & Television", "role": role, "categoryResolution": "Strict Music audit: known screen-first career"})
+            record.update({
+                "primaryCategory": "Actor",
+                "discipline": discipline,
+                "leagueOrMedium": "Film & Television",
+                "teamOrPlatform": "Independent / representation not listed",
+                "role": role,
+                "categoryResolution": "Strict Music audit: known screen-first career",
+                "categoryOriginSourceNamespace": str(record.get("sourceNamespace") or ""),
+                "sourceNamespace": "wikidata-actor-resolved-from-music",
+                "pricingDataStatus": "Source-discovered screen career; profession performance evidence partial",
+                "description": f"{role} in {discipline}. Reclassified from Music using source-backed screen-career evidence.",
+            })
+            for field in ("musicCategoryVerified", "musicCategoryVerification", "musicBrainzArtistIds", "verifiedMusicOccupations"):
+                record.pop(field, None)
             actor_names.add(key)
             moved.append(name)
             output.append(record)
@@ -246,7 +259,20 @@ def filter_records(records: list[dict[str, Any]], evidence: dict[str, dict[str, 
                 duplicate_actor_removals.append(name)
                 continue
             role, discipline = actor_role(occupations)
-            record.update({"primaryCategory": "Actor", "discipline": discipline, "leagueOrMedium": "Film & Television", "role": role, "categoryResolution": "Strict Music audit: screen-first Wikidata description"})
+            record.update({
+                "primaryCategory": "Actor",
+                "discipline": discipline,
+                "leagueOrMedium": "Film & Television",
+                "teamOrPlatform": "Independent / representation not listed",
+                "role": role,
+                "categoryResolution": "Strict Music audit: screen-first Wikidata description",
+                "categoryOriginSourceNamespace": str(record.get("sourceNamespace") or ""),
+                "sourceNamespace": "wikidata-actor-resolved-from-music",
+                "pricingDataStatus": "Source-discovered screen career; profession performance evidence partial",
+                "description": f"{role} in {discipline}. Reclassified from Music using source-backed screen-career evidence.",
+            })
+            for field in ("musicCategoryVerified", "musicCategoryVerification", "musicBrainzArtistIds", "verifiedMusicOccupations"):
+                record.pop(field, None)
             actor_names.add(key)
             moved.append(name)
             output.append(record)
