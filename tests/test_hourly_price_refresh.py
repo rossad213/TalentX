@@ -233,9 +233,20 @@ class HourlyGamePricingTests(unittest.TestCase):
         stale_player = "espn:old|espn:3149391"
         retained = retain_recent_processed_player_events(
             {recent_player, stale_player},
+            set(),
             {current_event},
         )
         self.assertEqual(retained, {recent_player})
+
+    def test_successful_player_marker_survives_incomplete_parent_game(self) -> None:
+        game = "espn:retry-game"
+        successful_player = f"{game}|espn:4035656"
+        retained = retain_recent_processed_player_events(
+            {successful_player},
+            set(),
+            {game},
+        )
+        self.assertEqual(retained, {successful_player})
 
     def test_discovery_skips_a_game_after_its_event_id_is_processed(self) -> None:
         scoreboard = {

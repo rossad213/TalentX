@@ -23,10 +23,18 @@ from category_market_store import load_records, write_records
 from results_event_pricing import MODEL_VERSION as RESULTS_MODEL_VERSION
 from results_event_pricing import result_move_from_delta, result_sensitivity
 
-NFL_EXPECTATION_MODEL_VERSION = "1.8-nfl-established-window-position-safe"
+NFL_EXPECTATION_MODEL_VERSION = "1.9-nfl-absolute-performance-authority"
 NFL_FUNDAMENTAL_EVIDENCE_VERSION = "1.0-established-multiseason-opportunity-weighted"
 NFL_RESULT_SCALE = 1.45
 NFL_MIGRATION_LOOKBACK_DAYS = 14
+NFL_ABSOLUTE_PERFORMANCE_TARGET = {
+    "QB": 22.0,
+    "RB": 22.0,
+    "REC": 24.0,
+    "DEF": 16.0,
+    "ST": 12.0,
+    "OL": 10.0,
+}
 NFL_STATS_HISTORY = (
     "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
     "athletes/{athlete_id}/stats?season={season}"
@@ -189,6 +197,22 @@ def _role_group(record: dict[str, Any]) -> str:
     if any(token in role for token in ("offensive line", "offensive tackle", "offensive guard")) or role in {"ot", "og", "c"}:
         return "OL"
     return "DEF"
+
+
+def nfl_absolute_performance_authority(
+    record: dict[str, Any],
+    actual_score: float,
+    expected_score: float,
+) -> tuple[float, float]:
+    """Scale relative surprise by how substantial the game actually was."""
+    group = _role_group(record)
+    target = NFL_ABSOLUTE_PERFORMANCE_TARGET.get(group, NFL_ABSOLUTE_PERFORMANCE_TARGET["DEF"])
+    reference = max(abs(float(actual_score or 0.0)), abs(float(expected_score or 0.0)))
+    if target <= 0:
+        return 1.0, 0.0
+    ratio = max(0.0, reference / target)
+    authority = min(1.0, max(0.15, ratio ** 1.35))
+    return round(authority, 4), round(target, 3)
 
 
 def _uses_rookie_transition(record: dict[str, Any], season: int) -> bool:
@@ -566,11 +590,20 @@ def nfl_results_based_game_event_move(record, item, event, legacy_max_game_move_
         sensitivity_record["professionalGames"] = item["professionalGames"]
     tier, sensitivity = result_sensitivity(sensitivity_record)
     scale = 0.80 if started is not None and started.month in {7, 8} else NFL_RESULT_SCALE
-    performance_move = result_move_from_delta(delta, scale=scale) * sensitivity
+    raw_performance_move = result_move_from_delta(delta, scale=scale) * sensitivity
+    authority, absolute_target = nfl_absolute_performance_authority(
+        record,
+        float(evidence.get("actualPerformanceScore") or 0.0),
+        float(evidence.get("expectedPerformanceScore") or 0.0),
+    )
+    performance_move = raw_performance_move * authority
     outcome_move = 0.06 if event.get("teamWon") is True else -0.05 if event.get("teamWon") is False else 0.0
     tuned_move = performance_move + outcome_move
     return round(tuned_move, 3), {
         **evidence,
+        "rawPerformanceMovePct": round(raw_performance_move, 3),
+        "absolutePerformanceAuthority": authority,
+        "absolutePerformanceTargetScore": absolute_target,
         "performanceMovePct": round(performance_move, 3),
         "outcomeMovePct": outcome_move,
         "volatilityTier": tier,

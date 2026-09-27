@@ -158,6 +158,15 @@ class NflPerGameExpectationTests(unittest.TestCase):
         self.assertGreater(expected, 12.0)
         self.assertLess(expected, 13.5)
 
+    def test_absolute_performance_authority_separates_role_td_from_real_breakout(self) -> None:
+        receiver = {"role": "Wide Receiver"}
+        one_catch_td, target = nfl.nfl_absolute_performance_authority(receiver, 11.917, 2.5)
+        hundred_yard_td, _ = nfl.nfl_absolute_performance_authority(receiver, 24.75, 4.0)
+        self.assertEqual(target, 24.0)
+        self.assertLess(one_catch_td, 0.45)
+        self.assertGreater(hundred_yard_td, 0.95)
+        self.assertGreater(hundred_yard_td, one_catch_td * 2)
+
     def test_caleb_like_four_touchdown_game_is_well_above_expectation(self) -> None:
         move, evidence = nfl.nfl_results_based_game_event_move(
             self.quarterback(), self.caleb_item(), self.caleb_event(), None

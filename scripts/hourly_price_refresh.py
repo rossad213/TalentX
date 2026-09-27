@@ -184,17 +184,20 @@ def prior_processed_events(
 def retain_recent_processed_player_events(
     processed_player_keys: set[str],
     processed_event_keys: set[str],
+    discovered_event_keys: set[str] | None = None,
 ) -> set[str]:
-    """Keep player/event retry markers while their parent event remains in the rolling event history.
+    """Keep exactly-once player markers for any still-active parent event.
 
-    The reliability wrapper intentionally ignores the global event marker so players missed
-    during a partial run can catch up. That makes the player/event marker authoritative for
-    exactly-once pricing. Retaining the markers for still-recent events prevents the same
-    player/game pair from being priced again on the next refresh.
+    A game can remain globally incomplete because one teammate's evidence failed.
+    Successfully priced teammates must still remain protected from another price
+    application on the next refresh. The event is active when it is either in
+    processed history or was rediscovered inside the current rolling window.
     """
+    active_event_keys = set(processed_event_keys)
+    active_event_keys.update(discovered_event_keys or set())
     return {
         key for key in processed_player_keys
-        if key.split("|", 1)[0] in processed_event_keys
+        if key.split("|", 1)[0] in active_event_keys
     }
 
 
@@ -1240,9 +1243,15 @@ def main() -> int:
 
     # Player-level markers prevent a successful athlete from being moved twice
     # when a teammate's evidence request fails and the game must be retried.
+    discovered_event_keys = {
+        str(event.get("eventKey") or "")
+        for event in events
+        if str(event.get("eventKey") or "")
+    }
     processed_player_history = retain_recent_processed_player_events(
         processed_player_history,
         set(processed_history),
+        discovered_event_keys,
     )
 
     manifest = safe_json(CATALOG_MANIFEST, {})
