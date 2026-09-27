@@ -33,6 +33,9 @@ on:
       - "tests/test_pricing_engine_v2.py"
       - "tests/test_category_market_store.py"
       - "tests/test_music_identity_reconciliation.py"
+      - "tests/test_music_enrichment_metadata.py"
+      - "tests/test_enrich_curated_non_athletes.py"
+      - "tests/test_append_price_history.py"
   workflow_run:
     workflows: ["Build current catalog baseline"]
     types: [completed]
@@ -101,7 +104,10 @@ jobs:
           tests/test_sync_billboard_outcome_manifest.py
           tests/test_pricing_engine_v2.py
           tests/test_category_market_store.py
-          tests/test_music_identity_reconciliation.py -v
+          tests/test_music_identity_reconciliation.py
+          tests/test_music_enrichment_metadata.py
+          tests/test_enrich_curated_non_athletes.py
+          tests/test_append_price_history.py -v
       - name: Refresh Music awards and verified career claims
         run: >-
           python scripts/non_athlete_event_refresh.py

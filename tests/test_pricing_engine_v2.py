@@ -204,6 +204,28 @@ class PricingEngineV2Tests(unittest.TestCase):
         discovered=self.music_record(sourceNamespace='wikidata-non-athlete',yearsActive=25,
                                      pricingConfidence=.94,dataConfidence=.94)
         self.assertLessEqual(evidence_confidence(discovered),76)
+    def test_strict_music_identity_does_not_equal_mature_pricing_evidence(self):
+        discovered=self.music_record(sourceNamespace='wikidata-music-strict',musicCategoryVerified=True,
+            musicBrainzArtistIds=['mbid'],yearsActive=25,pricingConfidence=.68,dataConfidence=.90,priceEvents=[])
+        self.assertLessEqual(evidence_confidence(discovered),60)
+        priced=apply_v2(discovered)
+        self.assertEqual(priced['pricingModelVersion'],'6.2-music-evidence-confidence')
+        self.assertEqual(priced['pricingV2']['musicIdentityConfidenceScore'],95.0)
+        self.assertEqual(priced['pricingV2']['musicPricingEvidenceCeiling'],60.0)
+
+    def test_verified_music_outcomes_raise_pricing_evidence_ceiling(self):
+        base=self.music_record(sourceNamespace='wikidata-music-strict',musicCategoryVerified=True,
+            musicBrainzArtistIds=['mbid'],yearsActive=15,pricingConfidence=.68,dataConfidence=.90,priceEvents=[])
+        enriched={**base,'priceEvents':[{'eventKey':f'chart:{i}','eventType':'music-chart-outcome','verified':True} for i in range(5)]}
+        self.assertGreater(evidence_confidence(enriched),evidence_confidence(base))
+        self.assertGreater(apply_v2(enriched)['pricingV2']['musicPricingEvidenceCeiling'],60)
+
+    def test_music_event_move_stays_in_event_ledger_not_fair_value(self):
+        base=self.music_record(lastGameMovePct=0)
+        moved={**base,'lastGameMovePct':12.0}
+        self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
+        self.assertEqual(market_score(base,80),market_score(moved,80))
+
     def test_stronger_curated_artist_stays_above_generic_longevity_proxy(self):
         curated=apply_v2(self.music_record(
             id='taylor',nonAthleteRosterVersion='1.0.0',benchmarkRank=1,benchmarkPoolSize=100,
