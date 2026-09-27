@@ -89,6 +89,8 @@ jobs:
         run: python -m unittest tests/test_discover_strict_music.py -v
       - name: Validate strict Music verification logic
         run: python -m unittest tests/test_strict_music_catalog.py -v
+      - name: Validate strict Actor primary-category logic
+        run: python -m unittest tests/test_strict_actor_catalog.py -v
       - name: Validate discovered benchmark cleanup
         run: python -m unittest tests/test_normalize_non_athlete_benchmarks.py -v
       - name: Validate curated actor and musician enrichment logic
@@ -133,6 +135,14 @@ jobs:
           --manifest data/strict_music_seed_manifest.json
           --batch-size 50
           --request-timeout 15
+      - name: Resolve music-first Actor discoveries
+        run: >-
+          python scripts/strict_actor_catalog.py
+          --seed data/current_seed.json
+          --manifest data/strict_actor_manifest.json
+          --batch-size 50
+          --request-timeout 15
+          --allow-source-errors
       - name: Keep discovered records outside curated benchmark rankings
         run: python scripts/normalize_non_athlete_benchmarks.py
       - name: Enrich existing curated musicians and actors
