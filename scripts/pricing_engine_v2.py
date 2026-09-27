@@ -23,6 +23,8 @@ from soccer_metric_calibration import (
 )
 
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
+MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
+MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
