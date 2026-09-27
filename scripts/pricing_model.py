@@ -206,7 +206,22 @@ EVIDENCE_SCORE_CAPS = {
 }
 
 
+def is_curated_benchmark_non_athlete(record: dict[str, Any]) -> bool:
+    category = category_name(record)
+    rank = optional_number(record.get("benchmarkRank"))
+    return (
+        category in {"Music", "Actor", "Creator"}
+        and rank is not None and rank >= 1
+        and (bool(record.get("nonAthleteRosterVersion")) or record.get("sourceName") == "TalentX current-first seed")
+    )
+
+
 def confidence_price_factor(record: dict[str, Any]) -> float:
+    if is_curated_benchmark_non_athlete(record):
+        # The reviewed benchmark order is the temporary valuation prior while
+        # profession-specific evidence is incomplete. Identity-source completeness
+        # must not invert adjacent reviewed ranks.
+        return 1.0
     confidence = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.5)), 0, 1)
     # Confidence should matter without erasing the documented career score.
     return round(0.92 + 0.08 * confidence, 4)
@@ -262,8 +277,14 @@ def build_benchmark_ranks(records: list[dict[str, Any]] | None) -> dict[tuple[st
 
         for rank, item in enumerate(ordered, start=1):
             explicit_rank = optional_number(item.get("benchmarkRank"))
-            applied_rank = int(explicit_rank) if explicit_rank is not None and 1 <= explicit_rank <= total else rank
-            output[(category, normalize(item.get("name", "")))] = (applied_rank, total)
+            applied_rank = int(explicit_rank) if explicit_rank is not None and explicit_rank >= 1 else rank
+            explicit_pool = optional_number(item.get("benchmarkPoolSize"))
+            applied_total = (
+                int(explicit_pool)
+                if explicit_pool is not None and explicit_pool >= applied_rank
+                else total
+            )
+            output[(category, normalize(item.get("name", "")))] = (applied_rank, applied_total)
     return output
 
 

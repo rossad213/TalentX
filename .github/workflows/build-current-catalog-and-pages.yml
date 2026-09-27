@@ -94,7 +94,7 @@ jobs:
       - name: Validate curated actor and musician enrichment logic
         run: python -m unittest tests/test_enrich_curated_non_athletes.py tests/test_music_enrichment_metadata.py -v
       - name: Validate non-athlete pricing regression logic
-        run: python -m unittest tests/test_validate_non_athlete_pricing.py -v
+        run: python -m unittest tests/test_validate_non_athlete_pricing.py tests/test_curated_benchmark_pricing.py -v
       - name: Validate individual-sport roster expansion
         run: python -m unittest tests/test_add_individual_sport_rosters.py -v
       - name: Validate 200-name individual-sport discovery logic
