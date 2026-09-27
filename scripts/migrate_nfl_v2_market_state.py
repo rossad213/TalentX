@@ -26,8 +26,8 @@ from pricing_engine_v2 import apply_v2
 from nfl_metric_calibration import calibrate_record as calibrate_nfl_record
 from hourly_price_refresh_nfl import NFL_FUNDAMENTAL_EVIDENCE_VERSION
 
-MIGRATION_VERSION = "1.4-nfl-recency-availability-position-value-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-4"
+MIGRATION_VERSION = "1.5-nfl-career-tier-and-exactly-once-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-5"
 
 _V2_FIELDS = (
     "talentScore",
@@ -50,6 +50,46 @@ def _finite(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return parsed if math.isfinite(parsed) else None
+
+
+def _parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _latest_preservable_game(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], float] | None:
+    key = str(record.get("lastPriceEventId") or "").strip()
+    move = _finite(record.get("lastGameMovePct"))
+    if not key or move is None or move <= -100.0:
+        return None
+    candidates = [
+        item for item in (record.get("priceEvents") or [])
+        if isinstance(item, dict)
+        and str(item.get("eventKey") or item.get("eventId") or "") == key
+        and str(item.get("eventType") or "").lower() == "game"
+        and item.get("verified") is not False
+    ]
+    if not candidates:
+        return None
+    event = max(candidates, key=lambda item: str(item.get("startedAt") or ""))
+    event_time = _parse_time(event.get("startedAt") or record.get("lastPriceEventAt"))
+    migrated_at = _parse_time(record.get("nflMarketMigratedAt"))
+    migration_time = _parse_time(stamp)
+    if event_time is None or migration_time is None:
+        return None
+    if event_time > migration_time or (migration_time - event_time).days > 7:
+        return None
+    if migrated_at is not None and event_time <= migrated_at:
+        return None
+    return event, move
 
 
 def _is_nfl(record: dict[str, Any]) -> bool:
@@ -116,10 +156,17 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     clean["dailyChange"] = 0.0
     clean["hourlyChangePct"] = 0.0
     repriced = apply_v2(clean)
-    target = _finite(repriced.get("fairValue"))
-    if target is None or target <= 0:
+    fundamental_target = _finite(repriced.get("fairValue"))
+    if fundamental_target is None or fundamental_target <= 0:
         return dict(record), False
-    target = round(target, 2)
+    fundamental_target = round(fundamental_target, 2)
+
+    preserved_game = _latest_preservable_game(record, stamp)
+    preserved_move = preserved_game[1] if preserved_game is not None else 0.0
+    target = round(
+        fundamental_target * (1.0 + preserved_move / 100.0),
+        2,
+    ) if preserved_game is not None else fundamental_target
 
     result = dict(calibrated)
     for field in _V2_FIELDS:
@@ -136,12 +183,16 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     ]
     result["priceHistory"] = _migration_point(history, target, stamp)
     result["marketPrice"] = target
-    result["previousMarketPrice"] = target
-    result["modelTargetPrice"] = target
-    result["dailyChange"] = 0.0
-    result["hourlyChangePct"] = 0.0
-    result["trend"] = [target] * 18
-    result["lastGameMovePct"] = 0.0
+    result["previousMarketPrice"] = fundamental_target if preserved_game is not None else target
+    result["modelTargetPrice"] = fundamental_target
+    result["dailyChange"] = round(preserved_move, 3) if preserved_game is not None else 0.0
+    result["hourlyChangePct"] = round(preserved_move, 3) if preserved_game is not None else 0.0
+    result["trend"] = (
+        [fundamental_target] * 17 + [target]
+        if preserved_game is not None
+        else [target] * 18
+    )
+    result["lastGameMovePct"] = round(preserved_move, 3) if preserved_game is not None else 0.0
     result["lastPriceRefreshAt"] = stamp
 
     result["nflMarketMigrationVersion"] = MIGRATION_VERSION
@@ -151,8 +202,16 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         round(prior_game_move, 3) if prior_game_move is not None else None
     )
     result["nflMarketMigrationTargetPrice"] = target
+    result["nflMarketMigrationFundamentalPrice"] = fundamental_target
+    if preserved_game is not None:
+        event, move = preserved_game
+        result["nflMarketMigrationPreservedEventId"] = str(event.get("eventKey") or event.get("eventId") or "")
+        result["nflMarketMigrationPreservedEventMovePct"] = round(move, 3)
+    else:
+        result.pop("nflMarketMigrationPreservedEventId", None)
+        result.pop("nflMarketMigrationPreservedEventMovePct", None)
     result["nflMarketMigrationReason"] = (
-        "Reset NFL market state to recency-aware, injury-aware, position-context v2 fair value before future event compounding"
+        "Reset NFL to career-tier v2 fair value and preserve at most one latest verified post-epoch game move exactly once"
     )
     return result, True
 

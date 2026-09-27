@@ -164,6 +164,36 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertNotEqual(migrated["marketPrice"], 88.0)
         self.assertEqual(migrated["marketPrice"], migrated["fundamentalValue"])
 
+    def test_latest_post_epoch_game_is_preserved_exactly_once_on_new_fundamental(self):
+        original=self.nfl_record(
+            marketPrice=126.68,
+            previousMarketPrice=117.40,
+            lastGameMovePct=7.905,
+            lastPriceEventId="espn:401872950",
+            lastPriceEventAt="2026-09-27T17:00:00Z",
+            nflMarketMigrationVersion="1.4-nfl-recency-availability-position-value-reset",
+            nflMarketMigratedAt="2026-09-26T07:46:16Z",
+            priceEvents=[{
+                "eventKey":"espn:401872950","eventId":"401872950","eventType":"game",
+                "league":"nfl","verified":True,"startedAt":"2026-09-27T17:00:00Z",
+                "priceBefore":100.83,"priceAfter":108.80,"movePct":7.905,
+            }],
+        )
+        expected_fair=apply_v2({
+            **calibrate_record(original),
+            "lastGameMovePct":0.0,
+            "dailyChange":0.0,
+            "hourlyChangePct":0.0,
+        })["fairValue"]
+        migrated,changed=migrate_record(original,"2026-09-27T23:30:00Z")
+        self.assertTrue(changed)
+        self.assertEqual(migrated["fundamentalValue"],expected_fair)
+        self.assertEqual(migrated["previousMarketPrice"],expected_fair)
+        self.assertEqual(migrated["marketPrice"],round(expected_fair*1.07905,2))
+        self.assertEqual(migrated["lastGameMovePct"],7.905)
+        self.assertEqual(migrated["nflMarketMigrationPreservedEventId"],"espn:401872950")
+        self.assertLess(migrated["marketPrice"],126.68)
+
     def test_migration_is_idempotent(self):
         first, changed = migrate_record(self.nfl_record(), "2026-09-24T16:15:00Z")
         second, changed_again = migrate_record(first, "2026-09-25T16:15:00Z")

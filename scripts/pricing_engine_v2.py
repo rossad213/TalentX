@@ -26,6 +26,7 @@ MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
 ACTOR_MODEL_VERSION = "6.3-actor-evidence-confidence"
+NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
 CATEGORY_METRICS = {
@@ -563,6 +564,26 @@ def fair_value(talent: float, market: float, confidence: float, situation: float
     return round(blended, 2), round(max(4.0, min(350.0, value)), 2)
 
 
+def nfl_career_tier_multiplier(
+    record: dict[str, Any],
+    talent: float,
+    rookie_influence: float = 0.0,
+) -> float:
+    """Spread the NFL middle/lower tiers without flattening elite careers."""
+    if not is_nfl(record) or rookie_influence >= 0.50:
+        return 1.0
+    score = clamp(talent)
+    if score >= 75.0:
+        return 1.0
+    if score >= 60.0:
+        return round(0.84 + (score - 60.0) * (0.16 / 15.0), 4)
+    if score >= 45.0:
+        return round(0.68 + (score - 45.0) * (0.16 / 15.0), 4)
+    if score <= 25.0:
+        return 0.55
+    return round(0.55 + (score - 25.0) * (0.13 / 20.0), 4)
+
+
 def rookie_ipo_value(record: dict[str, Any]) -> tuple[float | None, float]:
     """Return a calibrated rookie IPO anchor and its remaining draft influence.
 
@@ -595,15 +616,16 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     expected, generic_fair = fair_value(talent, market, confidence, situation)
 
     rookie_anchor, rookie_influence = rookie_ipo_value(result)
-    fair = generic_fair
+    nfl_tier_multiplier = nfl_career_tier_multiplier(result, talent, rookie_influence)
+    career_fair = round(generic_fair * nfl_tier_multiplier, 2)
+    fair = career_fair
     if is_unverified_motorsport_discovery(result):
         fair = round(min(fair, MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING), 2)
     if rookie_anchor is not None and rookie_influence > 0:
         # At IPO the draft/pre-pro anchor is fully authoritative. As verified
-        # professional evidence accumulates, the generic v2 career value takes
-        # over smoothly according to the already-saved transition percentage.
+        # professional evidence accumulates, the career model takes over.
         fair = round(
-            rookie_anchor * rookie_influence + generic_fair * (1.0 - rookie_influence),
+            rookie_anchor * rookie_influence + career_fair * (1.0 - rookie_influence),
             2,
         )
 
@@ -621,7 +643,9 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     result["fairValue"] = fair
     result["fundamentalValue"] = fair
     result["marketPrice"] = fair
-    if is_motorsport(result):
+    if is_nfl(result):
+        result["pricingModelVersion"] = NFL_MODEL_VERSION
+    elif is_motorsport(result):
         result["pricingModelVersion"] = MOTORSPORT_MODEL_VERSION
     elif is_music(result):
         result["pricingModelVersion"] = MUSIC_MODEL_VERSION
@@ -637,6 +661,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         "situationScore": situation,
         "expectedValueScore": expected,
         "genericFairValue": generic_fair,
+        "nflCareerTierMultiplier": nfl_tier_multiplier if is_nfl(result) else None,
+        "nflCareerTierFairValue": career_fair if is_nfl(result) else None,
         "rookieIpoAnchor": rookie_anchor,
         "rookieInfluence": round(rookie_influence, 4),
         "fairValue": fair,

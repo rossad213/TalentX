@@ -97,6 +97,25 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertLess(injured["situationScore"],healthy["situationScore"])
         self.assertLess(injured["fairValue"],healthy["fairValue"])
 
+    def test_nfl_role_player_is_spread_below_premium_price_band(self):
+        role_player=apply_v2(self.record(
+            leagueOrMedium='NFL',role='Wide Receiver',professionalGames=74,
+            pricingConfidence=.84,
+            activeMetrics={"performance":46,"achievements":35,"consistency":48,
+                           "potential":52,"availability":90,"audience":48}))
+        self.assertEqual(role_player['pricingModelVersion'],'6.4-nfl-career-tier-scale')
+        self.assertLess(role_player['pricingV2']['nflCareerTierMultiplier'],0.80)
+        self.assertLess(role_player['fairValue'],role_player['pricingV2']['genericFairValue']*0.80)
+        self.assertLess(role_player['fairValue'],80)
+
+    def test_elite_nfl_talent_keeps_full_career_scale(self):
+        elite=apply_v2(self.record(
+            leagueOrMedium='NFL',role='Quarterback',professionalGames=140,
+            activeMetrics={"performance":96,"achievements":96,"consistency":95,
+                           "potential":90,"availability":94,"audience":98}))
+        self.assertEqual(elite['pricingV2']['nflCareerTierMultiplier'],1.0)
+        self.assertEqual(elite['fairValue'],elite['pricingV2']['genericFairValue'])
+
     def test_top_nfl_rookie_keeps_meaningful_ipo_anchor(self):
         rookie=apply_v2(self.rookie_record('NFL',score=94,influence=100))
         self.assertGreater(rookie['fairValue'],110)
