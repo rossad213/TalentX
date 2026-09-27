@@ -887,8 +887,11 @@ def apply_ranked_metrics(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for item in results:
         record = dict(item["record"])
         if not item.get("ok"):
-            record["pricingDataStatus"] = "Provisional — roster, experience and role evidence only"
-            record["pricingEnrichmentError"] = item.get("reason")
+            if str(record.get("primaryCategory") or "") == "Athlete":
+                record["pricingDataStatus"] = "Provisional — roster, experience and role evidence only"
+                record["pricingEnrichmentError"] = item.get("reason")
+            else:
+                record["pricingEnrichmentSkippedReason"] = item.get("reason")
             enriched.append(record)
             continue
 

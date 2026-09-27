@@ -37,6 +37,13 @@ API = "https://www.wikidata.org/w/api.php"
 USER_AGENT = "TalentX-Curated-NonAthlete-Evidence/1.0 (+https://github.com/rossad213/TalentX)"
 SUPPORTED = {"Music", "Actor"}
 
+CURATED_IDENTITY_OVERRIDES = {
+    ("Music", "fuerzaregida"): {"wikidata": "Q118466501", "musicbrainz": "e665ce26-6ce9-4c42-8f6a-7a361a0ba328"},
+    ("Music", "tyla"): {"wikidata": "Q118105408", "musicbrainz": "45425c84-9092-4e2c-b732-e1d0280b580a"},
+    ("Music", "twentyonepilots"): {"wikidata": "Q7857806", "musicbrainz": "a6c6897a-7415-4f8d-b5a5-3a5e05f3be67"},
+    ("Music", "gunna"): {"wikidata": "Q55613105", "musicbrainz": "100b8734-f4f0-4536-9960-47f7c59d1b4c"},
+}
+
 CATEGORY_TERMS = {
     "Music": (
         "singer", "musician", "rapper", "songwriter", "disc jockey", "dj",
@@ -214,6 +221,7 @@ def merge_evidence(
     qid: str | None,
     evidence: dict[str, Any] | None,
     verified_at: str,
+    musicbrainz_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     result = dict(record)
     result["curatedEvidenceFloor"] = curated_floor(result)
@@ -226,6 +234,8 @@ def merge_evidence(
 
     source_url = f"https://www.wikidata.org/wiki/{qid}"
     result["wikidataSourceRecordId"] = qid
+    if musicbrainz_ids:
+        result["musicBrainzArtistIds"] = sorted({str(value) for value in musicbrainz_ids if value})
     result["curatedEvidenceSource"] = source_url
     result["curatedIdentityEvidenceVerified"] = True
     result["curatedEvidenceStatus"] = "Wikidata identity and durable career evidence merged"
@@ -269,12 +279,18 @@ def main() -> int:
     verified_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     resolved: dict[tuple[str, str], tuple[str, int]] = {}
     errors: list[str] = []
+    for record in targets:
+        key = (str(record.get("primaryCategory") or ""), normalize(record.get("name")))
+        override = CURATED_IDENTITY_OVERRIDES.get(key)
+        if override:
+            resolved[key] = (str(override["wikidata"]), 999)
 
     workers = max(1, min(16, int(args.workers)))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
             executor.submit(search_identity, str(record.get("name") or ""), str(record.get("primaryCategory") or ""), args.request_timeout): record
             for record in targets
+            if (str(record.get("primaryCategory") or ""), normalize(record.get("name"))) not in CURATED_IDENTITY_OVERRIDES
         }
         for future in as_completed(futures):
             record = futures[future]
@@ -301,10 +317,12 @@ def main() -> int:
             continue
         key = (category, normalize(record.get("name")))
         match = resolved.get(key)
-        qid = match[0] if match else None
+        override = CURATED_IDENTITY_OVERRIDES.get(key)
+        qid = str(override["wikidata"]) if override else (match[0] if match else None)
         entity = entities.get(qid) if qid else None
         evidence = derive_evidence(entity) if entity else None
-        merged = merge_evidence(record, qid, evidence, verified_at)
+        mbids = [str(override["musicbrainz"])] if override and override.get("musicbrainz") else None
+        merged = merge_evidence(record, qid, evidence, verified_at, mbids)
         if qid and evidence:
             merged_count += 1
             resolved_by_category[category] += 1

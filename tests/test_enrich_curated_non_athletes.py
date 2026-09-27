@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'scripts'))
-from enrich_curated_non_athletes import curated_floor, derive_evidence, identity_score, merge_evidence
+from enrich_curated_non_athletes import CURATED_IDENTITY_OVERRIDES, curated_floor, derive_evidence, identity_score, merge_evidence
 
 class CuratedNonAthleteEvidenceTests(unittest.TestCase):
     def test_identity_score_requires_name_and_category_context(self):
@@ -33,6 +33,14 @@ class CuratedNonAthleteEvidenceTests(unittest.TestCase):
         self.assertGreater(evidence['yearsActive'],20)
         self.assertEqual(evidence['wikidataAwardsCount'],1)
         self.assertEqual(evidence['wikidataNominationsCount'],1)
+    def test_known_music_identity_overrides_cover_unresolved_curated_names(self):
+        expected={"fuerzaregida":"Q118466501","tyla":"Q118105408","twentyonepilots":"Q7857806","gunna":"Q55613105"}
+        for name,qid in expected.items():
+            with self.subTest(name=name):
+                override=CURATED_IDENTITY_OVERRIDES[("Music",name)]
+                self.assertEqual(override["wikidata"],qid)
+                self.assertTrue(override["musicbrainz"])
+
     def test_merge_preserves_curated_metrics(self):
         record={"name":"Taylor Swift","primaryCategory":"Music","benchmarkRank":1,"benchmarkPoolSize":100,
                 "activeMetrics":{"performance":97,"audience":99},"pricingConfidence":.70,"dataConfidence":.70,
@@ -40,12 +48,13 @@ class CuratedNonAthleteEvidenceTests(unittest.TestCase):
         evidence={"birthYear":1989,"age":36,"workStartYear":2003,"workEndYear":None,"yearsActive":23,
                   "wikidataSitelinks":200,"wikidataAwardsCount":30,"wikidataNominationsCount":50,
                   "wikidataOccupationClaims":3,"identityEvidenceConfidence":.88}
-        merged=merge_evidence(record,'Q26876',evidence,'2026-08-06T00:00:00Z')
+        merged=merge_evidence(record,'Q26876',evidence,'2026-08-06T00:00:00Z',['20244d07-534f-4eff-b4d4-930878889970'])
         self.assertEqual(merged['activeMetrics'],record['activeMetrics'])
         self.assertEqual(merged['yearsActive'],23)
         self.assertEqual(merged['curatedEvidenceFloor'],82)
         self.assertTrue(merged['curatedIdentityEvidenceVerified'])
         self.assertGreaterEqual(merged['pricingConfidence'],.88)
         self.assertIn('https://www.wikidata.org/wiki/Q26876',merged['pricingEvidence'])
+        self.assertEqual(merged['musicBrainzArtistIds'],['20244d07-534f-4eff-b4d4-930878889970'])
 
 if __name__=='__main__': unittest.main()
