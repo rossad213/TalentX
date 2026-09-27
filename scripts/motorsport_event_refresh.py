@@ -456,15 +456,33 @@ def apply_refresh(records: list[dict[str, Any]], standings: list[dict[str, Any]]
     event_added = 0
     live_applied = 0
 
-    for identity, standing in standings_by_identity.items():
+    approved_current_f1 = {
+        identity_name(record.get("name"))
+        for record in updated
+        if is_motorsport(record)
+        and str(record.get("leagueOrMedium") or "").strip().lower() == "formula 1"
+        and (
+            str(record.get("sourceNamespace") or "").strip().lower() == "curated-individual-sport-roster"
+            or str(record.get("sourceType") or "").strip().lower() == "official-ranking-roster"
+            or bool(record.get("motorsportCurrentRosterVerified"))
+        )
+        and str(record.get("marketSegment") or "Current").strip().lower() != "under review"
+    }
+
+    # Driver standings include anyone who scored/participated during the season, not
+    # necessarily the current race-seat roster. Do not create/promote a live asset
+    # solely because a name appears in season standings (e.g. a replaced driver).
+    active_standings = {
+        identity: standing
+        for identity, standing in standings_by_identity.items()
+        if identity in approved_current_f1
+    }
+
+    for identity, standing in active_standings.items():
         candidates = indexes.get(identity, [])
-        if candidates:
-            index = max(candidates, key=lambda i: record_strength(updated[i]))
-        else:
-            updated.append(make_f1_record(standing, used_ids, used_tickers))
-            index = len(updated) - 1
-            indexes.setdefault(identity, []).append(index)
-            created += 1
+        if not candidates:
+            continue
+        index = max(candidates, key=lambda i: record_strength(updated[i]))
 
         record = dict(updated[index])
         season_stats = stats.get(identity, {})
@@ -514,7 +532,7 @@ def apply_refresh(records: list[dict[str, Any]], standings: list[dict[str, Any]]
         existing = [dict(item) for item in record.get("priceEvents", []) if isinstance(item, dict)]
         known = {str(item.get("eventKey") or item.get("eventId") or "") for item in existing}
         f1_existing = [item for item in existing if str(item.get("provider") or "") == "Jolpica F1"]
-        first_backfill = not f1_existing and not record.get("motorsportMarketMigrationVersion")
+        first_backfill = not f1_existing
         current_price = max(0.01, number(record.get("marketPrice"), 0.01))
         newly_added: list[dict[str, Any]] = []
         newly_live: list[dict[str, Any]] = []
@@ -559,7 +577,7 @@ def apply_refresh(records: list[dict[str, Any]], standings: list[dict[str, Any]]
 
     under_review = 0
     if standings_by_identity:
-        current_identities = set(standings_by_identity)
+        current_identities = set(approved_current_f1)
         for index, record in enumerate(updated):
             if not is_motorsport(record):
                 continue
