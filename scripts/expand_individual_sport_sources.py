@@ -402,10 +402,13 @@ def top_up_records(
 
     counts_before = Counter(str(record.get("discipline") or "") for record in output)
     changes: dict[str, dict[str, int]] = {}
-    for discipline in SPORT_CONFIG:
+    for discipline, config in SPORT_CONFIG.items():
         current = counts_before[discipline]
         needed = max(0, target_per_discipline - current)
         added = enriched = skipped = 0
+        if config.get("discoveryEnabled") is False:
+            changes[discipline] = {"before": current, "needed": needed, "added": 0, "enriched": 0, "skipped": 0}
+            continue
         seen_candidates: set[str] = set()
         for candidate in candidates_by_discipline.get(discipline, []):
             qid = str(candidate.get("qid") or "")
