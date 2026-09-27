@@ -112,6 +112,12 @@ EXTRA_MARKET_FIELDS = (
     "mlbMarketMigrationTargetPrice",
     "mlbMarketMigrationReason",
     "mlbGamePricingStatus",
+    # Motorsport-only structured race-evidence market epoch.
+    "motorsportMarketMigrationVersion",
+    "motorsportMarketMigratedAt",
+    "motorsportMarketMigrationPriorMarketPrice",
+    "motorsportMarketMigrationTargetPrice",
+    "motorsportMarketMigrationReason",
 )
 
 TICKER_CATEGORY_CODES = {
