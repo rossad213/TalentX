@@ -2,6 +2,7 @@
 """Apply source-backed Motorsport race results exactly once to live market state."""
 from __future__ import annotations
 import argparse,csv,json,math,re,unicodedata
+from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from typing import Any
 from results_event_pricing import result_move_from_delta
@@ -48,8 +49,14 @@ def apply_event(r,event,result,field):
     events.append(item);out["priceEvents"]=events[-500:]
     history=[dict(x) for x in out.get("priceHistory",[]) if isinstance(x,dict)]
     stamp=str(event.get("startedAt") or "")
+    try:
+        close_time=datetime.fromisoformat(stamp.replace("Z","+00:00"))
+        if close_time.tzinfo is None:close_time=close_time.replace(tzinfo=timezone.utc)
+        open_stamp=(close_time-timedelta(seconds=1)).astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00","Z")
+    except ValueError:
+        open_stamp=stamp
     history.extend([
-      {"time":stamp[:-1]+"-01Z" if stamp.endswith("Z") else stamp,"price":round(before,2),"eventId":key,"label":event.get("name"),"phase":"open","historyType":"verified","eventType":"race","source":event.get("sourceUrl"),"movePct":actual},
+      {"time":open_stamp,"price":round(before,2),"eventId":key,"label":event.get("name"),"phase":"open","historyType":"verified","eventType":"race","source":event.get("sourceUrl"),"movePct":actual},
       {"time":stamp,"price":after,"eventId":key,"label":event.get("name"),"phase":"close","historyType":"verified","eventType":"race","source":event.get("sourceUrl"),"movePct":actual},
     ])
     out["priceHistory"]=sorted(history,key=lambda x:str(x.get("time") or ""))[-2500:]
