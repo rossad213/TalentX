@@ -21,6 +21,10 @@ from soccer_metric_calibration import (
     calibrate_record as calibrate_soccer_record,
     is_soccer,
 )
+from motorsport_metric_calibration import (
+    calibrate_record as calibrate_motorsport_record,
+    is_motorsport,
+)
 
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 
@@ -248,6 +252,40 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         # No verified match ledger or official rank yet: fall through to the
         # conservative generic pathway rather than inventing sample maturity.
 
+    if is_motorsport(record):
+        # Race starts/seasons are Motorsport's sample clock. Requiring a
+        # team-sport professionalGames field made established world-class
+        # drivers look like thin-sample rookies.
+        ev = record.get("motorsportEvidence") if isinstance(record.get("motorsportEvidence"), dict) else {}
+        official = str(record.get("sourceNamespace") or "") == "curated-individual-sport-roster"
+        structured = bool(ev) and str(record.get("motorsportEvidenceStatus") or "").startswith("structured")
+        raw_data = optional_num(record.get("pricingConfidence"))
+        if raw_data is None:
+            raw_data = optional_num(record.get("dataConfidence"))
+        if raw_data is None:
+            raw_data = 0.45
+        if raw_data > 1.0:
+            raw_data /= 100.0
+        data_quality = 62.0 + 38.0 * clamp(raw_data, 0.0, 1.0)
+
+        starts = max(0.0, num(ev.get("seasonStarts")))
+        career_starts = max(0.0, num(ev.get("careerStarts")))
+        years = max(0.0, num(ev.get("yearsActive"), num(record.get("yearsActive"))))
+        evidence_units = starts + min(80.0, career_starts * 0.22) + min(72.0, years * 8.0)
+        sample = 100.0 * (1.0 - math.exp(-evidence_units / 34.0)) if evidence_units else 18.0
+
+        fields = (
+            "seasonRank", "seasonPoints", "seasonStarts", "seasonWins",
+            "careerWins", "careerChampionships",
+        )
+        completeness = sum(ev.get(key) is not None for key in fields) / len(fields)
+        confidence = data_quality * .55 + sample * .35 + (55.0 + 45.0 * completeness) * .10
+        if official and structured and starts >= 8:
+            confidence = max(confidence, 84.0)
+        if str(record.get("sourceNamespace") or "") == "wikidata-individual-sport":
+            confidence = min(confidence, 62.0)
+        return round(clamp(confidence, 15, 97), 2)
+
     # NFL confidence measures certainty in the estimate, not career value.
     # Sample maturity rises quickly and then saturates; achievements and
     # consistency remain valuation inputs instead of being counted again here.
@@ -312,6 +350,8 @@ def evidence_confidence(record: dict[str, Any]) -> float:
 def pricing_metrics(record: dict[str, Any]) -> dict[str, Any]:
     if is_soccer(record) and isinstance(record.get("soccerGlobalMetrics"), dict):
         return record["soccerGlobalMetrics"]
+    if is_motorsport(record) and isinstance(record.get("motorsportMetrics"), dict):
+        return record["motorsportMetrics"]
     return record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
 
 
@@ -355,7 +395,7 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     # market-price ledger. Reusing the previous game's move inside fair value
     # compounds the same event again on rebuilds. Keep event outcomes in the
     # observable market ledger while fundamentals remain evidence-driven.
-    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record)) else num(record.get("lastGameMovePct", 0))
+    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record) or is_motorsport(record)) else num(record.get("lastGameMovePct", 0))
     event_signal = math.copysign(math.log1p(abs(event_pct)) * 2.5, event_pct) if event_pct else 0.0
     current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_signal
     score = audience * .38 + talent * .37 + clamp(current_signal) * .25
@@ -424,6 +464,7 @@ def rookie_ipo_value(record: dict[str, Any]) -> tuple[float | None, float]:
 
 def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     result = calibrate_soccer_record(dict(record))
+    result = calibrate_motorsport_record(result)
     talent = talent_score(result)
     confidence = evidence_confidence(result)
     market = market_score(result, talent)
