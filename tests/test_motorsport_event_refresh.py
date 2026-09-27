@@ -67,13 +67,39 @@ class MotorsportEventRefreshTests(unittest.TestCase):
         self.assertEqual(generic["marketSegment"], "Under Review")
         self.assertEqual(counts["movedToUnderReview"], 1)
 
+    def test_standings_only_participant_is_not_auto_promoted_to_current(self):
+        records = [{
+            "id": "athlete-motorsport-george-russell", "name": "George Russell",
+            "primaryCategory": "Athlete", "discipline": "Motorsport", "leagueOrMedium": "Formula 1",
+            "sourceNamespace": "curated-individual-sport-roster", "marketPrice": 120.0,
+            "pricingConfidence": 0.64, "activeMetrics": {"performance": 80, "achievements": 75, "consistency": 75, "potential": 75, "availability": 88, "audience": 80},
+        }, {
+            "id": "wiki-max", "name": "Max Verstappen",
+            "primaryCategory": "Athlete", "discipline": "Motorsport", "leagueOrMedium": "International Motorsport",
+            "sourceNamespace": "wikidata-individual-sport", "marketSegment": "Current",
+            "marketPrice": 95.0, "pricingConfidence": 0.56,
+        }]
+        standings = standings_from_payload(self.standings_payload())
+        races = races_from_results_pages([self.results_page()])
+        updated, _ = apply_refresh(records, standings, races, season=2026, refreshed_at="2026-03-10T18:00:00Z")
+        max_rows = [r for r in updated if r["name"] == "Max Verstappen"]
+        self.assertEqual(len(max_rows), 1)
+        self.assertEqual(max_rows[0]["marketSegment"], "Under Review")
+        self.assertNotEqual(max_rows[0].get("leagueOrMedium"), "Formula 1")
+
     def test_new_race_applies_once_after_migration(self):
         standings = standings_from_payload(self.standings_payload())
         races = races_from_results_pages([self.results_page()])
         base = [{
             "id": "athlete-motorsport-george-russell", "name": "George Russell", "primaryCategory": "Athlete",
             "discipline": "Motorsport", "leagueOrMedium": "Formula 1", "marketPrice": 100.0,
-            "motorsportMarketMigrationVersion": "1.0-motorsport-verified-race-ledger", "priceEvents": [],
+            "sourceNamespace": "curated-individual-sport-roster",
+            "motorsportMarketMigrationVersion": "1.0-motorsport-verified-race-ledger",
+            "priceEvents": [{
+                "eventKey": "jolpica-f1:2026:0:russell", "eventId": "jolpica-f1:2026:0:russell",
+                "eventType": "game", "provider": "Jolpica F1", "verified": True,
+                "startedAt": "2026-03-01T14:00:00Z", "movePct": 0.5,
+            }],
             "activeMetrics": {"performance": 80, "achievements": 75, "consistency": 75, "potential": 75, "availability": 88, "audience": 80},
         }]
         one, counts = apply_refresh(base, standings, races, season=2026, refreshed_at="2026-03-10T18:00:00Z")
