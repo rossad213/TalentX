@@ -295,7 +295,21 @@ def apply_outcome_events(record: dict[str, Any], events: list[dict[str, Any]]) -
     result = dict(record)
     prior = [dict(item) for item in result.get("priceEvents", []) if isinstance(item, dict)]
     known = {str(item.get("eventKey") or item.get("eventId") or "") for item in prior}
-    pending = [event for event in events if str(event.get("eventKey") or "") not in known]
+    pending_by_key: dict[str, dict[str, Any]] = {}
+    for event in events:
+        key = str(event.get("eventKey") or event.get("eventId") or "").strip()
+        if not key or key in known:
+            continue
+        existing = pending_by_key.get(key)
+        if existing is None:
+            pending_by_key[key] = event
+            continue
+        # Multiple base events can independently discover the same verified
+        # outcome during one source pass. One real-world outcome may price once.
+        # Keep the strongest measured target when the duplicate payloads differ.
+        if abs(number(event.get("targetOutcomeMovePct"), 0)) > abs(number(existing.get("targetOutcomeMovePct"), 0)):
+            pending_by_key[key] = event
+    pending = list(pending_by_key.values())
     pending.sort(key=lambda item: str(item.get("startedAt") or ""))
     if not pending:
         return result, 0

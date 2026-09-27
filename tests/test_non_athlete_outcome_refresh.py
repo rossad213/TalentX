@@ -108,6 +108,25 @@ class NonAthleteOutcomePricingTests(unittest.TestCase):
         self.assertEqual(updated["lastPriceEventId"], event["eventKey"])
         self.assertEqual(updated["priceExplanation"]["headline"], "Chart performance: #7")
 
+    def test_duplicate_outcomes_in_same_batch_price_only_once(self) -> None:
+        first = outcome_event(
+            self.actor,
+            "wikimedia:attention:Q1:Q2:hot",
+            "actor-attention-outcome",
+            "Audience attention hot",
+            "Wikimedia Analytics API",
+            "https://example.test",
+            0.75,
+            datetime(2026, 8, 8, tzinfo=timezone.utc),
+            {"attentionRatio": 2.2},
+        )
+        stronger = {**first, "targetOutcomeMovePct": 1.10, "attentionRatio": 2.8}
+        updated, count = apply_outcome_events(self.actor, [first, stronger])
+        self.assertEqual(count, 1)
+        self.assertEqual(len(updated["priceEvents"]), 1)
+        self.assertEqual(updated["priceEvents"][0]["eventKey"], first["eventKey"])
+        self.assertGreater(updated["priceEvents"][0]["movePct"], 0)
+
     def test_duplicate_outcome_cannot_price_twice(self) -> None:
         event = outcome_event(
             self.actor,
