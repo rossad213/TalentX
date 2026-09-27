@@ -68,14 +68,42 @@ def _merge_lists(group,field,key_fn,preferred):
             if any(str(part) for part in key):merged[key]=dict(value)
     return sorted(merged.values(),key=lambda item:str(item.get("startedAt") or item.get("time") or item.get("date") or ""))
 
-def reconcile_records(records:list[dict[str,Any]],preferred_ids:set[str]|None=None):
+def reconcile_records(
+    records:list[dict[str,Any]],
+    preferred_ids:set[str]|None=None,
+    preferred_non_actor_names:set[str]|None=None,
+):
     preferred_ids=preferred_ids or set()
+    preferred_non_actor_names=preferred_non_actor_names or set()
+    replacements={};suppressed=set();repairs=[]
+    # A last-known-good Actor overlay may contain a source-discovered profile
+    # whose newest full baseline has deliberately reassigned that identity to
+    # another primary category. Do not let the stale Actor copy return.
+    for record in records:
+        rid=str(record.get("id") or "")
+        name_key=normalize_name(record.get("name"))
+        if (
+            is_actor(record)
+            and not _is_curated(record)
+            and rid not in preferred_ids
+            and name_key in preferred_non_actor_names
+        ):
+            if rid:
+                suppressed.add(rid)
+            repairs.append({
+                "name":str(record.get("name") or ""),
+                "canonicalId":"preferred-non-Actor-primary",
+                "suppressedId":rid,
+                "wikidataId":_qid(record),
+                "reason":"newest full baseline assigns this source-discovered identity to another primary category",
+            })
     groups=defaultdict(list)
     for record in records:
+        if str(record.get("id") or "") in suppressed:
+            continue
         if is_actor(record):
             key=normalize_name(record.get("name"))
             if key:groups[key].append(record)
-    replacements={};suppressed=set();repairs=[]
     for name_key,group in groups.items():
         if len(group)<2 or not _same_identity(group):continue
         canonical=max(group,key=lambda r:_canonical_score(r,preferred_ids))
@@ -110,11 +138,21 @@ def reconcile_records(records:list[dict[str,Any]],preferred_ids:set[str]|None=No
         output.append(replacements.get(rid,dict(r)))
     return output,repairs
 
-def preferred_actor_ids(path:Path|None)->set[str]:
-    if path is None or not path.exists():return set()
+def preferred_actor_context(path:Path|None)->tuple[set[str],set[str]]:
+    if path is None or not path.exists():return set(),set()
     payload=json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload,list):return set()
-    return {str(r.get("id") or "") for r in payload if isinstance(r,dict) and is_actor(r) and r.get("id")}
+    if not isinstance(payload,list):return set(),set()
+    actor_ids={
+        str(r.get("id") or "") for r in payload
+        if isinstance(r,dict) and is_actor(r) and r.get("id")
+    }
+    non_actor_names={
+        normalize_name(r.get("name")) for r in payload
+        if isinstance(r,dict)
+        and str(r.get("primaryCategory") or "") not in {"","Actor"}
+        and normalize_name(r.get("name"))
+    }
+    return actor_ids,non_actor_names
 
 def write_csv(path:Path,records):
     fields=sorted({k for r in records for k,v in r.items() if not isinstance(v,(dict,list))})
@@ -126,7 +164,8 @@ def main()->int:
     payload=json.loads(args.catalog.read_text(encoding="utf-8"))
     if not isinstance(payload,list):raise ValueError(f"{args.catalog} must contain a JSON array")
     records=[dict(i) for i in payload if isinstance(i,dict)]
-    reconciled,repairs=reconcile_records(records,preferred_actor_ids(args.preferred_catalog))
+    preferred_ids,preferred_non_actor_names=preferred_actor_context(args.preferred_catalog)
+    reconciled,repairs=reconcile_records(records,preferred_ids,preferred_non_actor_names)
     args.catalog.write_text(json.dumps(reconciled,ensure_ascii=False,separators=(",",":")),encoding="utf-8")
     if args.catalog.name=="current_catalog.json":write_csv(args.catalog.with_suffix(".csv"),reconciled)
     print(f"Actor identity reconciliation: {len(records):,} -> {len(reconciled):,}; suppressed {len(repairs):,} duplicate listing(s).")

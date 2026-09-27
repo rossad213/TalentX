@@ -13,6 +13,25 @@ class ActorIdentityReconciliationTests(unittest.TestCase):
         self.assertEqual(out[0]["marketPrice"],248.0);self.assertEqual(len(out[0]["priceEvents"]),1)
         self.assertEqual(out[0]["actorCanonicalAliasIds"],["cur-timoth-e-chalamet"]);self.assertEqual(len(repairs),1)
 
+    def test_stale_source_actor_is_removed_when_new_baseline_moved_identity_to_music(self):
+        stale={
+            "id":"cur-bob-dylan","name":"Bob Dylan","primaryCategory":"Actor",
+            "sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q392",
+        }
+        out,repairs=reconcile_records([stale],set(),{"bobdylan"})
+        self.assertEqual(out,[])
+        self.assertEqual(len(repairs),1)
+        self.assertIn("another primary category",repairs[0]["reason"])
+
+    def test_curated_crossover_is_not_removed_by_non_actor_name(self):
+        curated={
+            "id":"curated","name":"Crossover Star","primaryCategory":"Actor",
+            "nonAthleteRosterVersion":"1.0.0",
+        }
+        out,repairs=reconcile_records([curated],set(),{"crossoverstar"})
+        self.assertEqual(out,[curated])
+        self.assertEqual(repairs,[])
+
     def test_same_name_different_qids_are_preserved(self):
         a={"id":"a","name":"Jordan Lee","primaryCategory":"Actor","sourceRecordId":"Q1"}
         b={"id":"b","name":"Jordan Lee","primaryCategory":"Actor","sourceRecordId":"Q2"}
