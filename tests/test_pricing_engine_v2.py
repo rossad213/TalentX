@@ -213,6 +213,41 @@ class PricingEngineV2Tests(unittest.TestCase):
             id='generic',sourceNamespace='wikidata-non-athlete',yearsActive=25,pricingConfidence=.94,dataConfidence=.94,
             activeMetrics={"performance":88,"achievements":86,"consistency":90,"potential":68,"availability":78,"audience":91}))
         self.assertGreater(curated['fairValue'],discovered['fairValue'])
+    def test_unverified_motorsport_discovery_cannot_escape_evidence_ceiling(self):
+        discovered=apply_v2(self.record(
+            discipline='Motorsport',leagueOrMedium='International Motorsport',
+            sourceNamespace='wikidata-individual-sport',professionEvidenceVerified=False,
+            professionalGames=0,pricingConfidence=.56,dataConfidence=.56,
+            marketPrice=95,fundamentalValue=90))
+        self.assertLessEqual(discovered['confidenceScore'],56)
+        self.assertLessEqual(discovered['fairValue'],62)
+        self.assertEqual(discovered['pricingV2']['motorsportEvidenceGateCeiling'],62.0)
+        self.assertEqual(discovered['pricingModelVersion'],'6.1-motorsport-verified-race-ledger')
+
+    def test_verified_f1_races_create_mature_confidence(self):
+        events=[{
+            'eventKey':f'jolpica-f1:2026:{i}:russell','eventType':'game',
+            'provider':'Jolpica F1','verified':True
+        } for i in range(1,15)]
+        f1=self.record(
+            discipline='Motorsport',leagueOrMedium='Formula 1',
+            professionEvidenceVerified=True,motorsportSeasonStarts=14,
+            motorsportChampionshipRank=1,sourceRank=1,priceEvents=events,
+            pricingConfidence=.90,dataConfidence=.90)
+        self.assertGreaterEqual(evidence_confidence(f1),90)
+        priced=apply_v2(f1)
+        self.assertGreater(priced['fairValue'],62)
+        self.assertEqual(priced['pricingV2']['motorsportVerifiedRaceCount'],14)
+
+    def test_motorsport_game_move_stays_in_event_ledger_not_fair_value(self):
+        record=self.record(
+            discipline='Motorsport',leagueOrMedium='Formula 1',
+            professionEvidenceVerified=True,motorsportSeasonStarts=12,
+            motorsportChampionshipRank=4)
+        positive=market_score({**record,'lastGameMovePct':20},85)
+        negative=market_score({**record,'lastGameMovePct':-20},85)
+        self.assertEqual(positive,negative)
+
     def test_deterministic(self):
         self.assertEqual(apply_v2(self.record()),apply_v2(self.record()))
 

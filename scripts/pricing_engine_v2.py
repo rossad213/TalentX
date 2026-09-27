@@ -23,6 +23,8 @@ from soccer_metric_calibration import (
 )
 
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
+MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
+MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
 CATEGORY_METRICS = {
     "Athlete": {"performance": .34, "achievements": .24, "consistency": .18, "potential": .14, "availability": .10},
@@ -93,6 +95,36 @@ def is_tennis(record: dict[str, Any]) -> bool:
         str(record.get("primaryCategory") or "") == "Athlete"
         and str(record.get("discipline") or "").strip().lower() == "tennis"
     )
+
+
+def is_motorsport(record: dict[str, Any]) -> bool:
+    return (
+        str(record.get("primaryCategory") or "") == "Athlete"
+        and str(record.get("discipline") or "").strip().lower() == "motorsport"
+    )
+
+
+def motorsport_verified_race_count(record: dict[str, Any]) -> int:
+    keys: set[str] = set()
+    for event in record.get("priceEvents", []) if isinstance(record.get("priceEvents"), list) else []:
+        if not isinstance(event, dict) or event.get("verified") is False:
+            continue
+        if str(event.get("provider") or "") != "Jolpica F1":
+            continue
+        if str(event.get("eventType") or "").strip().lower() != "game":
+            continue
+        key = str(event.get("eventKey") or event.get("eventId") or "").strip()
+        if key:
+            keys.add(key)
+    return len(keys)
+
+
+def is_unverified_motorsport_discovery(record: dict[str, Any]) -> bool:
+    if not is_motorsport(record) or bool(record.get("professionEvidenceVerified")):
+        return False
+    namespace = str(record.get("sourceNamespace") or "").strip().lower()
+    segment = str(record.get("marketSegment") or "").strip().lower()
+    return namespace == "wikidata-individual-sport" or segment == "under review"
 
 
 def tennis_verified_match_count(record: dict[str, Any]) -> int:
@@ -222,6 +254,27 @@ def is_generic_wikidata_discovery(record: dict[str, Any]) -> bool:
 
 
 def evidence_confidence(record: dict[str, Any]) -> float:
+    if is_motorsport(record) and bool(record.get("professionEvidenceVerified")):
+        races = max(motorsport_verified_race_count(record), int(max(0.0, num(record.get("motorsportSeasonStarts")))))
+        data = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.75)) * 100)
+        metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+        consistency = clamp(metrics.get("consistency", 65))
+        achievements = clamp(metrics.get("achievements", 55))
+        sample = 100.0 * (1.0 - math.exp(-races / 9.0)) if races else 0.0
+        sustained = consistency * .55 + achievements * .45
+        confidence = data * .50 + sample * .35 + sustained * .15
+        rank = optional_num(record.get("motorsportChampionshipRank"))
+        if rank is None or rank <= 0:
+            rank = optional_num(record.get("sourceRank"))
+        if rank is not None and rank > 0:
+            if rank <= 3:
+                confidence = max(confidence, 90.0)
+            elif rank <= 10:
+                confidence = max(confidence, 86.0)
+            elif rank <= 22:
+                confidence = max(confidence, 80.0)
+        return round(clamp(confidence, 25, 96), 2)
+
     if is_tennis(record):
         # Tennis listings often lack a team-sport-style professionalGames field,
         # even when hundreds of verified ATP/WTA matches are attached. Treat the
@@ -301,6 +354,8 @@ def evidence_confidence(record: dict[str, Any]) -> float:
 
     if is_generic_wikidata_discovery(record):
         confidence = min(confidence, GENERIC_DISCOVERY_CONFIDENCE_CAP)
+    if is_unverified_motorsport_discovery(record):
+        confidence = min(confidence, 56.0)
 
     floor = curated_confidence_floor(record)
     if floor:
@@ -355,7 +410,7 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     # market-price ledger. Reusing the previous game's move inside fair value
     # compounds the same event again on rebuilds. Keep event outcomes in the
     # observable market ledger while fundamentals remain evidence-driven.
-    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record)) else num(record.get("lastGameMovePct", 0))
+    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record) or is_motorsport(record)) else num(record.get("lastGameMovePct", 0))
     event_signal = math.copysign(math.log1p(abs(event_pct)) * 2.5, event_pct) if event_pct else 0.0
     current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_signal
     score = audience * .38 + talent * .37 + clamp(current_signal) * .25
@@ -432,6 +487,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
 
     rookie_anchor, rookie_influence = rookie_ipo_value(result)
     fair = generic_fair
+    if is_unverified_motorsport_discovery(result):
+        fair = round(min(fair, MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING), 2)
     if rookie_anchor is not None and rookie_influence > 0:
         # At IPO the draft/pre-pro anchor is fully authoritative. As verified
         # professional evidence accumulates, the generic v2 career value takes
@@ -455,7 +512,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     result["fairValue"] = fair
     result["fundamentalValue"] = fair
     result["marketPrice"] = fair
-    result["pricingModelVersion"] = MODEL_VERSION
+    result["pricingModelVersion"] = MOTORSPORT_MODEL_VERSION if is_motorsport(result) else MODEL_VERSION
     result["pricingEngine"] = "v2"
     result["pricingV2"] = {
         "talentScore": talent,
@@ -468,6 +525,14 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         "rookieInfluence": round(rookie_influence, 4),
         "fairValue": fair,
         "soccerCalibrationVersion": result.get("soccerCalibrationVersion"),
+        "motorsportEvidenceGateCeiling": (
+            MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING
+            if is_unverified_motorsport_discovery(result)
+            else None
+        ),
+        "motorsportVerifiedRaceCount": (
+            motorsport_verified_race_count(result) if is_motorsport(result) else None
+        ),
     }
     if isinstance(result.get("rookiePricing"), dict) and rookie_anchor is not None:
         result["rookiePricing"] = {
