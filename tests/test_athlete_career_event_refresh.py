@@ -112,6 +112,22 @@ class AthleteCareerEventRefreshTests(unittest.TestCase):
         self.assertEqual(event["eventType"], "athlete-team-change")
         self.assertGreater(abs(float(event["movePct"])), 0.0)
 
+    def test_motorsport_provider_team_alias_does_not_create_fake_change(self):
+        prior = {
+            "id": "max", "primaryCategory": "Athlete", "discipline": "Motorsport",
+            "teamOrPlatform": "Red Bull Racing",
+        }
+        current = {
+            "id": "max", "name": "Max Verstappen", "primaryCategory": "Athlete",
+            "discipline": "Motorsport", "teamOrPlatform": "Red Bull",
+            "marketPrice": 190.0, "fundamentalValue": 195.0,
+            "lastVerifiedAt": "2026-09-27T08:00:00Z",
+        }
+        self.assertIsNone(automatic_team_change(current, prior))
+
+        current["teamOrPlatform"] = "Ferrari"
+        self.assertIsNotNone(automatic_team_change(current, prior))
+
     def test_large_expectation_gap_can_exceed_old_team_change_limit(self):
         prior = {"id": "player", "primaryCategory": "Athlete", "teamOrPlatform": "Old Club"}
         current = {

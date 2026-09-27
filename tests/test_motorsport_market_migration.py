@@ -31,6 +31,27 @@ class MotorsportMarketMigrationTests(unittest.TestCase):
         self.assertFalse(changed)
         self.assertEqual(unchanged, provisional)
 
+    def test_prior_motorsport_epoch_is_rebased_to_current_version(self):
+        stale = {
+            "id": "f1", "name": "Max Verstappen", "primaryCategory": "Athlete",
+            "discipline": "Motorsport", "leagueOrMedium": "Formula 1",
+            "marketPrice": 197.11, "fundamentalValue": 196.91,
+            "professionEvidenceVerified": True,
+            "motorsportMarketMigrationVersion": "1.0-motorsport-verified-race-ledger",
+            "pricingConfidence": 0.936,
+            "activeMetrics": {"performance": 88, "achievements": 90, "consistency": 84, "potential": 78, "availability": 88, "audience": 92},
+            "priceEvents": [{
+                "eventKey": "jolpica-f1:2026:15:max_verstappen",
+                "eventId": "jolpica-f1:2026:15:max_verstappen",
+                "eventType": "game", "provider": "Jolpica F1",
+                "startedAt": "2026-09-26T11:00:00Z", "movePct": 1.1,
+                "performanceDeltaPct": 20.0,
+            }],
+        }
+        updated, changed = migrate_record(stale, "2026-09-27T12:00:00Z")
+        self.assertTrue(changed)
+        self.assertEqual(updated["motorsportMarketMigrationVersion"], MIGRATION_VERSION)
+
     def test_migration_is_motorsport_only_and_idempotent(self):
         nfl = {"id": "nfl", "primaryCategory": "Athlete", "discipline": "American Football", "marketPrice": 50}
         unchanged, changed = migrate_record(nfl, "2026-09-26T23:00:00Z")

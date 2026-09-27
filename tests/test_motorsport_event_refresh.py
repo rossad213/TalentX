@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from motorsport_event_refresh import (
     apply_refresh, build_season_evidence, race_result_move,
-    races_from_results_pages, standings_from_payload,
+    races_from_results_pages, scrub_false_team_alias_events, standings_from_payload,
 )
 
 
@@ -86,6 +86,31 @@ class MotorsportEventRefreshTests(unittest.TestCase):
         self.assertEqual(len(max_rows), 1)
         self.assertEqual(max_rows[0]["marketSegment"], "Under Review")
         self.assertNotEqual(max_rows[0].get("leagueOrMedium"), "Formula 1")
+
+    def test_scrubs_false_team_alias_event_and_history(self):
+        record = {
+            "id": "max", "name": "Max Verstappen", "primaryCategory": "Athlete",
+            "discipline": "Motorsport", "leagueOrMedium": "Formula 1",
+            "priceEvents": [{
+                "eventKey": "roster-team-change:max:redbullracing:redbull",
+                "eventId": "roster-team-change:max:redbullracing:redbull",
+                "eventType": "athlete-team-change",
+                "careerEventModel": "verified-roster-team-change-v1",
+                "originTeam": "Red Bull Racing", "destinationTeam": "Red Bull",
+            }],
+            "priceHistory": [{
+                "time": "2026-09-27T08:00:00Z",
+                "eventId": "roster-team-change:max:redbullracing:redbull",
+                "price": 197.11,
+            }],
+            "lastPriceEventId": "roster-team-change:max:redbullracing:redbull",
+            "lastPriceEvent": "Team change: Red Bull Racing → Red Bull",
+        }
+        cleaned, removed = scrub_false_team_alias_events(record)
+        self.assertEqual(removed, 1)
+        self.assertEqual(cleaned["priceEvents"], [])
+        self.assertEqual(cleaned["priceHistory"], [])
+        self.assertNotIn("lastPriceEventId", cleaned)
 
     def test_new_race_applies_once_after_migration(self):
         standings = standings_from_payload(self.standings_payload())

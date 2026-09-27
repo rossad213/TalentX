@@ -19,8 +19,8 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 
-MIGRATION_VERSION = "1.0-motorsport-verified-race-ledger"
-MIGRATION_EVENT_ID = "model:motorsport-verified-race-ledger-v1"
+MIGRATION_VERSION = "1.1-motorsport-team-alias-cleanup"
+MIGRATION_EVENT_ID = "model:motorsport-verified-race-ledger-v2"
 PROVIDER = "Jolpica F1"
 
 _V2_FIELDS = (
@@ -146,6 +146,8 @@ def clean_prior_history(record: dict[str, Any], f1_event_ids: set[str]) -> list[
         event_id = str(item.get("eventId") or item.get("eventKey") or "")
         event_type = str(item.get("eventType") or "").lower()
         if event_id == "current-market-price" or event_type == "market-observation" or event_id in f1_event_ids:
+            continue
+        if event_type == "model_migration" and event_id.startswith("model:motorsport-verified-race-ledger"):
             continue
         key = (str(item.get("time") or ""), event_id, str(item.get("phase") or ""))
         if key in seen:

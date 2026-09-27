@@ -47,6 +47,30 @@ F1_ALIASES = {
     "sergioperez": "sergioperez",
 }
 
+F1_TEAM_ALIASES = {
+    "redbull": "redbull",
+    "redbullracing": "redbull",
+    "redbullracinghonda": "redbull",
+    "racingbulls": "racingbulls",
+    "rbf1team": "racingbulls",
+    "visacashapprb": "racingbulls",
+    "alpine": "alpine",
+    "alpinef1team": "alpine",
+    "cadillac": "cadillac",
+    "cadillacf1team": "cadillac",
+    "haas": "haas",
+    "haasf1team": "haas",
+    "astonmartin": "astonmartin",
+    "astonmartinf1team": "astonmartin",
+    "mercedes": "mercedes",
+    "mercedesamg": "mercedes",
+    "mclaren": "mclaren",
+    "ferrari": "ferrari",
+    "audi": "audi",
+    "williams": "williams",
+    "williamsracing": "williams",
+}
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -64,6 +88,53 @@ def normalize(value: Any) -> str:
 def identity_name(value: Any) -> str:
     key = normalize(value)
     return F1_ALIASES.get(key, key)
+
+
+def f1_team_key(value: Any) -> str:
+    key = normalize(value)
+    return F1_TEAM_ALIASES.get(key, key)
+
+
+def false_team_alias_event(event: dict[str, Any]) -> bool:
+    if str(event.get("careerEventModel") or "") != "verified-roster-team-change-v1":
+        return False
+    origin = str(event.get("originTeam") or "").strip()
+    destination = str(event.get("destinationTeam") or "").strip()
+    return bool(origin and destination and f1_team_key(origin) == f1_team_key(destination))
+
+
+def scrub_false_team_alias_events(record: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    result = dict(record)
+    events = [dict(item) for item in result.get("priceEvents", []) if isinstance(item, dict)]
+    removed_ids = {
+        str(item.get("eventKey") or item.get("eventId") or "")
+        for item in events if false_team_alias_event(item)
+    }
+    removed_ids.discard("")
+    if not removed_ids:
+        return result, 0
+
+    result["priceEvents"] = [
+        item for item in events
+        if str(item.get("eventKey") or item.get("eventId") or "") not in removed_ids
+    ]
+    result["priceHistory"] = [
+        dict(item) for item in result.get("priceHistory", [])
+        if isinstance(item, dict)
+        and str(item.get("eventId") or item.get("eventKey") or "") not in removed_ids
+    ]
+
+    for prefix in ("lastPriceEvent", "lastCareerEvent"):
+        if str(result.get(f"{prefix}Id") or "") in removed_ids:
+            for field in (f"{prefix}At", prefix, f"{prefix}Id"):
+                result.pop(field, None)
+    if str(result.get("lastEventType") or "") == "athlete-team-change":
+        result.pop("lastEventMovePct", None)
+        result.pop("lastEventType", None)
+        result.pop("lastEventSource", None)
+
+    result["motorsportFalseTeamAliasEventsRemoved"] = int(result.get("motorsportFalseTeamAliasEventsRemoved") or 0) + len(removed_ids)
+    return result, len(removed_ids)
 
 
 def slug(value: Any) -> str:
@@ -437,7 +508,14 @@ def record_strength(record: dict[str, Any]) -> tuple[Any, ...]:
 
 
 def apply_refresh(records: list[dict[str, Any]], standings: list[dict[str, Any]], races: list[dict[str, Any]], *, season: int, refreshed_at: str) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    updated = [dict(record) for record in records]
+    updated: list[dict[str, Any]] = []
+    false_team_alias_events_removed = 0
+    for record in records:
+        item = dict(record)
+        if is_motorsport(item):
+            item, removed = scrub_false_team_alias_events(item)
+            false_team_alias_events_removed += removed
+        updated.append(item)
     stats, events_by_identity = build_season_evidence(races)
     standings_by_identity = {str(item.get("identity") or ""): item for item in standings if item.get("identity")}
     field_size = max(2, len(standings))
@@ -601,6 +679,7 @@ def apply_refresh(records: list[dict[str, Any]], standings: list[dict[str, Any]]
         "eventsAdded": event_added,
         "liveEventsApplied": live_applied,
         "movedToUnderReview": under_review,
+        "falseTeamAliasEventsRemoved": false_team_alias_events_removed,
     }
 
 
@@ -641,7 +720,8 @@ def main() -> int:
         print(
             f"Motorsport F1 refresh: {len(standings)} current drivers, {len(races)} completed races, "
             f"{counts['eventsAdded']} event(s) added, {counts['liveEventsApplied']} live event(s) applied, "
-            f"{counts['movedToUnderReview']} unverified discovery listing(s) moved to Under Review."
+            f"{counts['movedToUnderReview']} unverified discovery listing(s) moved to Under Review, "
+            f"{counts['falseTeamAliasEventsRemoved']} false provider-label team event(s) removed."
         )
     except Exception as exc:  # noqa: BLE001
         manifest.update({"status": "degraded", "warnings": [f"{type(exc).__name__}: {exc}"]})

@@ -43,6 +43,36 @@ def norm(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
+MOTORSPORT_TEAM_ALIASES = {
+    "redbull": "redbull",
+    "redbullracing": "redbull",
+    "redbullracinghonda": "redbull",
+    "racingbulls": "racingbulls",
+    "rbf1team": "racingbulls",
+    "visacashapprb": "racingbulls",
+    "alpine": "alpine",
+    "alpinef1team": "alpine",
+    "cadillac": "cadillac",
+    "cadillacf1team": "cadillac",
+    "haas": "haas",
+    "haasf1team": "haas",
+    "astonmartin": "astonmartin",
+    "astonmartinf1team": "astonmartin",
+    "mercedes": "mercedes",
+    "mercedesamg": "mercedes",
+    "mclaren": "mclaren",
+    "ferrari": "ferrari",
+    "audi": "audi",
+    "williams": "williams",
+    "williamsracing": "williams",
+}
+
+
+def motorsport_team_key(value: Any) -> str:
+    key = norm(value)
+    return MOTORSPORT_TEAM_ALIASES.get(key, key)
+
+
 def load_records(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
@@ -193,6 +223,8 @@ def automatic_team_change(
     old_team = str(prior.get("teamOrPlatform") or "").strip()
     new_team = str(record.get("teamOrPlatform") or "").strip()
     if not old_team or not new_team or norm(old_team) == norm(new_team):
+        return None
+    if norm(record.get("discipline")) == "motorsport" and motorsport_team_key(old_team) == motorsport_team_key(new_team):
         return None
     if old_team.lower() in {"team not listed", "not listed", "unknown"}:
         return None
