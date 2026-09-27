@@ -512,7 +512,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     result["fairValue"] = fair
     result["fundamentalValue"] = fair
     result["marketPrice"] = fair
-    result["pricingModelVersion"] = MODEL_VERSION
+    result["pricingModelVersion"] = MOTORSPORT_MODEL_VERSION if is_motorsport(result) else MODEL_VERSION
     result["pricingEngine"] = "v2"
     result["pricingV2"] = {
         "talentScore": talent,
