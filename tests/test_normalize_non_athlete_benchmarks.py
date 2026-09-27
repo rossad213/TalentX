@@ -64,6 +64,19 @@ class NormalizeNonAthleteBenchmarksTests(unittest.TestCase):
         self.assertNotIn("benchmarkRank", records[0])
         self.assertNotIn("benchmarkPoolSize", records[0])
 
+    def test_removes_rank_from_creator_discovery(self):
+        records = [{
+            "name": "Source Creator",
+            "primaryCategory": "Creator",
+            "sourceNamespace": "wikidata-creator",
+            "benchmarkRank": 401,
+            "benchmarkPoolSize": 1000,
+        }]
+        self.assertEqual(normalize(records), 1)
+        self.assertNotIn("benchmarkRank", records[0])
+        self.assertNotIn("benchmarkPoolSize", records[0])
+        self.assertIn("not part of curated benchmark", records[0]["rankingStatus"])
+
     def test_preserves_curated_benchmark_rank(self):
         records = [{
             "name": "Curated Artist",

@@ -653,32 +653,33 @@ def apply_refresh(records: list[dict[str, Any]], standings: list[dict[str, Any]]
             live_applied += len(newly_live)
         updated[index] = record
 
-    under_review = 0
+    removed_from_current = 0
     if standings_by_identity:
         current_identities = set(approved_current_f1)
-        for index, record in enumerate(updated):
+        filtered: list[dict[str, Any]] = []
+        for record in updated:
             if not is_motorsport(record):
+                filtered.append(record)
                 continue
             identity = identity_name(record.get("name"))
-            if identity in current_identities:
-                continue
             namespace = str(record.get("sourceNamespace") or "").strip().lower()
-            if namespace == "wikidata-individual-sport" and not bool(record.get("professionEvidenceVerified")):
-                result = dict(record)
-                result["marketSegment"] = "Under Review"
-                result["verificationStatus"] = "Under Review — current championship participation not verified"
-                result["pricingDataStatus"] = "Under Review — generic racing occupation evidence only; current series participation not verified"
-                result["pricingConfidence"] = min(0.45, number(result.get("pricingConfidence", result.get("dataConfidence", 0.45)), 0.45))
-                result["dataConfidence"] = min(0.45, number(result.get("dataConfidence", result.get("pricingConfidence", 0.45)), 0.45))
-                updated[index] = result
-                under_review += 1
+            unverified_discovery = (
+                namespace == "wikidata-individual-sport"
+                and not bool(record.get("professionEvidenceVerified"))
+                and identity not in current_identities
+            )
+            if unverified_discovery:
+                removed_from_current += 1
+                continue
+            filtered.append(record)
+        updated = filtered
 
     return updated, {
         "createdF1Records": created,
         "verifiedF1Records": verified,
         "eventsAdded": event_added,
         "liveEventsApplied": live_applied,
-        "movedToUnderReview": under_review,
+        "removedUnverifiedFromCurrent": removed_from_current,
         "falseTeamAliasEventsRemoved": false_team_alias_events_removed,
     }
 
@@ -720,7 +721,7 @@ def main() -> int:
         print(
             f"Motorsport F1 refresh: {len(standings)} current drivers, {len(races)} completed races, "
             f"{counts['eventsAdded']} event(s) added, {counts['liveEventsApplied']} live event(s) applied, "
-            f"{counts['movedToUnderReview']} unverified discovery listing(s) moved to Under Review, "
+            f"{counts['removedUnverifiedFromCurrent']} unverified discovery listing(s) removed from the live Current catalog, "
             f"{counts['falseTeamAliasEventsRemoved']} false provider-label team event(s) removed."
         )
     except Exception as exc:  # noqa: BLE001

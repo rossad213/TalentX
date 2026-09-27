@@ -60,12 +60,11 @@ class MotorsportEventRefreshTests(unittest.TestCase):
         races = races_from_results_pages([self.results_page()])
         updated, counts = apply_refresh(records, standings, races, season=2026, refreshed_at="2026-03-10T18:00:00Z")
         russell = next(r for r in updated if r["name"] == "George Russell")
-        generic = next(r for r in updated if r["name"] == "Generic Racer")
         self.assertEqual(russell["marketPrice"], 120.0)
         self.assertTrue(russell["professionEvidenceVerified"])
         self.assertTrue(russell["priceEvents"][0]["historicalBackfill"])
-        self.assertEqual(generic["marketSegment"], "Under Review")
-        self.assertEqual(counts["movedToUnderReview"], 1)
+        self.assertFalse(any(r["name"] == "Generic Racer" for r in updated))
+        self.assertEqual(counts["removedUnverifiedFromCurrent"], 1)
 
     def test_standings_only_participant_is_not_auto_promoted_to_current(self):
         records = [{
@@ -83,9 +82,7 @@ class MotorsportEventRefreshTests(unittest.TestCase):
         races = races_from_results_pages([self.results_page()])
         updated, _ = apply_refresh(records, standings, races, season=2026, refreshed_at="2026-03-10T18:00:00Z")
         max_rows = [r for r in updated if r["name"] == "Max Verstappen"]
-        self.assertEqual(len(max_rows), 1)
-        self.assertEqual(max_rows[0]["marketSegment"], "Under Review")
-        self.assertNotEqual(max_rows[0].get("leagueOrMedium"), "Formula 1")
+        self.assertEqual(max_rows, [])
 
     def test_scrubs_false_team_alias_event_and_history(self):
         record = {
