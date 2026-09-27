@@ -104,6 +104,47 @@ def provisional_metrics(rank: int, group_size: int) -> dict[str, float]:
     }
 
 
+MOTORSPORT_EVIDENCE_FIELDS = (
+    "seasonRank", "seasonPoints", "seasonStarts", "seasonScheduledStarts",
+    "seasonWins", "seasonPodiums", "seasonPoles", "seasonTop5", "seasonTop10",
+    "seasonDNFs", "careerStarts", "careerWins", "careerPodiums", "careerPoles",
+    "careerChampionships", "majorWins", "birthYear", "workStartYear",
+)
+
+
+def motorsport_evidence(item: dict[str, Any], rank: int, group_size: int) -> dict[str, Any]:
+    evidence: dict[str, Any] = {}
+    for key in MOTORSPORT_EVIDENCE_FIELDS:
+        value = item.get(key)
+        if value is not None and value != "":
+            evidence[key] = value
+    if item.get("sourceRank") is not None:
+        evidence["seasonRank"] = int(number(item.get("sourceRank"), rank))
+        evidence["fieldSize"] = int(number(item.get("fieldSize"), group_size))
+    if evidence.get("workStartYear") is not None:
+        current_year = datetime.now(timezone.utc).year
+        evidence["yearsActive"] = max(1, current_year - int(number(evidence["workStartYear"], current_year)))
+    evidence["series"] = str(item.get("leagueOrMedium") or "Motorsport")
+    evidence["sourceName"] = item.get("sourceName")
+    evidence["sourceUrl"] = item.get("sourceUrl")
+    evidence["sourceAsOf"] = item.get("sourceAsOf")
+    return evidence
+
+
+def neutral_motorsport_metrics(item: dict[str, Any]) -> dict[str, float]:
+    """Non-rank fallback; the dedicated calibrator replaces these downstream."""
+    series = str(item.get("leagueOrMedium") or "")
+    audience = 84.0 if series == "Formula 1" else 72.0 if "INDYCAR" in series.upper() else 76.0 if series == "MotoGP" else 74.0
+    return {
+        "performance": 62.0,
+        "achievements": 40.0,
+        "consistency": 62.0,
+        "potential": 64.0,
+        "availability": 88.0,
+        "audience": audience,
+    }
+
+
 def ticker_base(name: str) -> str:
     words = re.findall(r"[A-Za-z0-9]+", unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii"))
     base = "".join(word[0] for word in words[:5]) if len(words) > 1 else "".join(words)[:5]
@@ -150,7 +191,8 @@ def build_record(
 ) -> dict[str, Any]:
     name = str(item["name"]).strip()
     rank = int(number(item.get("sourceRank", item.get("rosterPriority", group_size)), group_size))
-    confidence = 0.64 if item.get("sourceRank") is not None else 0.61
+    structured_motorsport = discipline == "Motorsport" and any(item.get(key) is not None for key in MOTORSPORT_EVIDENCE_FIELDS)
+    confidence = 0.90 if structured_motorsport else (0.64 if item.get("sourceRank") is not None else 0.61)
     source_as_of = str(item.get("sourceAsOf") or "")
     league = str(item.get("leagueOrMedium") or discipline)
     team = str(item.get("teamOrPlatform") or league)
@@ -183,11 +225,17 @@ def build_record(
         "pricingDataStatus": "Curated individual-sport roster; profession-specific statistics pending",
         "pricingConfidence": confidence,
         "dataConfidence": confidence,
-        "activeMetrics": provisional_metrics(rank, group_size),
+        "activeMetrics": neutral_motorsport_metrics(item) if discipline == "Motorsport" else provisional_metrics(rank, group_size),
         "legacyMetrics": {},
         "modelType": "Active career model",
         "careerStage": "Established",
         "avatar": "".join(part[0] for part in name.split()[:2]).upper(),
+        **({
+            "motorsportEvidence": motorsport_evidence(item, rank, group_size),
+            "yearsActive": motorsport_evidence(item, rank, group_size).get("yearsActive"),
+            "birthYear": item.get("birthYear"),
+            "motorsportEvidenceStatus": "structured-official-series-evidence",
+        } if discipline == "Motorsport" else {}),
         "description": (
             f"Current {discipline} listing sourced from {item.get('sourceName') or 'an official roster'}. "
             "Pricing is provisional until profession-specific performance and career evidence is enriched."
@@ -220,7 +268,21 @@ def merge_existing(record: dict[str, Any], discipline: str, item: dict[str, Any]
     })
     if item.get("sourceRank") is not None:
         record["rosterSourceRank"] = int(number(item.get("sourceRank"), rank))
-    if not isinstance(record.get("activeMetrics"), dict) or not record["activeMetrics"]:
+    if discipline == "Motorsport":
+        ev = motorsport_evidence(item, rank, group_size)
+        record["motorsportEvidence"] = {**(record.get("motorsportEvidence") if isinstance(record.get("motorsportEvidence"), dict) else {}), **ev}
+        record["motorsportEvidenceStatus"] = "structured-official-series-evidence"
+        if ev.get("yearsActive") is not None:
+            record["yearsActive"] = ev["yearsActive"]
+        if item.get("birthYear") is not None:
+            record["birthYear"] = item["birthYear"]
+        # Do not reuse championship rank as five separate metrics.
+        if str(record.get("sourceNamespace") or "") == SOURCE_NAMESPACE or not record.get("activeMetrics"):
+            record["activeMetrics"] = neutral_motorsport_metrics(item)
+        if record.get("pricingConfidence") is None or number(record.get("pricingConfidence"), 0) < 0.80:
+            record["pricingConfidence"] = 0.90
+            record["dataConfidence"] = max(number(record.get("dataConfidence"), 0), 0.90)
+    elif not isinstance(record.get("activeMetrics"), dict) or not record["activeMetrics"]:
         record["activeMetrics"] = provisional_metrics(rank, group_size)
     if record.get("pricingConfidence") is None:
         record["pricingConfidence"] = 0.64 if item.get("sourceRank") is not None else 0.61
