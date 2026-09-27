@@ -25,6 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
+ACTOR_MODEL_VERSION = "6.3-actor-evidence-confidence"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
 CATEGORY_METRICS = {
@@ -109,6 +110,10 @@ def is_music(record: dict[str, Any]) -> bool:
     return str(record.get("primaryCategory") or "") == "Music"
 
 
+def is_actor(record: dict[str, Any]) -> bool:
+    return str(record.get("primaryCategory") or "") == "Actor"
+
+
 def is_strict_music_discovery(record: dict[str, Any]) -> bool:
     return (
         is_music(record)
@@ -153,6 +158,55 @@ def music_pricing_evidence_ceiling(record: dict[str, Any]) -> float:
     direct = music_direct_evidence_weight(record)
     bonus = min(18.0, 5.5 * math.log1p(max(0.0, direct))) if direct else 0.0
     return round(min(78.0, base + bonus), 2)
+
+
+def is_actor_discovery(record: dict[str, Any]) -> bool:
+    return (
+        is_actor(record)
+        and not is_curated_non_athlete(record)
+        and str(record.get("sourceNamespace") or "") in {
+            "wikidata-non-athlete",
+            "wikidata-actor-only",
+            "wikidata-actor-resolved-from-music",
+        }
+    )
+
+
+def actor_direct_evidence_weight(record: dict[str, Any]) -> float:
+    weights = {
+        "actor-box-office-outcome": 2.5,
+        "actor-streaming-outcome": 2.25,
+        "actor-release": 1.0,
+        "award": 0.75,
+        "nomination": 0.35,
+        "actor-attention-outcome": 0.75,
+    }
+    seen: set[str] = set()
+    total = 0.0
+    for event in record.get("priceEvents", []) if isinstance(record.get("priceEvents"), list) else []:
+        if not isinstance(event, dict) or event.get("verified") is False:
+            continue
+        event_type = str(event.get("eventType") or "")
+        weight = weights.get(event_type, 0.0)
+        if not weight:
+            continue
+        key = str(event.get("eventKey") or event.get("eventId") or "")
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        total += weight
+    return round(total, 3)
+
+
+def actor_pricing_evidence_ceiling(record: dict[str, Any]) -> float:
+    if not is_actor_discovery(record):
+        return 99.0
+    identity_verified = bool(str(record.get("sourceRecordId") or "").strip())
+    base = 60.0 if identity_verified else 56.0
+    direct = actor_direct_evidence_weight(record)
+    bonus = min(20.0, 5.5 * math.log1p(max(0.0, direct))) if direct else 0.0
+    return round(min(80.0, base + bonus), 2)
 
 
 def motorsport_verified_race_count(record: dict[str, Any]) -> int:
@@ -407,6 +461,8 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         confidence = min(confidence, GENERIC_DISCOVERY_CONFIDENCE_CAP)
     if is_strict_music_discovery(record):
         confidence = min(confidence, music_pricing_evidence_ceiling(record))
+    if is_actor_discovery(record):
+        confidence = min(confidence, actor_pricing_evidence_ceiling(record))
     if is_unverified_motorsport_discovery(record):
         confidence = min(confidence, 56.0)
 
@@ -463,7 +519,7 @@ def market_score(record: dict[str, Any], talent: float) -> float:
     # market-price ledger. Reusing the previous game's move inside fair value
     # compounds the same event again on rebuilds. Keep event outcomes in the
     # observable market ledger while fundamentals remain evidence-driven.
-    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record) or is_motorsport(record) or is_music(record)) else num(record.get("lastGameMovePct", 0))
+    event_pct = 0.0 if (is_nhl(record) or is_basketball(record) or is_tennis(record) or is_motorsport(record) or is_music(record) or is_actor(record)) else num(record.get("lastGameMovePct", 0))
     event_signal = math.copysign(math.log1p(abs(event_pct)) * 2.5, event_pct) if event_pct else 0.0
     current_signal = 50 + momentum_pct * 1.25 + demand_pct * .8 + event_signal
     score = audience * .38 + talent * .37 + clamp(current_signal) * .25
@@ -569,6 +625,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         result["pricingModelVersion"] = MOTORSPORT_MODEL_VERSION
     elif is_music(result):
         result["pricingModelVersion"] = MUSIC_MODEL_VERSION
+    elif is_actor(result):
+        result["pricingModelVersion"] = ACTOR_MODEL_VERSION
     else:
         result["pricingModelVersion"] = MODEL_VERSION
     result["pricingEngine"] = "v2"
@@ -601,6 +659,16 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         ),
         "musicDirectEvidenceWeight": (
             music_direct_evidence_weight(result) if is_music(result) else None
+        ),
+        "actorIdentityConfidenceScore": (
+            90.0 if is_actor_discovery(result) and bool(str(result.get("sourceRecordId") or "").strip())
+            else None
+        ),
+        "actorPricingEvidenceCeiling": (
+            actor_pricing_evidence_ceiling(result) if is_actor_discovery(result) else None
+        ),
+        "actorDirectEvidenceWeight": (
+            actor_direct_evidence_weight(result) if is_actor(result) else None
         ),
     }
     if isinstance(result.get("rookiePricing"), dict) and rookie_anchor is not None:

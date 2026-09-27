@@ -226,6 +226,33 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
         self.assertEqual(market_score(base,80),market_score(moved,80))
 
+    def test_source_backed_actor_identity_does_not_equal_mature_pricing_evidence(self):
+        actor=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
+            yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
+        self.assertLessEqual(evidence_confidence(actor),60)
+        priced=apply_v2(actor)
+        self.assertEqual(priced['pricingModelVersion'],'6.3-actor-evidence-confidence')
+        self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
+        self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],60.0)
+
+    def test_verified_actor_outcomes_raise_pricing_evidence_ceiling(self):
+        base=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
+            yearsActive=15,pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
+        enriched={**base,'priceEvents':[
+            {'eventKey':f'box:{i}','eventType':'actor-box-office-outcome','verified':True}
+            for i in range(4)
+        ]}
+        self.assertGreater(evidence_confidence(enriched),evidence_confidence(base))
+        self.assertGreater(apply_v2(enriched)['pricingV2']['actorPricingEvidenceCeiling'],60)
+
+    def test_actor_event_move_stays_in_event_ledger_not_fair_value(self):
+        base=self.music_record(primaryCategory='Actor',lastGameMovePct=0)
+        moved={**base,'lastGameMovePct':12.0}
+        self.assertEqual(apply_v2(base)['fairValue'],apply_v2(moved)['fairValue'])
+        self.assertEqual(market_score(base,80),market_score(moved,80))
+
     def test_stronger_curated_artist_stays_above_generic_longevity_proxy(self):
         curated=apply_v2(self.music_record(
             id='taylor',nonAthleteRosterVersion='1.0.0',benchmarkRank=1,benchmarkPoolSize=100,

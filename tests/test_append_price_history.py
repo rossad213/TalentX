@@ -69,6 +69,27 @@ class AppendPriceHistoryTests(unittest.TestCase):
         updated,_=append_record_history(record,datetime(2026,9,26,16,31,tzinfo=timezone.utc))
         self.assertEqual(updated["priceHistoryStatus"],"source-backed-partial-history")
 
+    def test_actor_current_observation_only_is_not_labeled_source_backed(self):
+        record={
+            "id":"actor-1","primaryCategory":"Actor","marketPrice":120.0,
+            "lastPriceRefreshAt":"2026-09-26T16:30:00Z","priceHistory":[],"priceEvents":[],
+        }
+        updated,_=append_record_history(record,datetime(2026,9,26,16,31,tzinfo=timezone.utc))
+        self.assertEqual(updated["priceHistoryStatus"],"market-observation-only")
+
+    def test_actor_verified_event_history_is_labeled_source_backed_partial(self):
+        record={
+            "id":"actor-2","primaryCategory":"Actor","marketPrice":125.0,"previousMarketPrice":120.0,
+            "lastPriceEventAt":"2026-09-20T00:00:00Z","lastPriceEventId":"box:1",
+            "priceEvents":[{
+                "eventKey":"box:1","eventType":"actor-box-office-outcome","verified":True,
+                "startedAt":"2026-09-20T00:00:00Z","priceBefore":120.0,"priceAfter":125.0,
+            }],
+            "priceHistory":[],
+        }
+        updated,_=append_record_history(record,datetime(2026,9,26,16,31,tzinfo=timezone.utc))
+        self.assertEqual(updated["priceHistoryStatus"],"source-backed-partial-history")
+
     def test_non_nfl_history_keeps_normal_verified_status(self):
         record = {
             "id": "nba-1",

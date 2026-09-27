@@ -218,7 +218,17 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
     )
     if has_full_nfl_replay:
         result["priceHistoryStatus"] = "source-backed-full-point-in-time-nfl-replay"
-    elif str(result.get("primaryCategory") or "") == "Music":
+    elif str(result.get("primaryCategory") or "") in {"Music", "Actor"}:
+        category = str(result.get("primaryCategory") or "")
+        supported_events = {
+            "Music": {
+                "music-chart-outcome", "music-release", "award", "nomination", "music-attention-outcome",
+            },
+            "Actor": {
+                "actor-release", "actor-upcoming-project", "actor-box-office-outcome",
+                "actor-streaming-outcome", "actor-attention-outcome", "award", "nomination",
+            },
+        }[category]
         source_backed = any(
             isinstance(item, dict)
             and str(item.get("eventId") or "") != "current-market-price"
@@ -227,9 +237,7 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
         ) or any(
             isinstance(item, dict)
             and item.get("verified") is not False
-            and str(item.get("eventType") or "") in {
-                "music-chart-outcome", "music-release", "award", "nomination", "music-attention-outcome",
-            }
+            and str(item.get("eventType") or "") in supported_events
             for item in (result.get("priceEvents") or [])
         )
         if source_backed:
