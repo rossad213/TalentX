@@ -161,6 +161,14 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     if str(record.get("motorsportMarketMigrationVersion") or "") == MIGRATION_VERSION:
         return dict(record), False
 
+    current_f1_events = f1_events(record)
+    is_formula1 = str(record.get("leagueOrMedium") or "").strip().lower() == "formula 1"
+    # Never mark a Formula 1 listing migrated until verified race evidence is
+    # actually present. Otherwise a temporary provider outage could set the
+    # migration epoch early and make a later historical backfill look "live".
+    if is_formula1 and (not bool(record.get("professionEvidenceVerified")) or not current_f1_events):
+        return dict(record), False
+
     prior_market = finite(record.get("marketPrice"))
     repriced = apply_v2(dict(record))
     target = finite(repriced.get("fairValue"))
@@ -174,7 +182,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
             result[field] = repriced[field]
 
     all_events = [dict(item) for item in result.get("priceEvents", []) if isinstance(item, dict)]
-    current_f1 = f1_events(result)
+    current_f1 = current_f1_events
     rebuilt_f1, race_history = normalized_event_path(current_f1, target)
     f1_ids = {str(item.get("eventKey") or item.get("eventId") or "") for item in current_f1}
     other_events = [item for item in all_events if str(item.get("eventKey") or item.get("eventId") or "") not in f1_ids]
