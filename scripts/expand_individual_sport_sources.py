@@ -52,6 +52,10 @@ SPORT_CONFIG: dict[str, dict[str, Any]] = {
         "leagueOrMedium": "International Motorsport",
         "minAge": 15,
         "maxAge": 55,
+        # Wikidata occupation alone is not sufficient proof of a current
+        # professional racing seat. Motorsport is populated from official
+        # series rosters/results instead.
+        "discoveryEnabled": False,
     },
     "Combat Sports": {
         "occupations": {
@@ -204,6 +208,8 @@ def candidate_is_eligible(candidate: dict[str, Any], minimum_sitelinks: int, rec
     discipline = str(candidate.get("discipline") or "")
     config = SPORT_CONFIG.get(discipline)
     if config is None:
+        return False
+    if discipline == "Motorsport" and config.get("discoveryEnabled") is False:
         return False
     name = str(candidate.get("name") or "").strip()
     qid = str(candidate.get("qid") or "")
@@ -470,6 +476,11 @@ def main() -> int:
     source_errors: dict[str, list[str]] = {}
 
     for discipline, config in SPORT_CONFIG.items():
+        if config.get("discoveryEnabled") is False:
+            candidates_by_discipline[discipline] = []
+            source_errors[discipline] = []
+            print(f"{discipline}: generic occupation discovery disabled; official series sources only.", flush=True)
+            continue
         if existing_counts[discipline] >= args.target_per_discipline:
             candidates_by_discipline[discipline] = []
             source_errors[discipline] = []
