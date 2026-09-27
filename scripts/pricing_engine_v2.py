@@ -280,8 +280,14 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         )
         completeness = sum(ev.get(key) is not None for key in fields) / len(fields)
         confidence = data_quality * .55 + sample * .35 + (55.0 + 45.0 * completeness) * .10
-        if official and structured and starts >= 8:
-            confidence = max(confidence, 84.0)
+        if official and structured:
+            # A current official championship roster/standing is meaningful
+            # professional evidence even when the series source does not expose
+            # a team-sport-like career-start total.
+            rank = optional_num(ev.get("seasonRank"))
+            confidence = max(confidence, 82.0 if rank is not None and rank > 0 else 78.0)
+            if starts >= 8:
+                confidence = max(confidence, 84.0)
         if str(record.get("sourceNamespace") or "") == "wikidata-individual-sport":
             confidence = min(confidence, 62.0)
         return round(clamp(confidence, 15, 97), 2)
