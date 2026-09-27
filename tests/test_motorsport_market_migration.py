@@ -21,6 +21,16 @@ class MotorsportMarketMigrationTests(unittest.TestCase):
         self.assertEqual(history[-1]["price"], 123.45)
         self.assertEqual(history[-1]["historyType"], "verified-event-replay")
 
+    def test_formula1_waits_for_verified_race_evidence(self):
+        provisional = {
+            "id": "f1-provisional", "primaryCategory": "Athlete", "discipline": "Motorsport",
+            "leagueOrMedium": "Formula 1", "marketPrice": 110,
+            "professionEvidenceVerified": False, "priceEvents": [],
+        }
+        unchanged, changed = migrate_record(provisional, "2026-09-26T23:00:00Z")
+        self.assertFalse(changed)
+        self.assertEqual(unchanged, provisional)
+
     def test_migration_is_motorsport_only_and_idempotent(self):
         nfl = {"id": "nfl", "primaryCategory": "Athlete", "discipline": "American Football", "marketPrice": 50}
         unchanged, changed = migrate_record(nfl, "2026-09-26T23:00:00Z")
