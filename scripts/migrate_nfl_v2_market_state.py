@@ -24,10 +24,14 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 from nfl_metric_calibration import calibrate_record as calibrate_nfl_record
-from hourly_price_refresh_nfl import NFL_FUNDAMENTAL_EVIDENCE_VERSION
+from hourly_price_refresh_nfl import (
+    NFL_EXPECTATION_MODEL_VERSION,
+    NFL_FUNDAMENTAL_EVIDENCE_VERSION,
+    nfl_absolute_performance_authority,
+)
 
-MIGRATION_VERSION = "1.5-nfl-career-tier-and-exactly-once-reset"
-MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-5"
+MIGRATION_VERSION = "1.6-nfl-significance-aware-preserved-game-reset"
+MIGRATION_EVENT_ID = "model:nfl-v2-market-state-reset-v1-6"
 
 _V2_FIELDS = (
     "talentScore",
@@ -90,6 +94,44 @@ def _latest_preservable_game(record: dict[str, Any], stamp: str) -> tuple[dict[s
     if migrated_at is not None and event_time <= migrated_at:
         return None
     return event, move
+
+
+def _recalibrate_preserved_game_move(
+    record: dict[str, Any],
+    event: dict[str, Any],
+    fallback_move: float,
+) -> tuple[dict[str, Any], float]:
+    """Apply the current absolute-performance authority to one preserved game.
+
+    The career-tier migration may preserve a recent verified game that was
+    originally priced under the older pure-relative-surprise NFL model. Rebase
+    that event onto the current significance-aware logic when the durable event
+    already contains enough evidence to do so. If the required fields are absent,
+    preserve the audited move rather than inventing evidence.
+    """
+    result = dict(event)
+    if str(result.get("nflExpectationModelVersion") or "") == NFL_EXPECTATION_MODEL_VERSION:
+        return result, fallback_move
+
+    actual = _finite(result.get("actualPerformanceScore"))
+    expected = _finite(result.get("expectedPerformanceScore"))
+    old_performance_move = _finite(result.get("performanceMovePct"))
+    outcome_move = _finite(result.get("outcomeMovePct"))
+    if actual is None or expected is None or old_performance_move is None:
+        return result, fallback_move
+
+    authority, target = nfl_absolute_performance_authority(record, actual, expected)
+    new_performance_move = old_performance_move * authority
+    new_move = new_performance_move + (outcome_move or 0.0)
+
+    result["rawPerformanceMovePct"] = round(old_performance_move, 3)
+    result["absolutePerformanceAuthority"] = authority
+    result["absolutePerformanceTargetScore"] = target
+    result["performanceMovePct"] = round(new_performance_move, 3)
+    result["movePct"] = round(new_move, 3)
+    result["nflExpectationModelVersion"] = NFL_EXPECTATION_MODEL_VERSION
+    result["preservedGameMoveRecalibrated"] = MIGRATION_VERSION
+    return result, round(new_move, 3)
 
 
 def _is_nfl(record: dict[str, Any]) -> bool:
@@ -162,7 +204,16 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
     fundamental_target = round(fundamental_target, 2)
 
     preserved_game = _latest_preservable_game(record, stamp)
-    preserved_move = preserved_game[1] if preserved_game is not None else 0.0
+    if preserved_game is not None:
+        preserved_event, preserved_move = preserved_game
+        preserved_event, preserved_move = _recalibrate_preserved_game_move(
+            record,
+            preserved_event,
+            preserved_move,
+        )
+        preserved_game = (preserved_event, preserved_move)
+    else:
+        preserved_move = 0.0
     target = round(
         fundamental_target * (1.0 + preserved_move / 100.0),
         2,
@@ -193,8 +244,15 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
             event = dict(raw_event)
             event_key = str(event.get("eventKey") or event.get("eventId") or "")
             if event_key == preserved_key and str(event.get("eventType") or "").lower() == "game":
-                event["preMigrationPriceBefore"] = event.get("priceBefore")
-                event["preMigrationPriceAfter"] = event.get("priceAfter")
+                # Carry the recalibrated significance metadata onto the durable
+                # event before rebasing its prices to the new career-tier epoch.
+                event.update({
+                    key: value
+                    for key, value in preserved_event.items()
+                    if key not in {"priceBefore", "priceAfter"}
+                })
+                event["preMigrationPriceBefore"] = raw_event.get("priceBefore")
+                event["preMigrationPriceAfter"] = raw_event.get("priceAfter")
                 event["priceBefore"] = fundamental_target
                 event["priceAfter"] = target
                 event["movePct"] = round((target / fundamental_target - 1.0) * 100.0, 3)
@@ -254,7 +312,7 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         result.pop("nflMarketMigrationPreservedEventId", None)
         result.pop("nflMarketMigrationPreservedEventMovePct", None)
     result["nflMarketMigrationReason"] = (
-        "Reset NFL to career-tier v2 fair value and preserve at most one latest verified post-epoch game move exactly once"
+        "Reset NFL to career-tier v2 fair value, preserve one recent verified game exactly once, and recalibrate legacy preserved moves to the current absolute-performance-authority model when evidence permits"
     )
     return result, True
 

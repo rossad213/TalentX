@@ -198,6 +198,59 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertEqual(preserved["priceAfter"],migrated["marketPrice"])
         self.assertEqual(preserved["marketEpochRebased"],MIGRATION_VERSION)
 
+    def test_preserved_legacy_game_is_recalibrated_to_absolute_performance_authority(self):
+        original=self.nfl_record(
+            role="Tight End",
+            marketPrice=102.47,
+            previousMarketPrice=94.70,
+            lastGameMovePct=8.205,
+            lastPriceEventId="espn:401872954",
+            lastPriceEventAt="2026-09-27T17:00:00Z",
+            nflMarketMigrationVersion="1.5-nfl-career-tier-and-exactly-once-reset",
+            nflMarketMigratedAt="2026-09-27T23:30:00Z",
+            priceEvents=[{
+                "eventKey":"espn:401872954","eventId":"401872954","eventType":"game",
+                "league":"nfl","verified":True,"startedAt":"2026-09-27T17:00:00Z",
+                "priceBefore":94.70,"priceAfter":102.47,"movePct":8.205,
+                "performanceMovePct":8.256,"outcomeMovePct":-0.05,
+                "actualPerformanceScore":17.25,"expectedPerformanceScore":2.76,
+                "nflExpectationModelVersion":"1.8-nfl-position-normalized-established-window",
+            }],
+        )
+        migrated,changed=migrate_record(original,"2026-09-28T05:30:00Z")
+        self.assertTrue(changed)
+        self.assertLess(migrated["lastGameMovePct"],8.205)
+        self.assertGreater(migrated["lastGameMovePct"],4.0)
+        event=migrated["priceEvents"][0]
+        self.assertEqual(event["nflExpectationModelVersion"],"1.9-nfl-absolute-performance-authority")
+        self.assertLess(event["performanceMovePct"],8.256)
+        self.assertEqual(event["preservedGameMoveRecalibrated"],MIGRATION_VERSION)
+        self.assertEqual(event["priceBefore"],migrated["fundamentalValue"])
+        self.assertEqual(event["priceAfter"],migrated["marketPrice"])
+
+    def test_full_breakout_preserved_game_keeps_near_full_authority(self):
+        original=self.nfl_record(
+            role="Tight End",
+            marketPrice=92.99,
+            previousMarketPrice=85.28,
+            lastGameMovePct=9.036,
+            lastPriceEventId="espn:401872954",
+            lastPriceEventAt="2026-09-27T17:00:00Z",
+            nflMarketMigrationVersion="1.5-nfl-career-tier-and-exactly-once-reset",
+            nflMarketMigratedAt="2026-09-27T23:30:00Z",
+            priceEvents=[{
+                "eventKey":"espn:401872954","eventId":"401872954","eventType":"game",
+                "league":"nfl","verified":True,"startedAt":"2026-09-27T17:00:00Z",
+                "priceBefore":85.28,"priceAfter":92.99,"movePct":9.036,
+                "performanceMovePct":9.086,"outcomeMovePct":-0.05,
+                "actualPerformanceScore":24.75,"expectedPerformanceScore":4.083,
+                "nflExpectationModelVersion":"1.8-nfl-position-normalized-established-window",
+            }],
+        )
+        migrated,changed=migrate_record(original,"2026-09-28T05:30:00Z")
+        self.assertTrue(changed)
+        self.assertAlmostEqual(migrated["lastGameMovePct"],9.036,places=2)
+
     def test_false_post_game_market_observations_are_removed_during_rebase(self):
         original=self.nfl_record(
             marketPrice=121.47,
