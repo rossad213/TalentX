@@ -61,7 +61,9 @@ class CuratedBenchmarkPricingTests(unittest.TestCase):
         by_name={row["name"]:row for row in priced}
         self.assertEqual(by_name["Leonardo DiCaprio"]["benchmarkRank"],3)
         self.assertEqual(by_name["Shah Rukh Khan"]["benchmarkRank"],4)
-        self.assertIsNotNone(by_name["Leonardo DiCaprio"].get("benchmarkScore"))
+        self.assertIsNotNone(
+            by_name["Leonardo DiCaprio"]["pricingAudit"].get("curatedBenchmarkScore")
+        )
         self.assertGreaterEqual(
             by_name["Leonardo DiCaprio"]["fundamentalValue"],
             by_name["Shah Rukh Khan"]["fundamentalValue"],
