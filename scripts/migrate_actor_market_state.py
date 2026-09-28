@@ -27,8 +27,8 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 
-MIGRATION_VERSION = "1.0-actor-source-first-market-epoch"
-MIGRATION_EVENT_ID = "model:actor-source-first-market-epoch-v1"
+MIGRATION_VERSION = "1.1-actor-v6.4-fair-value-epoch"
+MIGRATION_EVENT_ID = "model:actor-source-first-market-epoch-v1-1"
 
 SUPPORTED_EVENT_TYPES = {
     "actor-release",
@@ -105,12 +105,20 @@ def canonical_event_key(record: dict[str,Any], event: dict[str,Any]) -> str:
         return f"wikidata:{event_type}:{person}:{work}"
     if person and work and event_type in {"actor-box-office-outcome","actor-streaming-outcome"} and date:
         return f"{provider_slug(event)}:{person}:{work}:{date}"
-    if person and work and event_type=="actor-attention-outcome":
+    if person and event_type=="actor-attention-outcome" and date:
         tier=str(event.get("outcomeTier") or "").strip().lower()
         if not tier:
             name=str(event.get("name") or "").lower()
-            tier="breakout" if "breakout" in name else "hot" if " hot" in name else "attention"
-        return f"wikimedia:attention:{person}:{work}:{tier}"
+            tier=(
+                "breakout" if "breakout" in name
+                else "hot" if " hot" in name
+                else "warm" if "warm" in name
+                else "cool" if "cool" in name
+                else "attention"
+            )
+        # Wikimedia attention is an actor-wide signal. Multiple projects may
+        # discover the same daily audience move, but the human asset prices once.
+        return f"wikimedia:attention:{person}:{date}:{tier}"
     return original
 
 
@@ -260,6 +268,11 @@ def clean_history(record: dict[str,Any], aliases: dict[str,str]) -> list[dict[st
             continue
         if event_id in actor_keys or event_type in SUPPORTED_EVENT_TYPES:
             continue
+        if (
+            event_type=="recorded-event"
+            and event_id.startswith(("wikidata:award:", "wikidata:nomination:", "wikidata:actor-"))
+        ):
+            continue
         if event_type=="model_migration" and event_id.startswith("model:actor-source-first-market-epoch"):
             continue
         key=(str(item.get("time") or ""),event_id,str(item.get("phase") or ""))
@@ -340,7 +353,7 @@ def migrate_record(record: dict[str,Any], stamp: str) -> tuple[dict[str,Any],boo
     result["actorMarketMigrationPriorMarketPrice"]=round(prior,2) if prior is not None else None
     result["actorMarketMigrationTargetPrice"]=target
     result["actorMarketDuplicateEventsRemoved"]=removed
-    result["actorMarketMigrationReason"]="Rebase Actor after source-first identity, semantic event dedupe, curated-prior preservation, and discovery evidence-scale calibration"
+    result["actorMarketMigrationReason"]="Rebase Actor after v6.4 evidence-scale calibration, source-first identity cleanup, actor-wide attention dedupe, curated-prior preservation, and semantic event canonicalization"
     return result,True
 
 

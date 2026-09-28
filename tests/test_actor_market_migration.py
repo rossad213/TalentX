@@ -80,6 +80,82 @@ class ActorMarketMigrationTests(unittest.TestCase):
         self.assertNotIn("musicBrainzArtistIds",updated)
         self.assertIn("Screen-career",updated["pricingDataStatus"])
 
+    def test_v1_epoch_record_rebases_again_after_v64_fair_value_change(self):
+        record=self.actor(
+            fundamentalValue=86.95,
+            fairValue=86.95,
+            marketPrice=170.56,
+            previousMarketPrice=170.56,
+            actorMarketMigrationVersion="1.0-actor-source-first-market-epoch",
+            actorMarketMigratedAt="2026-09-28T22:01:01Z",
+            actorMarketMigrationTargetPrice=170.56,
+            priceEvents=[],
+            priceHistory=[{
+                "time":"2026-09-28T22:01:01Z",
+                "eventId":"current-market-price",
+                "eventType":"market-observation",
+                "phase":"close",
+                "price":170.56,
+            }],
+        )
+        migrated,changed=migrate_record(record,"2026-09-28T23:30:00Z")
+        self.assertTrue(changed)
+        self.assertEqual(migrated["actorMarketMigrationVersion"],MIGRATION_VERSION)
+        self.assertAlmostEqual(migrated["marketPrice"],migrated["fundamentalValue"],places=2)
+        self.assertLess(migrated["marketPrice"],100.0)
+        self.assertEqual(migrated["actorMarketMigrationPriorMarketPrice"],170.56)
+
+    def test_actor_wide_attention_signal_is_deduped_across_projects(self):
+        record=self.actor(
+            sourceRecordId="Q4491",
+            priceEvents=[
+                {
+                    "eventKey":"wikimedia:attention:Q4491:Q133273688:cool",
+                    "eventType":"actor-attention-outcome",
+                    "name":"Audience attention cool: 0.64× baseline",
+                    "provider":"Wikimedia Analytics API",
+                    "startedAt":"2026-09-11T04:39:03Z",
+                    "movePct":-0.292,
+                    "workQid":"Q133273688",
+                },
+                {
+                    "eventKey":"wikimedia:attention:Q4491:Q135285630:cool",
+                    "eventType":"actor-attention-outcome",
+                    "name":"Audience attention cool: 0.64× baseline",
+                    "provider":"Wikimedia Analytics API",
+                    "startedAt":"2026-09-11T04:39:03Z",
+                    "movePct":-0.286,
+                    "workQid":"Q135285630",
+                },
+            ],
+        )
+        events,aliases,removed=canonicalize_events(record)
+        attention=[e for e in events if e.get("eventType")=="actor-attention-outcome"]
+        self.assertEqual(len(attention),1)
+        self.assertEqual(removed,1)
+        self.assertEqual(
+            attention[0]["eventKey"],
+            "wikimedia:attention:Q4491:2026-09-11:cool",
+        )
+
+    def test_orphan_legacy_recorded_award_history_is_removed(self):
+        record=self.actor(
+            priceEvents=[],
+            priceHistory=[{
+                "time":"2026-08-24T18:58:33Z",
+                "eventId":"wikidata:award:Q43387663:Q2089918",
+                "eventType":"recorded-event",
+                "phase":"close",
+                "price":170.19,
+            }],
+        )
+        migrated,changed=migrate_record(record,"2026-09-28T23:30:00Z")
+        self.assertTrue(changed)
+        self.assertFalse(any(
+            str(point.get("eventId") or "").startswith("wikidata:award:")
+            for point in migrated["priceHistory"]
+        ))
+
     def test_migration_is_actor_only_and_idempotent(self):
         music={"id":"m","primaryCategory":"Music","marketPrice":100}
         unchanged,changed=migrate_record(music,"2026-09-28T12:00:00Z")
