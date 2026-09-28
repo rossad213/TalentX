@@ -32,6 +32,37 @@ class ActorIdentityReconciliationTests(unittest.TestCase):
         self.assertEqual(out,[curated])
         self.assertEqual(repairs,[])
 
+    def test_different_names_with_same_qid_collapse(self):
+        canonical={
+            "id":"milo","name":"Milo Ventimiglia","primaryCategory":"Actor",
+            "sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q83733",
+            "wikidataCanonicalLabel":"Milo Ventimiglia",
+        }
+        character={
+            "id":"jess","name":"Jess Mariano","primaryCategory":"Actor",
+            "sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q83733",
+        }
+        out,repairs=reconcile_records([canonical,character],{"milo"})
+        self.assertEqual(len(out),1)
+        self.assertEqual(out[0]["id"],"milo")
+        self.assertEqual(out[0]["name"],"Milo Ventimiglia")
+        self.assertEqual(len(repairs),1)
+
+    def test_canonical_wikidata_label_breaks_qid_alias_tie(self):
+        good={
+            "id":"robin","name":"Robin Tunney","primaryCategory":"Actor",
+            "sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q209094",
+            "wikidataCanonicalLabel":"Robin Tunney","pricingConfidence":.7,
+        }
+        typo={
+            "id":"typo","name":"Robin Tunneyio","primaryCategory":"Actor",
+            "sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q209094",
+            "wikidataCanonicalLabel":"Robin Tunney","pricingConfidence":.9,
+        }
+        out,_=reconcile_records([typo,good])
+        self.assertEqual(len(out),1)
+        self.assertEqual(out[0]["id"],"robin")
+
     def test_same_name_different_qids_are_preserved(self):
         a={"id":"a","name":"Jordan Lee","primaryCategory":"Actor","sourceRecordId":"Q1"}
         b={"id":"b","name":"Jordan Lee","primaryCategory":"Actor","sourceRecordId":"Q2"}

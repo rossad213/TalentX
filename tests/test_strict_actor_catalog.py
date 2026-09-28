@@ -32,6 +32,28 @@ class StrictActorCatalogTests(unittest.TestCase):
         self.assertEqual(resolved[0]["primaryCategory"],"Actor")
         self.assertEqual(summary["movedToMusic"],0)
 
+    def test_secondary_actor_occupation_without_screen_first_description_is_removed(self):
+        actor={"id":"peyton","name":"Peyton Manning","primaryCategory":"Actor","sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q192296"}
+        evidence={"Q192296":{"label":"Peyton Manning","description":"American football quarterback","occupations":{"Q33999"},"musicbrainz":set()}}
+        resolved,summary=resolve_records([actor],evidence)
+        self.assertEqual(resolved,[])
+        self.assertEqual(summary["removedNonScreenFirst"],1)
+
+    def test_character_name_pointing_to_actor_qid_is_removed(self):
+        actor={"id":"jess","name":"Jess Mariano","primaryCategory":"Actor","sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q83733"}
+        evidence={"Q83733":{"label":"Milo Ventimiglia","description":"American actor","occupations":{"Q33999"},"musicbrainz":set()}}
+        resolved,summary=resolve_records([actor],evidence)
+        self.assertEqual(resolved,[])
+        self.assertEqual(summary["removedNameMismatches"],1)
+
+    def test_close_spelling_alias_can_survive_canonical_label_check(self):
+        actor={"id":"karisma","name":"Karisma Kapoor","primaryCategory":"Actor","sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q464578"}
+        evidence={"Q464578":{"label":"Karishma Kapoor","description":"Indian actress","occupations":{"Q33999"},"musicbrainz":set()}}
+        resolved,summary=resolve_records([actor],evidence)
+        self.assertEqual(len(resolved),1)
+        self.assertTrue(resolved[0]["actorCategoryVerified"])
+        self.assertEqual(summary["verifiedScreenFirst"],1)
+
     def test_curated_actor_is_never_reclassified(self):
         actor={"id":"actor","name":"Curated Crossover","primaryCategory":"Actor","nonAthleteRosterVersion":"1.0.0","sourceRecordId":"Q2"}
         evidence={"Q2":{"description":"American singer and actor","occupations":{"Q177220","Q33999"},"musicbrainz":{"mbid"}}}

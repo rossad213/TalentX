@@ -145,7 +145,7 @@ def fetch_entities(session: requests.Session, qids: list[str], timeout: float) -
         params={
             "action": "wbgetentities",
             "ids": "|".join(qids),
-            "props": "descriptions|claims",
+            "props": "labels|descriptions|claims",
             "languages": "en",
             "languagefallback": "1",
             "format": "json",
@@ -167,7 +167,12 @@ def fetch_entities(session: requests.Session, qids: list[str], timeout: float) -
         descriptions = entity.get("descriptions", {})
         if isinstance(descriptions, dict) and isinstance(descriptions.get("en"), dict):
             desc = str(descriptions["en"].get("value") or "")
+        labels = entity.get("labels", {})
+        label = ""
+        if isinstance(labels, dict) and isinstance(labels.get("en"), dict):
+            label = str(labels["en"].get("value") or "")
         out[qid] = {
+            "label": label,
             "description": desc,
             "occupations": item_claim_ids(entity, "P106"),
             "musicbrainz": string_claim_values(entity, "P434"),

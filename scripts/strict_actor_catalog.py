@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import time
+from difflib import SequenceMatcher
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,16 @@ SOURCE_NAMESPACES = {
     "wikidata-actor-only",
     "wikidata-actor-resolved-from-music",
 }
+
+
+def source_name_matches_label(name: Any, label: Any) -> bool:
+    left = normalize(name)
+    right = normalize(label)
+    if not left or not right:
+        return True
+    if left == right or left in right or right in left:
+        return True
+    return SequenceMatcher(None, left, right).ratio() >= 0.70
 
 
 def is_curated_actor(record: dict[str, Any]) -> bool:
@@ -87,6 +98,9 @@ def resolve_records(
     reviewed = 0
     moved: list[str] = []
     removed_duplicates: list[str] = []
+    removed_non_screen_first: list[str] = []
+    removed_name_mismatches: list[str] = []
+    verified_screen_first: list[str] = []
 
     for original in records:
         record = dict(original)
@@ -108,33 +122,55 @@ def resolve_records(
         occupations = set(info.get("occupations") or set())
         strong_music = occupations & set(STRONG_MUSIC_OCCUPATIONS)
         mbids = set(info.get("musicbrainz") or set())
-        dominant = primary_description_category(str(info.get("description") or ""))
+        description = str(info.get("description") or "")
+        canonical_label = str(info.get("label") or "")
+        dominant = primary_description_category(description)
+        name = str(record.get("name") or "")
+        key = normalize(name)
 
-        if dominant != "Music" or not strong_music or not mbids:
+        if canonical_label and not source_name_matches_label(name, canonical_label):
+            removed_name_mismatches.append(name or qid)
+            continue
+
+        if dominant == "Actor":
+            record["actorCategoryVerified"] = True
+            record["actorCategoryVerification"] = "Screen-first Wikidata description"
+            record["wikidataCanonicalLabel"] = canonical_label or name
+            record["pricingDataStatus"] = "Screen-career identity verified; direct performance evidence may be partial"
+            record["description"] = description or str(record.get("description") or "")
+            verified_screen_first.append(name or qid)
             output.append(record)
             continue
 
-        name = str(record.get("name") or "")
-        key = normalize(name)
-        if key in music_names:
-            removed_duplicates.append(name or qid)
+        if dominant == "Music" and strong_music and mbids:
+            if key in music_names:
+                removed_duplicates.append(name or qid)
+                continue
+            moved_record = move_to_music(
+                record,
+                info,
+                "Strict Actor audit: music-first source identity moved to Music",
+            )
+            music_names.add(key)
+            moved.append(name or qid)
+            output.append(moved_record)
             continue
 
-        moved_record = move_to_music(
-            record,
-            info,
-            "Strict Actor audit: music-first source identity moved to Music",
-        )
-        music_names.add(key)
-        moved.append(name or qid)
-        output.append(moved_record)
+        # A secondary acting occupation is not enough for the Actor exchange.
+        # Source-discovered records must be screen-first in their source identity.
+        removed_non_screen_first.append(name or qid)
 
     return output, {
         "reviewedSourceActors": reviewed,
         "movedToMusic": len(moved),
         "removedDuplicateActorCopies": len(removed_duplicates),
+        "removedNonScreenFirst": len(removed_non_screen_first),
+        "removedNameMismatches": len(removed_name_mismatches),
+        "verifiedScreenFirst": len(verified_screen_first),
         "movedNames": moved,
         "removedDuplicateNames": removed_duplicates,
+        "removedNonScreenFirstNames": removed_non_screen_first,
+        "removedNameMismatchNames": removed_name_mismatches,
     }
 
 
@@ -190,15 +226,19 @@ def main() -> int:
         "categoryCounts": dict(sorted(counts.items())),
         **summary,
         "rule": (
-            "Source-discovered Actor rows remain Actor unless a music-first English Wikidata "
-            "description, specific music profession, and MusicBrainz artist ID all support Music."
+            "Source-discovered Actor rows must have a screen-first English Wikidata description and a "
+            "compatible canonical identity label. Music-first identities move to Music only with a specific "
+            "music profession plus MusicBrainz proof; other secondary-occupation rows are removed from Current."
         ),
     }
     args.manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(
         f"Strict Actor audit: reviewed {summary['reviewedSourceActors']:,}; "
+        f"verified {summary['verifiedScreenFirst']:,} screen-first identities; "
         f"moved {summary['movedToMusic']:,} music-first identities to Music; "
-        f"removed {summary['removedDuplicateActorCopies']:,} duplicate Actor copies."
+        f"removed {summary['removedNonScreenFirst']:,} non-screen-first rows, "
+        f"{summary['removedNameMismatches']:,} name/QID mismatches, and "
+        f"{summary['removedDuplicateActorCopies']:,} duplicate Actor copies."
     )
     if errors:
         print(f"Completed with {len(errors):,} source warning(s); unresolved Actor rows were retained.")

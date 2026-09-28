@@ -41,7 +41,19 @@ def _canonical_score(record:dict[str,Any],preferred:set[str])->tuple[Any,...]:
     rid=str(record.get("id") or "")
     events=len(record.get("priceEvents") or []) if isinstance(record.get("priceEvents"),list) else 0
     history=len(record.get("priceHistory") or []) if isinstance(record.get("priceHistory"),list) else 0
-    return (int(rid in preferred),int(_is_curated(record)),int(bool(_qid(record))),events+history,_num(record.get("dataConfidence")),_num(record.get("pricingConfidence")))
+    name_matches_label = (
+        bool(record.get("wikidataCanonicalLabel"))
+        and normalize_name(record.get("name")) == normalize_name(record.get("wikidataCanonicalLabel"))
+    )
+    return (
+        int(rid in preferred),
+        int(_is_curated(record)),
+        int(name_matches_label),
+        int(bool(_qid(record))),
+        events+history,
+        _num(record.get("dataConfidence")),
+        _num(record.get("pricingConfidence")),
+    )
 
 def _state_score(record:dict[str,Any])->tuple[str,int,float]:
     timestamps=[str(record.get("lastPriceEventAt") or ""),str(record.get("lastPriceRefreshAt") or "")]
@@ -102,10 +114,17 @@ def reconcile_records(
         if str(record.get("id") or "") in suppressed:
             continue
         if is_actor(record):
-            key=normalize_name(record.get("name"))
-            if key:groups[key].append(record)
-    for name_key,group in groups.items():
-        if len(group)<2 or not _same_identity(group):continue
+            qid=_qid(record)
+            name_key=normalize_name(record.get("name"))
+            key=f"qid:{qid}" if qid else f"name:{name_key}"
+            if qid or name_key:
+                groups[key].append(record)
+    for identity_key,group in groups.items():
+        name_key=normalize_name(max(group,key=lambda r:_canonical_score(r,preferred_ids)).get("name"))
+        if len(group)<2:
+            continue
+        if identity_key.startswith("name:") and not _same_identity(group):
+            continue
         canonical=max(group,key=lambda r:_canonical_score(r,preferred_ids))
         cid=str(canonical.get("id") or "")
         if not cid:continue
