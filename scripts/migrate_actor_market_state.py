@@ -25,6 +25,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from pricing_engine_v2 import apply_v2
+
 MIGRATION_VERSION = "1.0-actor-source-first-market-epoch"
 MIGRATION_EVENT_ID = "model:actor-source-first-market-epoch-v1"
 
@@ -274,14 +276,25 @@ def migrate_record(record: dict[str,Any], stamp: str) -> tuple[dict[str,Any],boo
     if str(record.get("actorMarketMigrationVersion") or "")==MIGRATION_VERSION:
         return dict(record),False
 
-    target=finite(record.get("fundamentalValue") or record.get("fairValue"))
-    if target is None or target<=0:
-        return dict(record),False
-    target=round(target,2)
     prior=finite(record.get("marketPrice"))
 
     result=clean_metadata(record)
     events,aliases,removed=canonicalize_events(result)
+    result["priceEvents"]=events
+    # Recalculate Actor v2 only after semantic dedupe so duplicated legacy alias
+    # events cannot inflate direct-evidence maturity during the new market epoch.
+    repriced=apply_v2(result)
+    for field in (
+        "talentScore","marketScore","confidenceScore","situationScore",
+        "expectedValueScore","fairValue","fundamentalValue",
+        "pricingModelVersion","pricingEngine","pricingV2",
+    ):
+        if field in repriced:
+            result[field]=repriced[field]
+    target=finite(result.get("fairValue") or result.get("fundamentalValue"))
+    if target is None or target<=0:
+        return dict(record),False
+    target=round(target,2)
     rebuilt,event_history=normalized_event_path(events,target)
     result["priceEvents"]=rebuilt[-2500:]
 

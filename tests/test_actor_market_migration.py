@@ -35,6 +35,22 @@ class ActorMarketMigrationTests(unittest.TestCase):
         self.assertEqual(events[0]["eventKey"],"the-numbers:Q1:Q9:2026-09-04")
         self.assertEqual(events[0]["movePct"],2.5)
 
+    def test_duplicate_alias_outcomes_do_not_inflate_evidence_maturity_before_rebase(self):
+        record=self.actor(
+            sourceNamespace="wikidata-non-athlete",
+            priceEvents=[
+                {"eventKey":"the-numbers:alias-a:Q9:2026-09-04","eventType":"actor-box-office-outcome","provider":"The Numbers","workQid":"Q9","startedAt":"2026-09-04T00:00:00Z","movePct":2.4,"verified":True},
+                {"eventKey":"the-numbers:alias-b:Q9:2026-09-04","eventType":"actor-box-office-outcome","provider":"The Numbers","workQid":"Q9","startedAt":"2026-09-04T00:00:00Z","movePct":2.5,"verified":True},
+            ],
+            activeMetrics={"performance":80,"achievements":75,"consistency":78,"potential":70,"availability":85,"audience":82},
+            pricingConfidence=.90,dataConfidence=.90,
+        )
+        updated,changed=migrate_record(record,"2026-09-28T12:00:00Z")
+        self.assertTrue(changed)
+        self.assertEqual(updated["actorMarketDuplicateEventsRemoved"],1)
+        self.assertEqual(updated["pricingV2"]["actorDirectEvidenceWeight"],2.5)
+        self.assertEqual(len([e for e in updated["priceEvents"] if e.get("eventType")=="actor-box-office-outcome"]),1)
+
     def test_market_rebase_ends_at_current_fair_value(self):
         record=self.actor(priceEvents=[
             {"eventKey":"wikidata:award:Q1:Q2","eventId":"Q2","eventType":"award","provider":"Wikidata","startedAt":"2020-01-01T00:00:00Z","movePct":1.0},
