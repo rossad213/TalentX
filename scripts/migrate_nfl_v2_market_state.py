@@ -173,14 +173,57 @@ def migrate_record(record: dict[str, Any], stamp: str) -> tuple[dict[str, Any], 
         if field in repriced:
             result[field] = repriced[field]
 
-    # The historical priceEvents ledger remains untouched for audit/history,
-    # but NFL repair code treats nflMarketMigratedAt as a hard market-epoch
-    # boundary and will never replay events that predate this reset.
+    # Rebase the one preserved latest game onto the new market epoch and remove
+    # observation-only points created after that game. Those observations are
+    # where the old retry bug surfaced as second/third applications; the verified
+    # game itself remains in the durable ledger.
     history = [
         dict(item)
         for item in result.get("priceHistory", [])
         if isinstance(item, dict)
     ]
+    if preserved_game is not None:
+        preserved_event, _preserved_move = preserved_game
+        preserved_key = str(preserved_event.get("eventKey") or preserved_event.get("eventId") or "")
+        preserved_time = _parse_time(preserved_event.get("startedAt") or result.get("lastPriceEventAt"))
+        rebased_events: list[dict[str, Any]] = []
+        for raw_event in result.get("priceEvents", []) if isinstance(result.get("priceEvents"), list) else []:
+            if not isinstance(raw_event, dict):
+                continue
+            event = dict(raw_event)
+            event_key = str(event.get("eventKey") or event.get("eventId") or "")
+            if event_key == preserved_key and str(event.get("eventType") or "").lower() == "game":
+                event["preMigrationPriceBefore"] = event.get("priceBefore")
+                event["preMigrationPriceAfter"] = event.get("priceAfter")
+                event["priceBefore"] = fundamental_target
+                event["priceAfter"] = target
+                event["movePct"] = round((target / fundamental_target - 1.0) * 100.0, 3)
+                event["marketEpochRebased"] = MIGRATION_VERSION
+            rebased_events.append(event)
+        result["priceEvents"] = rebased_events
+
+        cleaned_history: list[dict[str, Any]] = []
+        for raw_point in history:
+            point = dict(raw_point)
+            point_time = _parse_time(point.get("time") or point.get("date"))
+            point_event = str(point.get("eventId") or point.get("eventKey") or "")
+            if (
+                preserved_time is not None
+                and point_time is not None
+                and point_time > preserved_time
+                and point_event == "current-market-price"
+            ):
+                continue
+            if point_event == preserved_key:
+                phase = str(point.get("phase") or "").lower()
+                if phase == "open":
+                    point["price"] = fundamental_target
+                elif phase == "close":
+                    point["price"] = target
+                point["marketEpochRebased"] = MIGRATION_VERSION
+            cleaned_history.append(point)
+        history = cleaned_history
+
     result["priceHistory"] = _migration_point(history, target, stamp)
     result["marketPrice"] = target
     result["previousMarketPrice"] = fundamental_target if preserved_game is not None else target

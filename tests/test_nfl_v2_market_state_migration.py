@@ -193,6 +193,41 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertEqual(migrated["lastGameMovePct"],7.905)
         self.assertEqual(migrated["nflMarketMigrationPreservedEventId"],"espn:401872950")
         self.assertLess(migrated["marketPrice"],126.68)
+        preserved=migrated["priceEvents"][0]
+        self.assertEqual(preserved["priceBefore"],expected_fair)
+        self.assertEqual(preserved["priceAfter"],migrated["marketPrice"])
+        self.assertEqual(preserved["marketEpochRebased"],MIGRATION_VERSION)
+
+    def test_false_post_game_market_observations_are_removed_during_rebase(self):
+        original=self.nfl_record(
+            marketPrice=121.47,
+            previousMarketPrice=112.33,
+            lastGameMovePct=8.137,
+            lastPriceEventId="espn:401872950",
+            lastPriceEventAt="2026-09-27T17:00:00Z",
+            nflMarketMigrationVersion="1.4-nfl-recency-availability-position-value-reset",
+            nflMarketMigratedAt="2026-09-26T07:46:16Z",
+            priceEvents=[{
+                "eventKey":"espn:401872950","eventId":"401872950","eventType":"game",
+                "league":"nfl","verified":True,"startedAt":"2026-09-27T17:00:00Z",
+                "priceBefore":96.06,"priceAfter":103.88,"movePct":8.141,
+            }],
+            priceHistory=[
+                {"time":"2026-09-27T16:59:59Z","eventId":"espn:401872950","eventType":"game","phase":"open","price":96.06},
+                {"time":"2026-09-27T17:00:00Z","eventId":"espn:401872950","eventType":"game","phase":"close","price":103.88},
+                {"time":"2026-09-27T21:59:30Z","eventId":"current-market-price","eventType":"market-observation","phase":"close","price":103.88},
+                {"time":"2026-09-27T22:22:57Z","eventId":"current-market-price","eventType":"market-observation","phase":"close","price":112.33},
+                {"time":"2026-09-27T22:52:15Z","eventId":"current-market-price","eventType":"market-observation","phase":"close","price":121.47},
+            ],
+        )
+        migrated,changed=migrate_record(original,"2026-09-27T23:30:00Z")
+        self.assertTrue(changed)
+        observations=[p for p in migrated["priceHistory"] if p.get("eventId")=="current-market-price"]
+        self.assertEqual(observations,[])
+        game_points=[p for p in migrated["priceHistory"] if p.get("eventId")=="espn:401872950"]
+        self.assertEqual(len(game_points),2)
+        self.assertEqual(game_points[0]["price"],migrated["fundamentalValue"])
+        self.assertEqual(game_points[1]["price"],migrated["marketPrice"])
 
     def test_migration_is_idempotent(self):
         first, changed = migrate_record(self.nfl_record(), "2026-09-24T16:15:00Z")
