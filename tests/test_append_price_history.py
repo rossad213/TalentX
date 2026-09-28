@@ -111,6 +111,28 @@ class AppendPriceHistoryTests(unittest.TestCase):
             for point in updated["priceHistory"]
         ))
 
+    def test_actor_clears_stale_last_event_pointer_when_event_is_not_in_durable_ledger(self):
+        record={
+            "id":"actor-pointer","primaryCategory":"Actor","marketPrice":105.15,
+            "lastPriceEventAt":"2026-08-24T18:58:33Z",
+            "lastPriceEventId":"wikidata:award:Q43387663:Q2089918",
+            "lastPriceEvent":"Award: stale",
+            "lastEventMovePct":1.0,
+            "lastEventType":"award",
+            "lastEventSource":"Wikidata",
+            "priceEvents":[],
+            "priceHistory":[],
+        }
+        updated,_=append_record_history(
+            record,
+            datetime(2026,9,28,23,50,tzinfo=timezone.utc),
+        )
+        for field in (
+            "lastPriceEventAt","lastPriceEventId","lastPriceEvent",
+            "lastEventMovePct","lastEventType","lastEventSource",
+        ):
+            self.assertNotIn(field,updated)
+
     def test_actor_current_observation_only_is_not_labeled_source_backed(self):
         record={
             "id":"actor-1","primaryCategory":"Actor","marketPrice":120.0,

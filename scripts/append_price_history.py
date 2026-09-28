@@ -147,6 +147,21 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
 
     event_id = str(result.get("lastPriceEventId") or "").strip()
     event_time = parse_time(result.get("lastPriceEventAt"))
+    category = str(result.get("primaryCategory") or "")
+    if category in {"Music", "Actor"} and event_id:
+        durable_ids = {
+            str(event.get("eventKey") or event.get("eventId") or "").strip()
+            for event in (result.get("priceEvents") or [])
+            if isinstance(event, dict)
+        }
+        if event_id not in durable_ids:
+            for field in (
+                "lastPriceEventAt","lastPriceEvent","lastPriceEventId",
+                "lastEventMovePct","lastEventType","lastEventSource",
+            ):
+                result.pop(field, None)
+            event_id = ""
+            event_time = None
     current_price = number(result.get("marketPrice"))
     previous_price = number(result.get("previousMarketPrice"))
     label = str(result.get("lastPriceEvent") or "Completed event")
