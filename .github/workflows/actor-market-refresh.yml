@@ -14,6 +14,7 @@ on:
       - "scripts/market_outcome_calibration_v2.py"
       - "scripts/reprice_category_outcomes_v2.py"
       - "scripts/repair_actor_duplicate_outcomes.py"
+      - "scripts/migrate_actor_market_state.py"
       - "scripts/repair_non_athlete_outcome_manifest.py"
       - "scripts/normalize_non_athlete_event_timestamps.py"
       - "scripts/restore_hourly_event_market_state.py"
@@ -33,6 +34,7 @@ on:
       - "tests/test_category_market_store.py"
       - "tests/test_actor_identity_reconciliation.py"
       - "tests/test_actor_duplicate_outcome_repair.py"
+      - "tests/test_actor_market_migration.py"
       - "tests/test_append_price_history.py"
   workflow_run:
     workflows: ["Build current catalog baseline"]
@@ -103,6 +105,7 @@ jobs:
           tests/test_category_market_store.py
           tests/test_actor_identity_reconciliation.py
           tests/test_actor_duplicate_outcome_repair.py
+          tests/test_actor_market_migration.py
           tests/test_append_price_history.py -v
       - name: Refresh verified Actor career events with broad coverage
         run: >-
@@ -163,6 +166,8 @@ jobs:
           python scripts/restore_hourly_event_market_state.py
           --base data/current_catalog.json
           --snapshot data/actor_event_market_state.json
+      - name: Reset Actor market epoch to source-backed fair value once
+        run: python scripts/migrate_actor_market_state.py --catalog data/current_catalog.json
       - name: Append durable Actor events
         run: python scripts/append_game_event_history.py --catalog data/current_catalog.json
       - name: Append dated Actor history

@@ -52,6 +52,12 @@ CSV_FIELDS = [
 # authoritative event market fields.
 EXTRA_MARKET_FIELDS = (
     "priceHistoryStatus",
+    "actorMarketMigrationVersion",
+    "actorMarketMigratedAt",
+    "actorMarketMigrationPriorMarketPrice",
+    "actorMarketMigrationTargetPrice",
+    "actorMarketDuplicateEventsRemoved",
+    "actorMarketMigrationReason",
     "hourlyEvidenceCheckedAt",
     "hourlyEvidenceWarning",
     # NFL-only v2 migration metadata must survive a later full-baseline rebuild
