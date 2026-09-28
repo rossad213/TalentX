@@ -58,9 +58,10 @@ class ActorMarketMigrationTests(unittest.TestCase):
         ])
         updated,changed=migrate_record(record,"2026-09-28T12:00:00Z")
         self.assertTrue(changed)
-        self.assertEqual(updated["marketPrice"],90.0)
+        self.assertEqual(updated["marketPrice"],updated["fairValue"])
+        self.assertEqual(updated["marketPrice"],updated["fundamentalValue"])
         self.assertEqual(updated["actorMarketMigrationVersion"],MIGRATION_VERSION)
-        self.assertEqual(updated["priceEvents"][-1]["priceAfter"],90.0)
+        self.assertEqual(updated["priceEvents"][-1]["priceAfter"],updated["marketPrice"])
         self.assertEqual(updated["dailyChange"],0.0)
         self.assertEqual(updated["priceHistoryStatus"],"source-backed-partial-history")
 
