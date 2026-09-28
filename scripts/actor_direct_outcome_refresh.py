@@ -222,7 +222,8 @@ def outcome_event(
     details: dict[str, Any],
 ) -> dict[str, Any]:
     work_qid = str(release.get("workQid") or release.get("eventId") or "")
-    record_key = str(record.get("id") or normalize_title(record.get("name")))
+    person_qid = str(record.get("wikidataSourceRecordId") or record.get("sourceRecordId") or "").strip()
+    record_key = person_qid if re.fullmatch(r"Q\d+", person_qid) else normalize_title(record.get("name"))
     title_key = normalize_title(release.get("_title"))
     event_key = f"{provider_key}:{record_key}:{work_qid or title_key}:{when.date().isoformat()}"
     return {
@@ -400,7 +401,9 @@ def main() -> int:
                 row = netflix_by_title[key]
                 previous_row = netflix_prev_by_title.get(key)
                 target = netflix_target(row, netflix_rows, previous_row)
-                state_key = f"netflix:{record.get('id')}:{work_qid or key}"
+                person_qid = str(record.get("wikidataSourceRecordId") or record.get("sourceRecordId") or "").strip()
+                state_identity = person_qid if re.fullmatch(r"Q\d+", person_qid) else str(record.get("id") or normalize_title(record.get("name")))
+                state_key = f"netflix:{state_identity}:{work_qid or key}"
                 previous_target = number(state.get(state_key, {}).get("targetMovePct"), 0) if isinstance(state.get(state_key), dict) else 0
                 delta = target - previous_target
                 next_state[state_key] = {

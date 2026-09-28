@@ -448,7 +448,7 @@ def actor_release_event(record: dict[str, Any], candidate: dict[str, Any], upcom
     kind = "actor-upcoming-project" if upcoming else "actor-release"
     prefix = "Upcoming project" if upcoming else "Released project"
     return {
-        "eventKey": f"wikidata:{kind}:{candidate['personQid']}:{candidate['workQid']}:{candidate['date'].date().isoformat()}",
+        "eventKey": f"wikidata:{kind}:{candidate['personQid']}:{candidate['workQid']}",
         "eventId": candidate["workQid"],
         "eventType": kind,
         "provider": "Wikidata",

@@ -13,6 +13,7 @@ from actor_direct_outcome_refresh import (
     latest_netflix_weeks,
     netflix_target,
     normalize_title,
+    outcome_event,
     parse_netflix_global,
     parse_the_numbers,
 )
@@ -23,6 +24,16 @@ class ActorDirectOutcomeTests(unittest.TestCase):
         self.assertEqual(normalize_title("Spider-Man: Brand New Day"), "spidermanbrandnewday")
         self.assertEqual(normalize_title("Rock & Roll"), "rockandroll")
         self.assertNotEqual(normalize_title("The Invite"), normalize_title("Invite Only"))
+
+    def test_direct_outcome_key_uses_wikidata_identity_not_asset_id(self) -> None:
+        release={"workQid":"Q999","_title":"Example Film"}
+        when=datetime(2026,9,4,tzinfo=timezone.utc)
+        a={"id":"alias-a","name":"Lupita Nyong’o","wikidataSourceRecordId":"Q3840847"}
+        b={"id":"alias-b","name":"Lupita Nyong'o","wikidataSourceRecordId":"Q3840847"}
+        one=outcome_event(a,release,"the-numbers","The Numbers","https://example.test",when,1.0,"Result","actor-box-office-outcome",{})
+        two=outcome_event(b,release,"the-numbers","The Numbers","https://example.test",when,1.0,"Result","actor-box-office-outcome",{})
+        self.assertEqual(one["eventKey"],two["eventKey"])
+        self.assertIn("Q3840847",one["eventKey"])
 
     def test_the_numbers_parser_reads_rank_gross_and_change(self) -> None:
         sample = """

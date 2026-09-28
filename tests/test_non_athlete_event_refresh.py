@@ -105,6 +105,22 @@ class NonAthleteEventPricingTests(unittest.TestCase):
         self.assertEqual(stored["startedAt"], "2026-08-08T11:55:00Z")
         self.assertEqual(normalized["lastPriceEventAt"], stored["startedAt"])
 
+    def test_actor_project_date_change_does_not_create_second_event_identity(self) -> None:
+        from non_athlete_event_refresh import actor_release_event
+        candidate_a={
+            "personQid":"Q456","workQid":"Q777","title":"Future Film",
+            "date":datetime(2027,1,1,tzinfo=timezone.utc),
+        }
+        candidate_b={**candidate_a,"date":datetime(2027,1,8,tzinfo=timezone.utc)}
+        first=actor_release_event(self.actor,candidate_a,upcoming=True)
+        second=actor_release_event(self.actor,candidate_b,upcoming=True)
+        self.assertEqual(first["eventKey"],second["eventKey"])
+        once,count=apply_events(self.actor,[first])
+        self.assertEqual(count,1)
+        twice,second_count=apply_events(once,[second])
+        self.assertEqual(second_count,0)
+        self.assertEqual(len(twice["priceEvents"]),1)
+
     def test_duplicate_event_cannot_move_price_twice(self) -> None:
         event = {
             "eventKey": "musicbrainz:dup",

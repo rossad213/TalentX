@@ -484,7 +484,7 @@ def main() -> int:
                     target_info = actor_box_office_target(ratio, age_days)
                     if target_info:
                         tier, target = target_info
-                        state_key = f"{index}:{work_qid}"
+                        state_key = f"{person_qid or index}:{work_qid}"
                         old_state = box_state.get(state_key) if isinstance(box_state.get(state_key), dict) else {}
                         previous_target = number(old_state.get("targetMovePct"), 0)
                         delta = state_delta(previous_target, target)
