@@ -116,6 +116,15 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(elite['pricingV2']['nflCareerTierMultiplier'],1.0)
         self.assertEqual(elite['fairValue'],elite['pricingV2']['genericFairValue'])
 
+    def test_established_star_talent_is_not_compressed(self):
+        star=apply_v2(self.record(
+            leagueOrMedium='NFL',role='Quarterback',professionalGames=100,
+            activeMetrics={"performance":78,"achievements":72,"consistency":74,
+                           "potential":72,"availability":92,"audience":94}))
+        self.assertGreaterEqual(star['talentScore'],70)
+        self.assertEqual(star['pricingV2']['nflCareerTierMultiplier'],1.0)
+        self.assertEqual(star['fairValue'],star['pricingV2']['genericFairValue'])
+
     def test_top_nfl_rookie_keeps_meaningful_ipo_anchor(self):
         rookie=apply_v2(self.rookie_record('NFL',score=94,influence=100))
         self.assertGreater(rookie['fairValue'],110)

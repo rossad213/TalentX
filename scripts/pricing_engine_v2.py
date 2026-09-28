@@ -573,10 +573,10 @@ def nfl_career_tier_multiplier(
     if not is_nfl(record) or rookie_influence >= 0.50:
         return 1.0
     score = clamp(talent)
-    if score >= 75.0:
+    if score >= 70.0:
         return 1.0
     if score >= 60.0:
-        return round(0.84 + (score - 60.0) * (0.16 / 15.0), 4)
+        return round(0.84 + (score - 60.0) * (0.16 / 10.0), 4)
     if score >= 45.0:
         return round(0.68 + (score - 45.0) * (0.16 / 15.0), 4)
     if score <= 25.0:
