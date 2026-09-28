@@ -359,7 +359,17 @@ def absolute_category_score(
     raw = active_score(metrics, category_name(record))
     benchmark_value: float | None = None
     rank_info = benchmark_ranks.get((category_name(record), normalize(record.get("name", ""))))
-    if rank_info and (evidence_tier(record) == "curated" or record.get("sourceName") == "TalentX current-first seed"):
+    # Curated non-athlete benchmark rows keep the reviewed ordering prior until
+    # a profession-specific model explicitly replaces it. Generic enrichment
+    # (Wikidata footprint, longevity, source completeness) can improve identity
+    # confidence but must not silently discard the curated Actor/Music/Creator
+    # prior and invert adjacent reviewed ranks.
+    benchmark_authoritative = (
+        is_curated_benchmark_non_athlete(record)
+        or record.get("sourceName") == "TalentX current-first seed"
+        or evidence_tier(record) == "curated"
+    )
+    if rank_info and benchmark_authoritative:
         benchmark_value = benchmark_score(*rank_info)
         raw = round(raw * (1.0 - CURATED_BENCHMARK_WEIGHT) + benchmark_value * CURATED_BENCHMARK_WEIGHT, 1)
     return raw, benchmark_value
