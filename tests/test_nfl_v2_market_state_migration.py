@@ -208,6 +208,8 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
             lastPriceEventAt="2026-09-27T17:00:00Z",
             nflMarketMigrationVersion="1.5-nfl-career-tier-and-exactly-once-reset",
             nflMarketMigratedAt="2026-09-27T23:30:00Z",
+            nflMarketMigrationPreservedEventId="espn:401872954",
+            nflMarketMigrationPreservedEventMovePct=8.205,
             priceEvents=[{
                 "eventKey":"espn:401872954","eventId":"401872954","eventType":"game",
                 "league":"nfl","verified":True,"startedAt":"2026-09-27T17:00:00Z",
@@ -238,6 +240,8 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
             lastPriceEventAt="2026-09-27T17:00:00Z",
             nflMarketMigrationVersion="1.5-nfl-career-tier-and-exactly-once-reset",
             nflMarketMigratedAt="2026-09-27T23:30:00Z",
+            nflMarketMigrationPreservedEventId="espn:401872954",
+            nflMarketMigrationPreservedEventMovePct=9.036,
             priceEvents=[{
                 "eventKey":"espn:401872954","eventId":"401872954","eventType":"game",
                 "league":"nfl","verified":True,"startedAt":"2026-09-27T17:00:00Z",
@@ -281,6 +285,26 @@ class NflV2MarketStateMigrationTests(unittest.TestCase):
         self.assertEqual(len(game_points),2)
         self.assertEqual(game_points[0]["price"],migrated["fundamentalValue"])
         self.assertEqual(game_points[1]["price"],migrated["marketPrice"])
+
+    def test_old_pre_epoch_game_still_cannot_be_revived_by_v1_6(self):
+        original=self.nfl_record(
+            lastGameMovePct=6.0,
+            lastPriceEventId="espn:old-game",
+            lastPriceEventAt="2026-09-20T17:00:00Z",
+            nflMarketMigrationVersion="1.5-nfl-career-tier-and-exactly-once-reset",
+            nflMarketMigratedAt="2026-09-27T23:30:00Z",
+            nflMarketMigrationPreservedEventId="espn:different-game",
+            priceEvents=[{
+                "eventKey":"espn:old-game","eventId":"old-game","eventType":"game",
+                "league":"nfl","verified":True,"startedAt":"2026-09-20T17:00:00Z",
+                "movePct":6.0,"performanceMovePct":6.05,"outcomeMovePct":-0.05,
+                "actualPerformanceScore":18.0,"expectedPerformanceScore":3.0,
+            }],
+        )
+        migrated,changed=migrate_record(original,"2026-09-28T05:30:00Z")
+        self.assertTrue(changed)
+        self.assertEqual(migrated["lastGameMovePct"],0.0)
+        self.assertNotIn("nflMarketMigrationPreservedEventId",migrated)
 
     def test_migration_is_idempotent(self):
         first, changed = migrate_record(self.nfl_record(), "2026-09-24T16:15:00Z")

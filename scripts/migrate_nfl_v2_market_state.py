@@ -91,7 +91,14 @@ def _latest_preservable_game(record: dict[str, Any], stamp: str) -> tuple[dict[s
         return None
     if event_time > migration_time or (migration_time - event_time).days > 7:
         return None
-    if migrated_at is not None and event_time <= migrated_at:
+    prior_version = str(record.get("nflMarketMigrationVersion") or "")
+    prior_preserved_key = str(record.get("nflMarketMigrationPreservedEventId") or "")
+    explicitly_preserved_by_v1_5 = (
+        prior_version == "1.5-nfl-career-tier-and-exactly-once-reset"
+        and prior_preserved_key
+        and prior_preserved_key == key
+    )
+    if migrated_at is not None and event_time <= migrated_at and not explicitly_preserved_by_v1_5:
         return None
     return event, move
 
