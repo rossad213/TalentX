@@ -48,7 +48,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: talentx-actor-market
+  # Failed/cancelled baselines still emit workflow_run. Give those no-op runs
+  # a unique group so they cannot cancel a healthy Actor push/schedule refresh.
+  # Successful baseline completions share the active group and may supersede an
+  # older Actor run with fresher baseline identities.
+  group: talentx-actor-market-${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' && github.run_id || 'active' }}
   cancel-in-progress: true
 
 jobs:
