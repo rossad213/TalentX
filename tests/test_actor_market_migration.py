@@ -156,6 +156,24 @@ class ActorMarketMigrationTests(unittest.TestCase):
             for point in migrated["priceHistory"]
         ))
 
+    def test_actor_without_surviving_priced_event_clears_stale_last_event_metadata(self):
+        record=self.actor(
+            lastPriceEventAt="2026-08-24T18:58:33Z",
+            lastPriceEventId="wikidata:award:Q43387663:Q2089918",
+            lastPriceEvent="Award: old recorded-only event",
+            lastEventMovePct=1.0,
+            lastEventType="award",
+            lastEventSource="Wikidata",
+            priceEvents=[],
+        )
+        migrated,changed=migrate_record(record,"2026-09-28T23:45:00Z")
+        self.assertTrue(changed)
+        for field in (
+            "lastPriceEventAt","lastPriceEventId","lastPriceEvent",
+            "lastEventMovePct","lastEventType","lastEventSource",
+        ):
+            self.assertNotIn(field,migrated)
+
     def test_migration_is_actor_only_and_idempotent(self):
         music={"id":"m","primaryCategory":"Music","marketPrice":100}
         unchanged,changed=migrate_record(music,"2026-09-28T12:00:00Z")

@@ -69,6 +69,48 @@ class AppendPriceHistoryTests(unittest.TestCase):
         updated,_=append_record_history(record,datetime(2026,9,26,16,31,tzinfo=timezone.utc))
         self.assertEqual(updated["priceHistoryStatus"],"source-backed-partial-history")
 
+    def test_actor_does_not_recreate_generic_recorded_event_from_stale_last_event_metadata(self):
+        record={
+            "id":"actor-stale","primaryCategory":"Actor","marketPrice":105.15,
+            "previousMarketPrice":170.19,
+            "lastPriceEventAt":"2026-08-24T18:58:33Z",
+            "lastPriceEventId":"wikidata:award:Q43387663:Q2089918",
+            "lastPriceEvent":"Award: Volpi Cup for Best Actress",
+            "priceEvents":[],
+            "priceHistory":[],
+        }
+        updated,_=append_record_history(
+            record,
+            datetime(2026,9,28,23,45,tzinfo=timezone.utc),
+        )
+        self.assertFalse(any(
+            point.get("eventType")=="recorded-event"
+            for point in updated["priceHistory"]
+        ))
+
+    def test_actor_purges_existing_legacy_recorded_event_history(self):
+        record={
+            "id":"actor-old","primaryCategory":"Actor","marketPrice":105.15,
+            "priceEvents":[],
+            "priceHistory":[{
+                "time":"2026-08-24T18:58:33Z",
+                "price":170.19,
+                "eventId":"wikidata:award:Q43387663:Q2089918",
+                "label":"Award: Volpi Cup for Best Actress",
+                "phase":"close",
+                "historyType":"verified",
+                "eventType":"recorded-event",
+            }],
+        }
+        updated,_=append_record_history(
+            record,
+            datetime(2026,9,28,23,45,tzinfo=timezone.utc),
+        )
+        self.assertFalse(any(
+            point.get("eventType")=="recorded-event"
+            for point in updated["priceHistory"]
+        ))
+
     def test_actor_current_observation_only_is_not_labeled_source_backed(self):
         record={
             "id":"actor-1","primaryCategory":"Actor","marketPrice":120.0,

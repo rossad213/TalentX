@@ -55,7 +55,13 @@ def existing_history(record: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         # Purge legacy reconstructed/synthetic dated points as they pass through.
         history_type = str(item.get("historyType") or "verified").strip().lower()
+        event_type = str(item.get("eventType") or "").strip().lower()
         if history_type in {"reconstructed", "synthetic"} or item.get("reconstructed") is True or item.get("synthetic") is True:
+            continue
+        if str(record.get("primaryCategory") or "") in {"Music", "Actor"} and event_type == "recorded-event":
+            # Music/Actor use explicit durable priceEvents + event replay. The
+            # generic last-event fallback predates those ledgers and can revive
+            # stale award/project metadata after a market-epoch cleanup.
             continue
         timestamp = parse_time(item.get("time") or item.get("date") or item.get("timestamp"))
         price = number(item.get("price") or item.get("value") or item.get("marketPrice"))
@@ -146,7 +152,8 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
     label = str(result.get("lastPriceEvent") or "Completed event")
 
     changed = removed_legacy
-    if event_id and event_time is not None and current_price is not None:
+    allow_generic_recorded_event = str(result.get("primaryCategory") or "") not in {"Music", "Actor"}
+    if allow_generic_recorded_event and event_id and event_time is not None and current_price is not None:
         already_recorded = any(item.get("eventId") == event_id and item.get("phase") == "close" for item in history)
         if not already_recorded:
             if previous_price is not None:

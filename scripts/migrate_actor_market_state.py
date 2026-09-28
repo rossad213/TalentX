@@ -336,16 +336,25 @@ def migrate_record(record: dict[str,Any], stamp: str) -> tuple[dict[str,Any],boo
         if str(item.get("eventType") or "") in SUPPORTED_EVENT_TYPES and finite(item.get("priceAfter")) is not None
     ]
     result["trend"]=[round(float(value),2) for value in closes[-18:]] or [target]
-    if rebuilt:
-        priced=[e for e in rebuilt if str(e.get("eventType") or "") in SUPPORTED_EVENT_TYPES and finite(e.get("movePct")) is not None]
-        if priced:
-            latest=priced[-1]
-            result["lastPriceEventAt"]=latest.get("startedAt")
-            result["lastPriceEvent"]=latest.get("name")
-            result["lastPriceEventId"]=latest.get("eventKey") or latest.get("eventId")
-            result["lastEventMovePct"]=latest.get("movePct")
-            result["lastEventType"]=latest.get("eventType")
-            result["lastEventSource"]=latest.get("provider")
+    priced=[
+        e for e in rebuilt
+        if str(e.get("eventType") or "") in SUPPORTED_EVENT_TYPES
+        and finite(e.get("movePct")) is not None
+    ]
+    if priced:
+        latest=priced[-1]
+        result["lastPriceEventAt"]=latest.get("startedAt")
+        result["lastPriceEvent"]=latest.get("name")
+        result["lastPriceEventId"]=latest.get("eventKey") or latest.get("eventId")
+        result["lastEventMovePct"]=latest.get("movePct")
+        result["lastEventType"]=latest.get("eventType")
+        result["lastEventSource"]=latest.get("provider")
+    else:
+        for field in (
+            "lastPriceEventAt","lastPriceEvent","lastPriceEventId",
+            "lastEventMovePct","lastEventType","lastEventSource",
+        ):
+            result.pop(field,None)
     result.pop("priceExplanation",None)
     result["priceHistoryStatus"]="source-backed-partial-history" if event_history else "market-observation-only"
     result["actorMarketMigrationVersion"]=MIGRATION_VERSION
