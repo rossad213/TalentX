@@ -231,8 +231,7 @@ def append_record_history(record: dict[str, Any], now: datetime) -> tuple[dict[s
         }[category]
         source_backed = any(
             isinstance(item, dict)
-            and str(item.get("eventId") or "") != "current-market-price"
-            and str(item.get("eventType") or "") != "market-observation"
+            and str(item.get("eventType") or "") in supported_events
             for item in result["priceHistory"]
         ) or any(
             isinstance(item, dict)

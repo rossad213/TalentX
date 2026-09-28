@@ -77,6 +77,25 @@ class AppendPriceHistoryTests(unittest.TestCase):
         updated,_=append_record_history(record,datetime(2026,9,26,16,31,tzinfo=timezone.utc))
         self.assertEqual(updated["priceHistoryStatus"],"market-observation-only")
 
+    def test_actor_model_migration_point_alone_is_not_source_backed_event_history(self):
+        record={
+            "id":"actor-migration-only","primaryCategory":"Actor","marketPrice":85.0,
+            "lastPriceRefreshAt":"2026-09-28T22:00:00Z",
+            "priceEvents":[],
+            "priceHistory":[{
+                "time":"2026-09-28T22:00:00Z",
+                "price":85.0,
+                "eventId":"model:actor-source-first-market-epoch-v1",
+                "phase":"close",
+                "historyType":"verified",
+                "eventType":"model_migration",
+            }],
+        }
+        updated,_=append_record_history(
+            record,datetime(2026,9,28,22,1,tzinfo=timezone.utc)
+        )
+        self.assertEqual(updated["priceHistoryStatus"],"market-observation-only")
+
     def test_actor_verified_event_history_is_labeled_source_backed_partial(self):
         record={
             "id":"actor-2","primaryCategory":"Actor","marketPrice":125.0,"previousMarketPrice":120.0,
