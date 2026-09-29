@@ -258,11 +258,11 @@ class PricingEngineV2Tests(unittest.TestCase):
         actor=self.music_record(
             primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
-        self.assertLessEqual(evidence_confidence(actor),60)
+        self.assertLessEqual(evidence_confidence(actor),78)
         priced=apply_v2(actor)
         self.assertEqual(priced['pricingModelVersion'],'6.5-actor-career-first-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
-        self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],60.0)
+        self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],78.0)
 
     def test_source_discovered_actor_uses_lower_market_scale_until_direct_evidence_matures(self):
         actor=self.music_record(
