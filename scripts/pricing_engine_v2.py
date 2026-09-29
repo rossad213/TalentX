@@ -201,14 +201,18 @@ def actor_direct_evidence_weight(record: dict[str, Any]) -> float:
 
 
 def actor_pricing_evidence_ceiling(record: dict[str, Any]) -> float:
-    """Confidence guardrail for discovered Actors; direct evidence refines certainty, not career value."""
+    """Confidence guardrail for discovered Actors; evidence narrows uncertainty without repricing careers."""
     if not is_actor_discovery(record):
         return 99.0
     identity_verified = bool(str(record.get("sourceRecordId") or record.get("wikidataSourceRecordId") or "").strip())
-    base = 78.0 if identity_verified else 72.0
+    # Keep the evidence-driven confidence band intentionally narrow. A verified
+    # identity is already meaningful evidence; additional outcome coverage may
+    # improve certainty by only a few points, while actual outcomes themselves
+    # move market price through the durable event ledger.
+    base = 82.0 if identity_verified else 76.0
     direct = actor_direct_evidence_weight(record)
-    bonus = min(10.0, 3.5 * math.log1p(max(0.0, direct))) if direct else 0.0
-    return round(min(88.0, base + bonus), 2)
+    bonus = min(4.0, 1.4 * math.log1p(max(0.0, direct))) if direct else 0.0
+    return round(min(86.0, base + bonus), 2)
 
 
 def actor_discovery_fair_value_multiplier(record: dict[str, Any]) -> float:
