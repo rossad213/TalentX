@@ -464,11 +464,19 @@ def evidence_confidence(record: dict[str, Any]) -> float:
     elif "early" in stage or (games and games < 120):
         confidence = min(confidence, 72)
 
-    if is_generic_wikidata_discovery(record):
+    if is_generic_wikidata_discovery(record) and not is_actor_discovery(record):
         confidence = min(confidence, GENERIC_DISCOVERY_CONFIDENCE_CAP)
     if is_strict_music_discovery(record):
         confidence = min(confidence, music_pricing_evidence_ceiling(record))
     if is_actor_discovery(record):
+        # Verified Actor identity establishes a usable confidence floor.
+        # Direct outcome evidence adds only a modest certainty bonus; it does
+        # not set career value or apply a second fair-value multiplier.
+        identity_verified = bool(str(record.get("sourceRecordId") or record.get("wikidataSourceRecordId") or "").strip())
+        direct = actor_direct_evidence_weight(record)
+        actor_floor = 72.0 if identity_verified else 68.0
+        evidence_bonus = min(8.0, 2.5 * math.log1p(max(0.0, direct))) if direct else 0.0
+        confidence = max(confidence, actor_floor + evidence_bonus)
         confidence = min(confidence, actor_pricing_evidence_ceiling(record))
     if is_unverified_motorsport_discovery(record):
         confidence = min(confidence, 56.0)
