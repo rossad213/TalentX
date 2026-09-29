@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.4-actor-evidence-market-scale"
+ACTOR_MODEL_VERSION = "6.5-actor-career-first-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -201,24 +201,19 @@ def actor_direct_evidence_weight(record: dict[str, Any]) -> float:
 
 
 def actor_pricing_evidence_ceiling(record: dict[str, Any]) -> float:
+    """Confidence guardrail for discovered Actors; direct evidence refines certainty, not career value."""
     if not is_actor_discovery(record):
         return 99.0
     identity_verified = bool(str(record.get("sourceRecordId") or record.get("wikidataSourceRecordId") or "").strip())
-    base = 60.0 if identity_verified else 56.0
+    base = 78.0 if identity_verified else 72.0
     direct = actor_direct_evidence_weight(record)
-    bonus = min(20.0, 5.5 * math.log1p(max(0.0, direct))) if direct else 0.0
-    return round(min(80.0, base + bonus), 2)
+    bonus = min(10.0, 3.5 * math.log1p(max(0.0, direct))) if direct else 0.0
+    return round(min(88.0, base + bonus), 2)
 
 
 def actor_discovery_fair_value_multiplier(record: dict[str, Any]) -> float:
-    """Keep source-discovered Actor prices below curated/star scale until direct screen evidence matures."""
-    if not is_actor_discovery(record):
-        return 1.0
-    direct = actor_direct_evidence_weight(record)
-    # A verified screen identity with no direct outcomes starts at 68% of the
-    # generic cross-category curve. Repeated verified box-office/streaming/release
-    # evidence can graduate the listing toward, but not above, the full scale.
-    return round(min(0.95, 0.68 + min(0.27, direct * 0.035)), 4)
+    """Do not double-discount discovered Actors after confidence has already priced uncertainty."""
+    return 1.0
 
 
 def motorsport_verified_race_count(record: dict[str, Any]) -> int:
