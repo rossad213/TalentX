@@ -82,6 +82,10 @@ def event_date(event: dict[str,Any]) -> str:
     when=parse_time(event.get("startedAt") or event.get("time") or event.get("date"))
     return when.date().isoformat() if when is not None else ""
 
+def event_observation_key(event: dict[str,Any]) -> str:
+    when=parse_time(event.get("startedAt") or event.get("time") or event.get("date"))
+    return iso(when) if when is not None else ""
+
 
 def provider_slug(event: dict[str,Any]) -> str:
     provider=str(event.get("provider") or "").strip().lower()
