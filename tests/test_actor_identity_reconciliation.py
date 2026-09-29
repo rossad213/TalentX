@@ -63,6 +63,15 @@ class ActorIdentityReconciliationTests(unittest.TestCase):
         self.assertEqual(len(out),1)
         self.assertEqual(out[0]["id"],"robin")
 
+    def test_duplicate_actor_tickers_are_reassigned_deterministically(self):
+        a={"id":"brie","name":"Brie Larson","primaryCategory":"Actor","sourceRecordId":"Q1","ticker":"BRIE"}
+        b={"id":"brittany","name":"Brittany Snow","primaryCategory":"Actor","sourceRecordId":"Q2","ticker":"BRIE"}
+        out,repairs=reconcile_records([a,b])
+        tickers=[record["ticker"] for record in out]
+        self.assertEqual(len(set(tickers)),2)
+        self.assertIn("BRIE",tickers)
+        self.assertTrue(any("ticker collision" in str(item.get("reason") or "") for item in repairs))
+
     def test_same_name_different_qids_are_preserved(self):
         a={"id":"a","name":"Jordan Lee","primaryCategory":"Actor","sourceRecordId":"Q1"}
         b={"id":"b","name":"Jordan Lee","primaryCategory":"Actor","sourceRecordId":"Q2"}
