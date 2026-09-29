@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.6-actor-career-score-scale"
+ACTOR_MODEL_VERSION = "6.7-actor-verified-career-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -220,11 +220,46 @@ def actor_discovery_fair_value_multiplier(record: dict[str, Any]) -> float:
     return 1.0
 
 
-def actor_career_scale_fair_value(record: dict[str, Any]) -> float | None:
-    """Price discovered Actors on the same career-score dollar curve as the curated Actor benchmark."""
+def actor_verified_career_achievement_bonus(record: dict[str, Any]) -> float:
+    """Bounded career bonus from verified acting-specific awards and nominations only."""
+    if not is_actor_discovery(record):
+        return 0.0
+    awards = 0
+    nominations = 0
+    for event in record.get("priceEvents", []) if isinstance(record.get("priceEvents"), list) else []:
+        if not isinstance(event, dict) or event.get("verified") is False:
+            continue
+        event_type = str(event.get("eventType") or "")
+        if event_type not in {"award", "nomination"}:
+            continue
+        name = str(event.get("name") or "").lower()
+        if not any(token in name for token in ("actor", "actress", "acting", "performance", "cast", "ensemble")):
+            continue
+        if event_type == "award":
+            awards += 1
+        else:
+            nominations += 1
+    return round(min(5.0, awards * 0.8 + nominations * 0.2), 3)
+
+
+def actor_career_scale_score(record: dict[str, Any]) -> float | None:
+    """Career-first Actor score with a proxy ceiling and verified acting-achievement lift."""
     if not is_actor_discovery(record):
         return None
-    score = clamp(record.get("careerScore", 0), 0, 100)
+    proxy_score = clamp(record.get("careerScore", 0), 0, 100)
+    # Source discovery uses broad public-footprint proxies. Those may establish
+    # a strong career baseline, but they cannot alone place a listing in the
+    # elite reviewed-Actor band. Verified acting achievements can lift it there.
+    baseline = min(proxy_score, 86.0)
+    bonus = actor_verified_career_achievement_bonus(record)
+    return round(min(91.0, baseline + bonus), 2)
+
+
+def actor_career_scale_fair_value(record: dict[str, Any]) -> float | None:
+    """Price discovered Actors on the same career-score dollar curve as the curated Actor benchmark."""
+    score = actor_career_scale_score(record)
+    if score is None:
+        return None
     # Same curve used by the reviewed non-athlete benchmark:
     # rank-1 score 95 -> $164.45; score 61.2 -> $69.42.
     return round(2.0 + 180.0 * (score / 100.0) ** 2, 2)
@@ -652,6 +687,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     nfl_tier_multiplier = nfl_career_tier_multiplier(result, talent, rookie_influence)
     career_fair = round(generic_fair * nfl_tier_multiplier, 2)
     actor_scale = actor_discovery_fair_value_multiplier(result)
+    actor_career_score = actor_career_scale_score(result)
+    actor_career_bonus = actor_verified_career_achievement_bonus(result)
     actor_career_fair = actor_career_scale_fair_value(result)
     actor_curated_prior = None
     fair = career_fair
@@ -744,6 +781,12 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         ),
         "actorDiscoveryFairValueMultiplier": (
             actor_scale if is_actor_discovery(result) else None
+        ),
+        "actorCareerScaleScore": (
+            actor_career_score if is_actor_discovery(result) else None
+        ),
+        "actorVerifiedCareerAchievementBonus": (
+            actor_career_bonus if is_actor_discovery(result) else None
         ),
         "actorCareerScaleFairValue": (
             actor_career_fair if is_actor_discovery(result) else None
