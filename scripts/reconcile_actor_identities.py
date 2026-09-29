@@ -112,11 +112,12 @@ def ensure_unique_actor_tickers(records:list[dict[str,Any]]):
     for record in actors:
         rid=str(record.get("id") or "")
         ticker=re.sub(r"[^A-Z0-9]","",str(record.get("ticker") or "").upper())[:4]
+        if not ticker:
+            continue
         identity=_qid(record) or rid or normalize_name(record.get("name"))
-        if ticker and ticker not in used:
+        if ticker not in used:
             chosen[rid]=ticker;used.add(ticker);continue
-        base=ticker or _ticker_seed(record)
-        new_ticker=_unique_ticker(base,identity,used)
+        new_ticker=_unique_ticker(ticker,identity,used)
         chosen[rid]=new_ticker;used.add(new_ticker)
         repairs.append({"name":str(record.get("name") or ""),"oldTicker":ticker,"newTicker":new_ticker})
     for record in records:
