@@ -135,8 +135,35 @@ class ActorMarketMigrationTests(unittest.TestCase):
         self.assertEqual(removed,1)
         self.assertEqual(
             attention[0]["eventKey"],
-            "wikimedia:attention:Q4491:2026-09-11:cool",
+            "wikimedia:attention:Q4491:2026-09-11T04:39:03Z",
         )
+
+    def test_same_snapshot_attention_tiers_collapse_to_strongest_move(self):
+        record=self.actor(
+            sourceRecordId="Q1",
+            priceEvents=[
+                {"eventKey":"a","eventType":"actor-attention-outcome","outcomeTier":"hot","provider":"Wikimedia Analytics API","startedAt":"2026-09-20T12:00:00Z","movePct":0.51},
+                {"eventKey":"b","eventType":"actor-attention-outcome","outcomeTier":"warm","provider":"Wikimedia Analytics API","startedAt":"2026-09-20T12:00:00Z","movePct":0.27},
+            ],
+        )
+        events,_,removed=canonicalize_events(record)
+        attention=[event for event in events if event.get("eventType")=="actor-attention-outcome"]
+        self.assertEqual(len(attention),1)
+        self.assertEqual(removed,1)
+        self.assertEqual(attention[0]["movePct"],0.51)
+        self.assertEqual(attention[0]["eventKey"],"wikimedia:attention:Q1:2026-09-20T12:00:00Z")
+
+    def test_distinct_intraday_attention_observations_are_preserved(self):
+        record=self.actor(
+            sourceRecordId="Q1",
+            priceEvents=[
+                {"eventKey":"a","eventType":"actor-attention-outcome","provider":"Wikimedia Analytics API","startedAt":"2026-09-20T12:00:00Z","movePct":0.51},
+                {"eventKey":"b","eventType":"actor-attention-outcome","provider":"Wikimedia Analytics API","startedAt":"2026-09-20T18:00:00Z","movePct":-0.20},
+            ],
+        )
+        events,_,removed=canonicalize_events(record)
+        self.assertEqual(len([event for event in events if event.get("eventType")=="actor-attention-outcome"]),2)
+        self.assertEqual(removed,0)
 
     def test_orphan_legacy_recorded_award_history_is_removed(self):
         record=self.actor(
