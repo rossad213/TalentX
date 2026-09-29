@@ -27,8 +27,8 @@ from typing import Any
 
 from pricing_engine_v2 import apply_v2
 
-MIGRATION_VERSION = "1.3-actor-v6.6-career-score-epoch"
-MIGRATION_EVENT_ID = "model:actor-career-score-market-epoch-v1-3"
+MIGRATION_VERSION = "1.4-actor-v6.7-verified-career-epoch"
+MIGRATION_EVENT_ID = "model:actor-verified-career-market-epoch-v1-4"
 
 SUPPORTED_EVENT_TYPES = {
     "actor-release",
