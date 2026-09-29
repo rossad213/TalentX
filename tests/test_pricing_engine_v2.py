@@ -260,7 +260,7 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),60)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.4-actor-evidence-market-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.5-actor-career-first-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],60.0)
 
