@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.5-actor-career-first-scale"
+ACTOR_MODEL_VERSION = "6.6-actor-career-score-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -216,8 +216,18 @@ def actor_pricing_evidence_ceiling(record: dict[str, Any]) -> float:
 
 
 def actor_discovery_fair_value_multiplier(record: dict[str, Any]) -> float:
-    """Do not double-discount discovered Actors after confidence has already priced uncertainty."""
+    """Retained for audit compatibility; discovered Actors no longer receive a discovery haircut."""
     return 1.0
+
+
+def actor_career_scale_fair_value(record: dict[str, Any]) -> float | None:
+    """Price discovered Actors on the same career-score dollar curve as the curated Actor benchmark."""
+    if not is_actor_discovery(record):
+        return None
+    score = clamp(record.get("careerScore", 0), 0, 100)
+    # Same curve used by the reviewed non-athlete benchmark:
+    # rank-1 score 95 -> $164.45; score 61.2 -> $69.42.
+    return round(2.0 + 180.0 * (score / 100.0) ** 2, 2)
 
 
 def motorsport_verified_race_count(record: dict[str, Any]) -> int:
@@ -642,10 +652,14 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     nfl_tier_multiplier = nfl_career_tier_multiplier(result, talent, rookie_influence)
     career_fair = round(generic_fair * nfl_tier_multiplier, 2)
     actor_scale = actor_discovery_fair_value_multiplier(result)
+    actor_career_fair = actor_career_scale_fair_value(result)
     actor_curated_prior = None
     fair = career_fair
-    if is_actor_discovery(result):
-        fair = round(fair * actor_scale, 2)
+    if is_actor_discovery(result) and actor_career_fair is not None:
+        # Career score sets the Actor baseline on the same dollar curve as the
+        # reviewed benchmark. Confidence remains descriptive; verified outcomes
+        # move the live market through the event ledger.
+        fair = actor_career_fair
     elif is_actor(result) and is_curated_non_athlete(result) and v1_fundamental is not None and v1_fundamental > 0:
         # The baseline's reviewed Actor benchmark is the current profession prior.
         # Generic V2 evidence must not re-invert that ordering after publication.
@@ -730,6 +744,9 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         ),
         "actorDiscoveryFairValueMultiplier": (
             actor_scale if is_actor_discovery(result) else None
+        ),
+        "actorCareerScaleFairValue": (
+            actor_career_fair if is_actor_discovery(result) else None
         ),
         "actorCuratedBaselinePrior": (
             actor_curated_prior if is_actor(result) and is_curated_non_athlete(result) else None
