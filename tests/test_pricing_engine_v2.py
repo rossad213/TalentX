@@ -260,7 +260,7 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),82)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.6-actor-career-score-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.7-actor-verified-career-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],82.0)
 
@@ -271,8 +271,32 @@ class PricingEngineV2Tests(unittest.TestCase):
         priced=apply_v2(actor)
         expected=round(2.0+180.0*(85.0/100.0)**2,2)
         self.assertEqual(priced['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
+        self.assertEqual(priced['pricingV2']['actorCareerScaleScore'],85.0)
         self.assertEqual(priced['pricingV2']['actorCareerScaleFairValue'],expected)
         self.assertEqual(priced['fairValue'],expected)
+
+    def test_proxy_only_actor_cannot_enter_elite_band_from_public_footprint_alone(self):
+        actor=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
+            careerScore=92.0,pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
+        priced=apply_v2(actor)
+        self.assertEqual(priced['pricingV2']['actorCareerScaleScore'],86.0)
+        self.assertEqual(priced['pricingV2']['actorVerifiedCareerAchievementBonus'],0.0)
+        self.assertEqual(priced['fairValue'],round(2.0+180.0*(86.0/100.0)**2,2))
+
+    def test_verified_acting_achievements_can_lift_actor_above_proxy_ceiling(self):
+        actor=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
+            careerScore=89.0,pricingConfidence=.90,dataConfidence=.90,
+            priceEvents=[
+                {'eventKey':'award:1','eventType':'award','name':'Award: Academy Award for Best Actor','verified':True},
+                {'eventKey':'nom:1','eventType':'nomination','name':'Nomination: Academy Award for Best Actor','verified':True},
+                {'eventKey':'honor:1','eventType':'award','name':'Award: Legion of Honour','verified':True},
+                {'eventKey':'box:1','eventType':'actor-box-office-outcome','name':'Box office breakout','verified':True},
+            ])
+        priced=apply_v2(actor)
+        self.assertEqual(priced['pricingV2']['actorVerifiedCareerAchievementBonus'],1.0)
+        self.assertEqual(priced['pricingV2']['actorCareerScaleScore'],87.0)
 
     def test_direct_actor_evidence_refines_confidence_without_market_scale_haircut(self):
         base=self.music_record(
