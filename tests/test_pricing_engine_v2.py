@@ -272,7 +272,7 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(priced['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
         self.assertEqual(priced['fairValue'],priced['pricingV2']['genericFairValue'])
 
-    def test_direct_actor_evidence_graduates_market_scale(self):
+    def test_direct_actor_evidence_refines_confidence_without_market_scale_haircut(self):
         base=self.music_record(
             primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
             pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
@@ -282,11 +282,24 @@ class PricingEngineV2Tests(unittest.TestCase):
         ]}
         thin=apply_v2(base)
         mature=apply_v2(enriched)
-        self.assertGreater(
-            mature['pricingV2']['actorDiscoveryFairValueMultiplier'],
-            thin['pricingV2']['actorDiscoveryFairValueMultiplier'],
-        )
+        self.assertEqual(thin['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
+        self.assertEqual(mature['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
+        self.assertGreater(mature['confidenceScore'],thin['confidenceScore'])
         self.assertGreater(mature['fairValue'],thin['fairValue'])
+
+    def test_actor_direct_evidence_cannot_dominate_equal_career_strength(self):
+        common=dict(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',
+            yearsActive=20,pricingConfidence=.90,dataConfidence=.90,
+            activeMetrics={"performance":86,"achievements":86,"consistency":86,"potential":78,"availability":84,"audience":82},
+        )
+        thin=apply_v2(self.music_record(sourceRecordId='Q1',priceEvents=[],**common))
+        rich=apply_v2(self.music_record(
+            sourceRecordId='Q2',
+            priceEvents=[{'eventKey':f'box:{i}','eventType':'actor-box-office-outcome','verified':True} for i in range(6)],
+            **common,
+        ))
+        self.assertLess((rich['fairValue']/thin['fairValue']-1.0)*100.0,8.0)
 
     def test_curated_actor_keeps_reviewed_baseline_fundamental_in_v2(self):
         actor=self.music_record(
