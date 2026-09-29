@@ -475,7 +475,11 @@ def evidence_confidence(record: dict[str, Any]) -> float:
         identity_verified = bool(str(record.get("sourceRecordId") or record.get("wikidataSourceRecordId") or "").strip())
         direct = actor_direct_evidence_weight(record)
         actor_floor = 72.0 if identity_verified else 68.0
-        evidence_bonus = min(8.0, 2.5 * math.log1p(max(0.0, direct))) if direct else 0.0
+        # Direct evidence improves certainty, but cannot become a substitute for
+        # career strength. Even a dense verified ledger adds only a few points
+        # of confidence; actual box-office/streaming/award outcomes move price
+        # through the event ledger rather than a permanent evidence premium.
+        evidence_bonus = min(5.0, 1.75 * math.log1p(max(0.0, direct))) if direct else 0.0
         confidence = max(confidence, actor_floor + evidence_bonus)
         confidence = min(confidence, actor_pricing_evidence_ceiling(record))
     if is_unverified_motorsport_discovery(record):
