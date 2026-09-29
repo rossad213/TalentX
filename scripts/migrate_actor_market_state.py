@@ -109,20 +109,10 @@ def canonical_event_key(record: dict[str,Any], event: dict[str,Any]) -> str:
         return f"wikidata:{event_type}:{person}:{work}"
     if person and work and event_type in {"actor-box-office-outcome","actor-streaming-outcome"} and date:
         return f"{provider_slug(event)}:{person}:{work}:{date}"
-    if person and event_type=="actor-attention-outcome" and date:
-        tier=str(event.get("outcomeTier") or "").strip().lower()
-        if not tier:
-            name=str(event.get("name") or "").lower()
-            tier=(
-                "breakout" if "breakout" in name
-                else "hot" if " hot" in name
-                else "warm" if "warm" in name
-                else "cool" if "cool" in name
-                else "attention"
-            )
-        # Wikimedia attention is an actor-wide signal. Multiple projects may
-        # discover the same daily audience move, but the human asset prices once.
-        return f"wikimedia:attention:{person}:{date}:{tier}"
+    if person and event_type=="actor-attention-outcome":
+        observation=event_observation_key(event)
+        if observation:
+            return f"wikimedia:attention:{person}:{observation}"
     return original
 
 
@@ -136,7 +126,7 @@ def semantic_event_key(record: dict[str,Any], event: dict[str,Any]) -> tuple[str
         return (event_type,work)
     if work and event_type in {"actor-box-office-outcome","actor-streaming-outcome"}:
         return (event_type,provider,work,date)
-    if work and event_type=="actor-attention-outcome":
+    if event_type=="actor-attention-outcome":
         return (event_type,canonical_event_key(record,event))
     return (canonical_event_key(record,event),)
 
