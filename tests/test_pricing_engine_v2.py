@@ -264,13 +264,13 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],78.0)
 
-    def test_source_discovered_actor_uses_lower_market_scale_until_direct_evidence_matures(self):
+    def test_source_discovered_actor_is_not_double_discounted_after_confidence(self):
         actor=self.music_record(
             primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
             pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingV2']['actorDiscoveryFairValueMultiplier'],0.68)
-        self.assertLess(priced['fairValue'],priced['pricingV2']['genericFairValue']*0.70)
+        self.assertEqual(priced['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
+        self.assertEqual(priced['fairValue'],priced['pricingV2']['genericFairValue'])
 
     def test_direct_actor_evidence_graduates_market_scale(self):
         base=self.music_record(
