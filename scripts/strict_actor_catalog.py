@@ -31,6 +31,76 @@ SOURCE_NAMESPACES = {
     "wikidata-actor-resolved-from-music",
 }
 
+ACTING_TERMS = (
+    "film actor", "television actor", "voice actor", "stage actor",
+    "actor", "actress",
+)
+NON_ACTING_SCREEN_TERMS = (
+    "film director", "television director", "filmmaker", "film-maker",
+    "screenwriter", "screen writer", "producer", "cinematographer",
+)
+
+
+def primary_actor_description(description: str) -> bool:
+    """Require acting to be the primary screen identity, not merely a secondary occupation."""
+    text = str(description or "").lower()
+    acting = [text.find(term) for term in ACTING_TERMS if text.find(term) >= 0]
+    if not acting:
+        return False
+    competing = [text.find(term) for term in NON_ACTING_SCREEN_TERMS if text.find(term) >= 0]
+    music = [
+        text.find(term)
+        for term in (
+            "singer-songwriter", "singer songwriter", "record producer", "rapper",
+            "singer", "songwriter", "composer", "disc jockey", "guitarist",
+            "pianist", "drummer", "bassist", "violinist", "saxophonist",
+        )
+        if text.find(term) >= 0
+    ]
+    blockers = competing + music
+    return not blockers or min(acting) < min(blockers)
+
+
+def actor_role_from_occupations(occupations: set[str]) -> tuple[str, str]:
+    priority = (
+        ("Q10800557", "Film actor", "Film"),
+        ("Q10798782", "Television actor", "Television"),
+        ("Q2405480", "Voice actor", "Voice Acting"),
+        ("Q2259451", "Stage actor", "Theatre"),
+        ("Q33999", "Actor", "Acting"),
+    )
+    for qid, role, discipline in priority:
+        if qid in occupations:
+            return role, discipline
+    return "Actor", "Acting"
+
+
+def clean_verified_actor_payload(record: dict[str, Any], info: dict[str, Any], canonical_label: str) -> dict[str, Any]:
+    result = dict(record)
+    occupations = set(info.get("occupations") or set())
+    role, discipline = actor_role_from_occupations(occupations)
+    result["primaryCategory"] = "Actor"
+    result["role"] = role
+    result["discipline"] = discipline
+    result["leagueOrMedium"] = "Film & Television" if discipline in {"Acting", "Film", "Television"} else discipline
+    result["actorCategoryVerified"] = True
+    result["actorCategoryVerification"] = "Acting-first Wikidata description"
+    result["wikidataCanonicalLabel"] = canonical_label or str(record.get("name") or "")
+    result["pricingDataStatus"] = "Screen-career identity verified; direct performance evidence may be partial"
+    result["description"] = str(info.get("description") or record.get("description") or "")
+    for field in ("musicCategoryVerified", "musicCategoryVerification", "musicBrainzArtistIds", "verifiedMusicOccupations"):
+        result.pop(field, None)
+    namespace = str(result.get("sourceNamespace") or "")
+    if namespace.startswith("wikidata-music"):
+        result["categoryOriginSourceNamespace"] = namespace
+        result["sourceNamespace"] = "wikidata-actor-resolved-from-music"
+    result["searchText"] = " ".join([
+        str(result.get("name") or ""), "Actor", discipline,
+        str(result.get("leagueOrMedium") or ""), role,
+        str(result.get("country") or ""), "Current active",
+    ]).lower()
+    return result
+
 
 def source_name_matches_label(name: Any, label: Any) -> bool:
     left = normalize(name)
@@ -132,12 +202,8 @@ def resolve_records(
             removed_name_mismatches.append(name or qid)
             continue
 
-        if dominant == "Actor":
-            record["actorCategoryVerified"] = True
-            record["actorCategoryVerification"] = "Screen-first Wikidata description"
-            record["wikidataCanonicalLabel"] = canonical_label or name
-            record["pricingDataStatus"] = "Screen-career identity verified; direct performance evidence may be partial"
-            record["description"] = description or str(record.get("description") or "")
+        if dominant == "Actor" and primary_actor_description(description):
+            record = clean_verified_actor_payload(record, info, canonical_label)
             verified_screen_first.append(name or qid)
             output.append(record)
             continue
@@ -226,7 +292,7 @@ def main() -> int:
         "categoryCounts": dict(sorted(counts.items())),
         **summary,
         "rule": (
-            "Source-discovered Actor rows must have a screen-first English Wikidata description and a "
+            "Source-discovered Actor rows must have an acting-first English Wikidata description and a "
             "compatible canonical identity label. Music-first identities move to Music only with a specific "
             "music profession plus MusicBrainz proof; other secondary-occupation rows are removed from Current."
         ),
