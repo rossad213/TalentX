@@ -69,6 +69,64 @@ def _event_key(e:dict[str,Any])->tuple[str,str,str]:
 def _history_key(p:dict[str,Any])->tuple[str,str,str,str]:
     return (str(p.get("time") or p.get("date") or ""),str(p.get("eventId") or p.get("eventKey") or ""),str(p.get("phase") or ""),str(p.get("source") or ""))
 
+def _ticker_seed(record:dict[str,Any])->str:
+    name=unicodedata.normalize("NFKD",str(record.get("name") or "")).encode("ascii","ignore").decode("ascii")
+    parts=[re.sub(r"[^A-Za-z0-9]","",part).upper() for part in name.split()]
+    parts=[part for part in parts if part]
+    if not parts:return "ACTR"
+    if len(parts)==1:return (parts[0][:4]+"ACTR")[:4]
+    base=(parts[0][:2]+parts[-1][:2]).ljust(4,"X")[:4]
+    return base
+
+def _unique_ticker(base:str,identity:str,used:set[str])->str:
+    import hashlib
+    clean=re.sub(r"[^A-Z0-9]","",str(base or "").upper()) or "ACTR"
+    clean=(clean+"ACTR")[:4]
+    if clean not in used:return clean
+    digest=hashlib.sha1(identity.encode("utf-8")).hexdigest().upper()
+    alphabet="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for width in (1,2,3):
+        prefix=clean[:4-width]
+        start=int(digest[:8],16)
+        space=len(alphabet)**width
+        for offset in range(space):
+            value=(start+offset)%space
+            suffix=""
+            n=value
+            for _ in range(width):
+                suffix=alphabet[n%len(alphabet)]+suffix
+                n//=len(alphabet)
+            candidate=(prefix+suffix)[:4]
+            if candidate not in used:return candidate
+    raise RuntimeError("Unable to allocate unique Actor ticker")
+
+def ensure_unique_actor_tickers(records:list[dict[str,Any]]):
+    used=set()
+    repairs=[]
+    output=[]
+    actors=sorted(
+        [r for r in records if is_actor(r)],
+        key=lambda r:(str(r.get("ticker") or ""),normalize_name(r.get("name")),str(r.get("id") or "")),
+    )
+    chosen={}
+    for record in actors:
+        rid=str(record.get("id") or "")
+        ticker=re.sub(r"[^A-Z0-9]","",str(record.get("ticker") or "").upper())[:4]
+        identity=_qid(record) or rid or normalize_name(record.get("name"))
+        if ticker and ticker not in used:
+            chosen[rid]=ticker;used.add(ticker);continue
+        base=ticker or _ticker_seed(record)
+        new_ticker=_unique_ticker(base,identity,used)
+        chosen[rid]=new_ticker;used.add(new_ticker)
+        repairs.append({"name":str(record.get("name") or ""),"oldTicker":ticker,"newTicker":new_ticker})
+    for record in records:
+        result=dict(record)
+        rid=str(result.get("id") or "")
+        if is_actor(result) and rid in chosen:
+            result["ticker"]=chosen[rid]
+        output.append(result)
+    return output,repairs
+
 def _merge_lists(group,field,key_fn,preferred):
     merged={}
     ordered=[r for r in group if r is not preferred]+[preferred]
@@ -155,6 +213,11 @@ def reconcile_records(
         rid=str(r.get("id") or "")
         if rid in suppressed:continue
         output.append(replacements.get(rid,dict(r)))
+    output,ticker_repairs=ensure_unique_actor_tickers(output)
+    repairs.extend({
+        "name":item["name"],"canonicalId":"","suppressedId":"",
+        "wikidataId":"","reason":f"ticker collision {item['oldTicker']} -> {item['newTicker']}"
+    } for item in ticker_repairs)
     return output,repairs
 
 def preferred_actor_context(path:Path|None)->tuple[set[str],set[str]]:
