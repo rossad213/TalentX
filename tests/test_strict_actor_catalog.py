@@ -54,6 +54,31 @@ class StrictActorCatalogTests(unittest.TestCase):
         self.assertTrue(resolved[0]["actorCategoryVerified"])
         self.assertEqual(summary["verifiedScreenFirst"],1)
 
+    def test_filmmaker_first_identity_is_removed_even_with_actor_occupation(self):
+        actor={"id":"spielberg","name":"Steven Spielberg","primaryCategory":"Actor","sourceNamespace":"wikidata-non-athlete","sourceRecordId":"Q8877"}
+        evidence={"Q8877":{"label":"Steven Spielberg","description":"American filmmaker and actor","occupations":{"Q2526255","Q33999"},"musicbrainz":set()}}
+        resolved,summary=resolve_records([actor],evidence)
+        self.assertEqual(resolved,[])
+        self.assertEqual(summary["removedNonScreenFirst"],1)
+
+    def test_verified_actor_payload_removes_music_search_classification(self):
+        actor={
+            "id":"x","name":"Example Actor","primaryCategory":"Actor",
+            "sourceNamespace":"wikidata-actor-resolved-from-music","sourceRecordId":"Q1",
+            "role":"Singer","discipline":"Vocal","leagueOrMedium":"Music",
+            "searchText":"example actor music vocal singer",
+            "musicCategoryVerified":True,"musicBrainzArtistIds":["mbid"],
+        }
+        evidence={"Q1":{"label":"Example Actor","description":"American actor and singer","occupations":{"Q33999","Q177220"},"musicbrainz":{"mbid"}}}
+        resolved,_=resolve_records([actor],evidence)
+        record=resolved[0]
+        self.assertEqual(record["primaryCategory"],"Actor")
+        self.assertNotEqual(record["leagueOrMedium"],"Music")
+        self.assertNotIn("musicCategoryVerified",record)
+        self.assertNotIn("musicBrainzArtistIds",record)
+        self.assertIn("actor",record["searchText"])
+        self.assertNotIn(" music vocal ",f" {record['searchText']} ")
+
     def test_curated_actor_is_never_reclassified(self):
         actor={"id":"actor","name":"Curated Crossover","primaryCategory":"Actor","nonAthleteRosterVersion":"1.0.0","sourceRecordId":"Q2"}
         evidence={"Q2":{"description":"American singer and actor","occupations":{"Q177220","Q33999"},"musicbrainz":{"mbid"}}}
