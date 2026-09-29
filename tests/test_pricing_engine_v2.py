@@ -260,17 +260,19 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),82)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.5-actor-career-first-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.6-actor-career-score-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],82.0)
 
-    def test_source_discovered_actor_is_not_double_discounted_after_confidence(self):
+    def test_source_discovered_actor_uses_curated_career_score_dollar_curve(self):
         actor=self.music_record(
             primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q42',
-            pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
+            careerScore=85.0,pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
         priced=apply_v2(actor)
+        expected=round(2.0+180.0*(85.0/100.0)**2,2)
         self.assertEqual(priced['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
-        self.assertEqual(priced['fairValue'],priced['pricingV2']['genericFairValue'])
+        self.assertEqual(priced['pricingV2']['actorCareerScaleFairValue'],expected)
+        self.assertEqual(priced['fairValue'],expected)
 
     def test_direct_actor_evidence_refines_confidence_without_market_scale_haircut(self):
         base=self.music_record(
@@ -285,7 +287,7 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(thin['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
         self.assertEqual(mature['pricingV2']['actorDiscoveryFairValueMultiplier'],1.0)
         self.assertGreater(mature['confidenceScore'],thin['confidenceScore'])
-        self.assertGreater(mature['fairValue'],thin['fairValue'])
+        self.assertEqual(mature['fairValue'],thin['fairValue'])
 
     def test_actor_direct_evidence_cannot_dominate_equal_career_strength(self):
         common=dict(
@@ -299,7 +301,8 @@ class PricingEngineV2Tests(unittest.TestCase):
             priceEvents=[{'eventKey':f'box:{i}','eventType':'actor-box-office-outcome','verified':True} for i in range(6)],
             **common,
         ))
-        self.assertLess((rich['fairValue']/thin['fairValue']-1.0)*100.0,8.0)
+        self.assertEqual(rich['careerScore'],thin['careerScore'])
+        self.assertEqual(rich['fairValue'],thin['fairValue'])
 
     def test_curated_actor_keeps_reviewed_baseline_fundamental_in_v2(self):
         actor=self.music_record(
