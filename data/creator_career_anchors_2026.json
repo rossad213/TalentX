@@ -1,0 +1,21 @@
+{
+  "version": "2026.1",
+  "updatedAt": "2026-09-30",
+  "purpose": "Source-backed current Creator career anchors used to refresh selected curated priors without pretending an incomplete source is a full top-100 ranking.",
+  "source": {
+    "name": "Forbes Top Creators 2026",
+    "url": "https://www.forbes.com/sites/pr/2026/06/23/forbes-unveils-2026-top-creators-list-as-collective-earnings-surpass-1-billion-for-the-first-time/"
+  },
+  "anchors": [
+    {
+      "name": "MrBeast",
+      "rank": 1,
+      "evidence": "Forbes states MrBeast retained the number one spot for the fifth consecutive year."
+    },
+    {
+      "name": "Dhar Mann",
+      "rank": 2,
+      "evidence": "Forbes' 2026 coverage identifies Dhar Mann as second on the 2026 Top Creators list."
+    }
+  ]
+}
