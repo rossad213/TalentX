@@ -260,7 +260,7 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),82)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.10-actor-idempotent-elite-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.11-actor-career-anchor-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],82.0)
 
@@ -334,12 +334,19 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(priced['pricingV2']['actorLegacyMarketMultiplier'],0.85)
         self.assertGreater(priced['fairValue'],110.0)
 
-    def test_active_actor_is_not_given_legacy_discount(self):
+    def test_active_actor_anchor_uses_career_metrics_without_legacy_discount(self):
         actor=self.music_record(
             primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q873',
-            actorCareerAnchor=True,marketSegment='Current',careerScore=86.0,priceEvents=[])
+            actorCareerAnchor=True,marketSegment='Current',careerScore=82.0,
+            activeMetrics={"performance":89,"achievements":94,"consistency":92,"potential":34,"availability":80,"audience":86},
+            priceEvents=[
+                {'eventKey':'award:1','eventType':'award','name':'Award: Academy Award for Best Actress','verified':True},
+                {'eventKey':'award:2','eventType':'award','name':'Award: Best Actress performance','verified':True},
+            ])
         priced=apply_v2(actor)
         self.assertEqual(priced['pricingV2']['actorLegacyMarketMultiplier'],1.0)
+        self.assertGreater(priced['pricingV2']['actorCareerScaleScore'],90.0)
+        self.assertGreater(priced['pricingV2']['actorCareerScaleScore'],actor['careerScore'])
 
     def test_direct_actor_evidence_refines_confidence_without_market_scale_haircut(self):
         base=self.music_record(
