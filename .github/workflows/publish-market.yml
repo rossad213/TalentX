@@ -133,13 +133,41 @@ jobs:
             # A workflow can remain "successful" after its short-retention
             # artifact has expired, so never trust one run ID blindly.
             healthy_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=success&per_page=100")"
-            candidates="$(printf '%s' "$healthy_meta" | jq -r '.workflow_runs | sort_by(.created_at) | reverse[] | [.id,.created_at] | @tsv')"
+            candidates="$(printf '%s' "$healthy_meta" | jq -r '.workflow_runs | sort_by(.created_at) | reverse[] | "\(.id) \(.created_at)"')"
 
             run_id=""
             created_at=""
             state=""
             rm -rf "$target_dir"; mkdir -p "$target_dir"
-            while IFS=            mode="market"
+            while read -r candidate_id candidate_created; do
+              [ -n "$candidate_id" ] || continue
+              rm -rf "$target_dir"; mkdir -p "$target_dir"
+              if gh run download "$candidate_id" -R "$GITHUB_REPOSITORY" -n "$artifact_name" -D "$target_dir" >/dev/null 2>&1; then
+                candidate_state="$(find "$target_dir" -name "$state_filename" -print -quit)"
+                if [ -n "$candidate_state" ]; then
+                  run_id="$candidate_id"
+                  created_at="$candidate_created"
+                  state="$candidate_state"
+                  break
+                fi
+              fi
+              echo "WARNING: successful ${category} run ${candidate_id} has no usable ${artifact_name}; trying an older healthy run."
+            done <<< "$candidates"
+
+            if [ -z "$run_id" ] || [ -z "$state" ]; then
+              if [ "$required" = "required" ]; then
+                echo "Required ${category} market state has no downloadable successful artifact."
+                exit 1
+              fi
+              echo "No downloadable successful optional ${category} artifact; using baseline."
+              return 0
+            fi
+
+            if [ -n "$latest_id" ] && [ "$latest_id" != "$run_id" ]; then
+              echo "WARNING: latest ${category} refresh ${latest_id} concluded ${latest_conclusion}; publishing downloadable last-known-good run ${run_id}."
+            fi
+
+            mode="market"
             if [ -n "$created_at" ] && [ "$created_at" \> "$baseline_time" ]; then mode="replace"; fi
             python scripts/category_market_store.py merge --base data/current_catalog.json --overlay "$state" --category "$category" --mode "$mode"
             echo "Published ${category} from last-known-good run ${run_id} in ${mode} mode."
