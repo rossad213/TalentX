@@ -32,7 +32,7 @@ from pricing_model import clamp
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "market" / "creators.json"
 DEFAULT_YOUTUBE_MANIFEST = ROOT / "data" / "creator_youtube_manifest.json"
-MODEL_VERSION = "creator-fundamentals-v2"
+MODEL_VERSION = "creator-fundamentals-v2.1-authoritative"
 
 # The Creator model agreed for TalentX. Existing generic field names retain their
 # storage compatibility while their Creator meaning is explicitly defined here.
@@ -389,13 +389,29 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
         if isinstance(explanation, dict):
             explanation = dict(explanation)
             explanation["recordedMarketPrice"] = market
+            explanation["recordedFairValue"] = fundamental
+            explanation["creatorAuthoritativeFundamental"] = fundamental
             record["priceExplanation"] = explanation
 
+        # Creator v2.1 is authoritative for Creator fundamentals. Keep the
+        # generic fairValue field synchronized so UI/comparison code cannot
+        # accidentally display an obsolete generic-v2 valuation.
         record["careerScore"] = score
         record["fundamentalValue"] = fundamental
+        record["fairValue"] = fundamental
         record["marketPrice"] = market
         record["pricingModelVersion"] = MODEL_VERSION
         record["creatorFundamentalModelVersion"] = MODEL_VERSION
+        if str(record.get("sourceNamespace") or "") == "wikidata-creator":
+            record.pop("benchmarkRank", None)
+            record.pop("benchmarkPoolSize", None)
+            record["rankingStatus"] = "Source-discovered; not part of curated benchmark ranking"
+        pricing_v2 = record.get("pricingV2")
+        if isinstance(pricing_v2, dict):
+            pricing_v2 = dict(pricing_v2)
+            pricing_v2["creatorAuthoritativeFundamental"] = fundamental
+            pricing_v2["creatorAuthoritativeModelVersion"] = MODEL_VERSION
+            record["pricingV2"] = pricing_v2
         record["creatorFundamentalComponents"] = {
             "weights": CREATOR_WEIGHTS,
             "absoluteCreatorScore": round(absolute, 1),
