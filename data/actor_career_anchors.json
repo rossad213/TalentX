@@ -1,6 +1,6 @@
 {
-  "version": "1.1",
-  "purpose": "Actor career anchors that complement the current-star benchmark. QIDs are authoritative identity sources; fallback metadata guarantees coverage when Wikidata endpoints return partial batches. These entries do not assign editorial benchmark ranks.",
+  "version": "1.2",
+  "purpose": "Actor career anchors complement the current-star benchmark by protecting established career stature without assigning editorial ranks. QIDs are identity sources; fallback metadata is used only when Wikidata endpoint batches are incomplete.",
   "anchors": [
     {
       "name": "Meryl Streep",
@@ -41,6 +41,54 @@
       "country": "United States",
       "role": "Actor",
       "discipline": "Film & Stage"
+    },
+    {
+      "name": "Robert De Niro",
+      "wikidataQid": "Q36949"
+    },
+    {
+      "name": "Al Pacino",
+      "wikidataQid": "Q41163"
+    },
+    {
+      "name": "Tom Hanks",
+      "wikidataQid": "Q2263"
+    },
+    {
+      "name": "Anthony Hopkins",
+      "wikidataQid": "Q65932"
+    },
+    {
+      "name": "Morgan Freeman",
+      "wikidataQid": "Q48337"
+    },
+    {
+      "name": "Kate Winslet",
+      "wikidataQid": "Q202765"
+    },
+    {
+      "name": "Jodie Foster",
+      "wikidataQid": "Q41351"
+    },
+    {
+      "name": "Helen Mirren",
+      "wikidataQid": "Q349391"
+    },
+    {
+      "name": "Frances McDormand",
+      "wikidataQid": "Q204299"
+    },
+    {
+      "name": "Gary Oldman",
+      "wikidataQid": "Q83492"
+    },
+    {
+      "name": "Judi Dench",
+      "wikidataQid": "Q28054"
+    },
+    {
+      "name": "Julianne Moore",
+      "wikidataQid": "Q80405"
     }
   ]
 }
