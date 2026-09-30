@@ -121,12 +121,16 @@ jobs:
             # must never take the public market down. We still surface the newest
             # run's conclusion as a warning, but compose from the newest successful
             # artifact until the next healthy refresh replaces it.
-            meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=30")"
-            latest="$(printf '%s' "$meta" | jq -c '.workflow_runs[0] // {}')"
+            latest_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=completed&per_page=1")"
+            latest="$(printf '%s' "$latest_meta" | jq -c '.workflow_runs[0] // {}')"
             latest_id="$(printf '%s' "$latest" | jq -r '.id // empty')"
             latest_conclusion="$(printf '%s' "$latest" | jq -r '.conclusion // empty')"
 
-            healthy="$(printf '%s' "$meta" | jq -c '[.workflow_runs[] | select(.conclusion == "success")][0] // {}')"
+            # Query success directly instead of scanning only a short window of
+            # completed runs. High-churn workflows can accumulate dozens of
+            # skipped/cancelled runs between healthy artifacts.
+            healthy_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_file}/runs?status=success&per_page=1")"
+            healthy="$(printf '%s' "$healthy_meta" | jq -c '.workflow_runs[0] // {}')"
             run_id="$(printf '%s' "$healthy" | jq -r '.id // empty')"
             created_at="$(printf '%s' "$healthy" | jq -r '.created_at // empty')"
 
