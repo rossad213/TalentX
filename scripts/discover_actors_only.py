@@ -10,10 +10,13 @@ from pathlib import Path
 
 from expand_non_athlete_sources import (
     RECENT_ACTIVITY_YEARS,
+    SPARQL_ENDPOINT,
+    binding_value,
     discover_category,
     make_record,
     make_session,
     normalize,
+    parse_year,
     update_taxonomy,
 )
 from pricing_model import apply_pricing_to_records, load_overrides
@@ -24,6 +27,75 @@ DEFAULT_SEED = DATA / "current_seed.json"
 DEFAULT_TAXONOMY = DATA / "taxonomy.json"
 DEFAULT_MANIFEST = DATA / "actor_discovery_manifest.json"
 DEFAULT_OVERRIDES = DATA / "pricing_overrides.json"
+DEFAULT_CAREER_ANCHORS = DATA / "actor_career_anchors.json"
+
+
+def fetch_actor_career_anchors(session, path: Path, timeout: float) -> list[dict]:
+    if not path.exists():
+        return []
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    anchors = payload.get("anchors", []) if isinstance(payload, dict) else []
+    qids = [
+        str(item.get("wikidataQid") or "")
+        for item in anchors
+        if isinstance(item, dict) and str(item.get("wikidataQid") or "").startswith("Q")
+    ]
+    if not qids:
+        return []
+    values = " ".join(f"wd:{qid}" for qid in qids)
+    occupation_values = " ".join(f"wd:{qid}" for qid in ("Q33999","Q10800557","Q10798782","Q2259451","Q2405480"))
+    query = f"""
+SELECT DISTINCT ?person ?personLabel ?sitelinks ?birth ?workStart ?workEnd ?countryLabel WHERE {{
+  VALUES ?person {{ {values} }}
+  VALUES ?occupation {{ {occupation_values} }}
+  ?person wdt:P31 wd:Q5;
+          wdt:P106 ?occupation;
+          wikibase:sitelinks ?sitelinks.
+  FILTER NOT EXISTS {{ ?person wdt:P570 ?death. }}
+  OPTIONAL {{ ?person wdt:P569 ?birth. }}
+  OPTIONAL {{ ?person wdt:P2031 ?workStart. }}
+  OPTIONAL {{ ?person wdt:P2032 ?workEnd. }}
+  OPTIONAL {{ ?person wdt:P27 ?country. }}
+  SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
+}}
+""".strip()
+    response = session.post(
+        SPARQL_ENDPOINT,
+        data={"query": query, "format": "json"},
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    bindings = response.json().get("results", {}).get("bindings", [])
+    by_qid = {}
+    for binding in bindings:
+        if not isinstance(binding, dict):
+            continue
+        uri = binding_value(binding, "person")
+        qid = uri.rsplit("/", 1)[-1] if "/Q" in uri else ""
+        name = binding_value(binding, "personLabel").strip()
+        if not qid.startswith("Q") or not name or name == qid:
+            continue
+        try:
+            sitelinks = int(float(binding_value(binding, "sitelinks") or 0))
+        except ValueError:
+            sitelinks = 0
+        candidate = {
+            "qid": qid,
+            "name": name,
+            "sitelinks": sitelinks,
+            "birthYear": parse_year(binding_value(binding, "birth")),
+            "workStartYear": parse_year(binding_value(binding, "workStart")),
+            "workEndYear": parse_year(binding_value(binding, "workEnd")),
+            "country": binding_value(binding, "countryLabel").strip() or "Not listed",
+            "role": "Actor",
+            "discipline": "Acting",
+            "actorCareerAnchor": True,
+        }
+        prior = by_qid.get(qid)
+        if prior is None or sitelinks > int(prior.get("sitelinks") or 0):
+            by_qid[qid] = candidate
+    order = {qid: index for index, qid in enumerate(qids)}
+    return sorted(by_qid.values(), key=lambda row: order.get(str(row.get("qid")), 9999))
 
 
 def main() -> int:
@@ -65,9 +137,19 @@ def main() -> int:
         max(1, args.minimum_sitelinks),
         recent_cutoff,
     )
+    try:
+        anchor_candidates = fetch_actor_career_anchors(session, DEFAULT_CAREER_ANCHORS, args.request_timeout)
+    except Exception as exc:
+        anchor_candidates = []
+        source_errors.append({"source": "actor-career-anchors", "error": str(exc)})
+
+    anchor_qids = {str(row.get("qid") or "") for row in anchor_candidates}
+    merged_candidates = anchor_candidates + [
+        row for row in candidates if str(row.get("qid") or "") not in anchor_qids
+    ]
 
     selected = []
-    for candidate in candidates:
+    for candidate in merged_candidates:
         key = normalize(str(candidate.get("name") or ""))
         qid = str(candidate.get("qid") or "")
         if not key or key in existing_names or qid in existing_source_ids:
@@ -83,8 +165,9 @@ def main() -> int:
 
     counts = Counter(str(record.get("primaryCategory") or "") for record in records)
     pool_size = counts["Actor"] + len(selected)
-    additions = [
-        make_record(
+    additions = []
+    for offset, candidate in enumerate(selected, start=1):
+        record = make_record(
             candidate,
             "Actor",
             counts["Actor"] + offset,
@@ -93,8 +176,18 @@ def main() -> int:
             used_tickers,
             verified_at,
         )
-        for offset, candidate in enumerate(selected, start=1)
-    ]
+        if candidate.get("actorCareerAnchor"):
+            record["actorCareerAnchor"] = True
+            record["careerAnchorSource"] = f"https://www.wikidata.org/wiki/{candidate.get('qid')}"
+            record["verificationStatus"] = "Source-backed Actor career anchor; profession evidence verified separately"
+            record["statusSource"] = "Wikidata Actor occupation and career-anchor coverage list"
+            work_end = candidate.get("workEndYear")
+            if isinstance(work_end, int) and work_end < recent_cutoff:
+                record["careerStatus"] = "Retired / legacy"
+                record["marketSegment"] = "Legacy"
+                record["careerStage"] = "Legacy career"
+                record["searchText"] = str(record.get("searchText") or "").replace("current active", "legacy retired")
+        additions.append(record)
     combined = records + additions
     combined = apply_pricing_to_records(
         combined,
@@ -111,6 +204,8 @@ def main() -> int:
         "actualActorAdditions": len(additions),
         "musicRecordsAdded": 0,
         "sourceErrors": source_errors,
+        "careerAnchorCandidatesFound": len(anchor_candidates),
+        "careerAnchorsAdded": sum(1 for record in additions if record.get("actorCareerAnchor")),
     }
     args.manifest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Actor-only discovery added {len(additions):,} Actor records and 0 Music records.")
