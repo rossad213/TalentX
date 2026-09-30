@@ -13,6 +13,7 @@ from discover_creators_only import (  # noqa: E402
     creator_confidence,
     creator_metrics,
     merge_creator_candidates,
+    make_creator_record,
 )
 
 
@@ -118,6 +119,34 @@ class DiscoverCreatorsOnlyTests(unittest.TestCase):
         self.assertEqual(merged[0]["discipline"], "Digital Content")
         self.assertEqual(merged[0]["role"], "Multi-platform creator")
         self.assertEqual(merged[0]["platform"], "Digital platforms")
+
+    def test_source_discovered_creator_is_not_given_curated_benchmark_rank(self):
+        candidate = {
+            "qid": "Q123",
+            "name": "Example Creator",
+            "sitelinks": 25,
+            "birthYear": 1998,
+            "workStartYear": 2018,
+            "workEndYear": None,
+            "country": "United States",
+            "discipline": "YouTube",
+            "role": "YouTuber",
+            "platform": "YouTube",
+            "creatorOccupationEvidence": [
+                {"discipline": "YouTube", "role": "YouTuber", "platform": "YouTube"}
+            ],
+        }
+        record = make_creator_record(
+            candidate,
+            rank=999,
+            pool_size=1000,
+            used_ids=set(),
+            used_tickers=set(),
+            verified_at="2026-09-30T00:00:00Z",
+        )
+        self.assertNotIn("benchmarkRank", record)
+        self.assertNotIn("benchmarkPoolSize", record)
+        self.assertIn("Source-discovered", record["rankingStatus"])
 
     def test_creator_metrics_do_not_use_sitelinks_as_production(self):
         current = datetime.now(timezone.utc).year
