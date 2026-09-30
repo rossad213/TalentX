@@ -24,7 +24,10 @@ on:
       - "scripts/pricing_engine_v2_catalog.py"
       - "scripts/category_market_store.py"
       - "scripts/reconcile_actor_identities.py"
+      - "scripts/ensure_actor_career_anchors.py"
+      - "scripts/discover_actors_only.py"
       - "scripts/strict_actor_catalog.py"
+      - "data/actor_career_anchors.json"
       - "data/verified_non_athlete_events.json"
       - "tests/test_non_athlete_event_refresh.py"
       - "tests/test_repair_non_athlete_award_timeline.py"
@@ -99,6 +102,12 @@ jobs:
             fi
           fi
           python scripts/reconcile_actor_identities.py --catalog data/current_catalog.json --preferred-catalog "$baseline_catalog"
+      - name: Ensure source-backed Actor career anchors
+        run: >-
+          python scripts/ensure_actor_career_anchors.py
+          --catalog data/current_catalog.json
+          --request-timeout 20
+          --allow-source-errors
       - name: Re-verify Actor primary-category ownership
         run: |
           python scripts/strict_actor_catalog.py \
