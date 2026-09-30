@@ -36,9 +36,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: talentx-creator-market
-  # Queue Creator refreshes instead of allowing a later skipped workflow_run
-  # event to cancel a valid push/scheduled refresh already doing real work.
+  # GitHub keeps only one pending run per concurrency group even when
+  # cancel-in-progress is false. Separate trigger types so a skipped
+  # workflow_run cannot evict a real push or scheduled Creator refresh.
+  group: talentx-creator-market-${{ github.event_name }}
   cancel-in-progress: false
 
 jobs:
