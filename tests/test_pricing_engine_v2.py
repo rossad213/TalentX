@@ -260,7 +260,7 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),82)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.9-actor-anchor-aware-elite-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.10-actor-idempotent-elite-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],82.0)
 
@@ -371,16 +371,28 @@ class PricingEngineV2Tests(unittest.TestCase):
         self.assertEqual(rich['careerScore'],thin['careerScore'])
         self.assertEqual(rich['fairValue'],thin['fairValue'])
 
-    def test_curated_actor_keeps_reviewed_baseline_fundamental_in_v2(self):
+    def test_curated_actor_rebuilds_prior_from_career_score_not_stale_fundamental(self):
         actor=self.music_record(
             primaryCategory='Actor',nonAthleteRosterVersion='1.0.0',
-            benchmarkRank=3,benchmarkPoolSize=100,
+            benchmarkRank=3,benchmarkPoolSize=100,careerScore=94.7,
             fundamentalValue=249.80,marketPrice=249.80,
             activeMetrics={'performance':60,'achievements':60,'consistency':60,'potential':60,'availability':80,'audience':60},
         )
         priced=apply_v2(actor)
-        self.assertEqual(priced['fairValue'],249.80)
-        self.assertEqual(priced['pricingV2']['actorCuratedBaselinePrior'],249.80)
+        base=round(2.0+180.0*(94.7/100.0)**2,2)
+        expected=round(base*priced['pricingV2']['actorEliteScaleMultiplier'],2)
+        self.assertEqual(priced['pricingV2']['actorCuratedBaselinePrior'],base)
+        self.assertEqual(priced['fairValue'],expected)
+
+    def test_curated_actor_elite_pricing_is_idempotent(self):
+        actor=self.music_record(
+            primaryCategory='Actor',nonAthleteRosterVersion='1.0.0',
+            benchmarkRank=1,benchmarkPoolSize=100,careerScore=95.0,
+            fundamentalValue=164.45,marketPrice=164.45)
+        first=apply_v2(actor)
+        second=apply_v2(first)
+        self.assertEqual(first['fairValue'],second['fairValue'])
+        self.assertEqual(first['fairValue'],197.34)
 
     def test_verified_actor_outcomes_raise_pricing_evidence_ceiling(self):
         base=self.music_record(
