@@ -16,7 +16,8 @@ from reprice_creator_fundamentals import (  # noqa: E402
 )
 
 
-# Creator v2.2 platform-aware regression coverage\nclass RepriceCreatorFundamentalsTests(unittest.TestCase):
+# Creator v2.2 platform-aware regression coverage
+class RepriceCreatorFundamentalsTests(unittest.TestCase):
     def setUp(self):
         self.records = [
             {
