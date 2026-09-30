@@ -37,7 +37,9 @@ permissions:
 
 concurrency:
   group: talentx-creator-market
-  cancel-in-progress: true
+  # Queue Creator refreshes instead of allowing a later skipped workflow_run
+  # event to cancel a valid push/scheduled refresh already doing real work.
+  cancel-in-progress: false
 
 jobs:
   refresh:
