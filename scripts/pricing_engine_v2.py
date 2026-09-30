@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.10-actor-idempotent-elite-scale"
+ACTOR_MODEL_VERSION = "6.11-actor-career-anchor-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -246,14 +246,14 @@ def actor_career_scale_score(record: dict[str, Any]) -> float | None:
     """Career-first Actor score with proxy ceilings and career-anchor handling."""
     if not is_actor_discovery(record):
         return None
-    if bool(record.get("actorCareerAnchor")) and str(record.get("marketSegment") or "").lower() == "legacy":
+    if bool(record.get("actorCareerAnchor")):
         metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
         performance = clamp(metrics.get("performance", 50))
         achievements = clamp(metrics.get("achievements", 50))
         consistency = clamp(metrics.get("consistency", 50))
         audience = clamp(metrics.get("audience", 50))
-        # Legacy career anchors should be judged on documented career body of
-        # work, not the generic Legacy placeholder or age-based potential.
+        # Career anchors are judged on documented acting body of work rather
+        # than age-based potential or generic discovery/legacy placeholders.
         proxy_score = (
             performance * .20
             + achievements * .40
