@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.8-actor-career-anchor-elite-scale"
+ACTOR_MODEL_VERSION = "6.9-actor-anchor-aware-elite-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -243,9 +243,26 @@ def actor_verified_career_achievement_bonus(record: dict[str, Any]) -> float:
 
 
 def actor_career_scale_score(record: dict[str, Any]) -> float | None:
-    """Career-first Actor score with a proxy ceiling and verified acting-achievement lift."""
+    """Career-first Actor score with proxy ceilings and career-anchor handling."""
     if not is_actor_discovery(record):
         return None
+    if bool(record.get("actorCareerAnchor")) and str(record.get("marketSegment") or "").lower() == "legacy":
+        metrics = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+        performance = clamp(metrics.get("performance", 50))
+        achievements = clamp(metrics.get("achievements", 50))
+        consistency = clamp(metrics.get("consistency", 50))
+        audience = clamp(metrics.get("audience", 50))
+        # Legacy career anchors should be judged on documented career body of
+        # work, not the generic Legacy placeholder or age-based potential.
+        proxy_score = (
+            performance * .20
+            + achievements * .40
+            + consistency * .25
+            + audience * .15
+        )
+        baseline = min(proxy_score, 90.0)
+        bonus = actor_verified_career_achievement_bonus(record)
+        return round(min(95.0, baseline + bonus), 2)
     proxy_score = clamp(record.get("careerScore", 0), 0, 100)
     # Source discovery uses broad public-footprint proxies. Those may establish
     # a strong career baseline, but they cannot alone place a listing in the
@@ -278,6 +295,13 @@ def actor_elite_scale_multiplier(score: float) -> float:
     # Middle-market Actor values already align well cross-category. Only the
     # 90-95 elite band receives a gradual lift, topping out at +20%.
     return round(min(1.20, 1.0 + (score - 90.0) * 0.04), 4)
+
+
+def actor_legacy_market_multiplier(record: dict[str, Any]) -> float:
+    """Keep retired/legacy Actor anchors valuable but below comparable active listings."""
+    if not is_actor(record):
+        return 1.0
+    return 0.85 if str(record.get("marketSegment") or "").lower() == "legacy" else 1.0
 
 
 def motorsport_verified_race_count(record: dict[str, Any]) -> int:
@@ -707,6 +731,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     actor_career_fair = actor_career_scale_fair_value(result)
     actor_effective_score = actor_effective_career_score(result, actor_career_score)
     actor_elite_multiplier = actor_elite_scale_multiplier(actor_effective_score) if is_actor(result) else 1.0
+    actor_legacy_multiplier = actor_legacy_market_multiplier(result)
     actor_curated_prior = None
     fair = career_fair
     if is_actor_discovery(result) and actor_career_fair is not None:
@@ -720,7 +745,7 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         actor_curated_prior = round(v1_fundamental, 2)
         fair = actor_curated_prior
     if is_actor(result):
-        fair = round(fair * actor_elite_multiplier, 2)
+        fair = round(fair * actor_elite_multiplier * actor_legacy_multiplier, 2)
     if is_unverified_motorsport_discovery(result):
         fair = round(min(fair, MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING), 2)
     if rookie_anchor is not None and rookie_influence > 0:
@@ -815,6 +840,9 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         ),
         "actorEliteScaleMultiplier": (
             actor_elite_multiplier if is_actor(result) else None
+        ),
+        "actorLegacyMarketMultiplier": (
+            actor_legacy_multiplier if is_actor(result) else None
         ),
         "actorCuratedBaselinePrior": (
             actor_curated_prior if is_actor(result) and is_curated_non_athlete(result) else None
