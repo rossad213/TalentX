@@ -19,7 +19,8 @@ from reprice_creator_fundamentals import (  # noqa: E402
 )
 
 
-# Creator v2.2 platform-aware regression coverage
+# Creator v2.3 career-baseline regression coverage
+# Weekly career-baseline throttling is intentionally regression-tested.
 class RepriceCreatorFundamentalsTests(unittest.TestCase):
     def setUp(self):
         self.records = [
