@@ -33,10 +33,15 @@ from pricing_model import clamp
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "market" / "creators.json"
 DEFAULT_YOUTUBE_MANIFEST = ROOT / "data" / "creator_youtube_manifest.json"
-MODEL_VERSION = "creator-fundamentals-v2.2-platform-aware"
+MODEL_VERSION = "creator-fundamentals-v2.3-career-baseline"
 
 # The Creator model agreed for TalentX. Existing generic field names retain their
 # storage compatibility while their Creator meaning is explicitly defined here.
+CAREER_FUNDAMENTAL_WEIGHT = 0.70
+RECENT_PRODUCTION_WEIGHT = 0.30
+CAREER_BASELINE_REFRESH_WEIGHT = 0.10
+CAREER_BASELINE_VERSION = "creator-career-baseline-v1"
+
 CREATOR_WEIGHTS: dict[str, float] = {
     "audience": 0.30,       # verified audience / reach production
     "performance": 0.25,    # recent engagement / view production
@@ -266,13 +271,16 @@ def curated_creator_prior(record: dict[str, Any]) -> dict[str, float] | None:
     return {key: round(clamp(value, 0, 100), 1) for key, value in prior.items()}
 
 
-def youtube_evidence_weight(record: dict[str, Any], has_curated_prior: bool) -> float:
-    """Weight verified YouTube production by how central YouTube is to the creator."""
-    if not has_curated_prior:
-        return 1.0
+def youtube_evidence_weight(record: dict[str, Any], has_curated_prior: bool = False) -> float:
+    """Weight YouTube within the recent-production sleeve by platform centrality.
+
+    The career baseline exists for every Creator in v2.3, so source-discovered
+    creators no longer default to 100% YouTube just because they lack an
+    editorial benchmark prior.
+    """
     platform = str(record.get("teamOrPlatform") or "").strip().lower()
     if not platform:
-        return 0.65
+        return 0.50
     parts = [part.strip() for part in platform.replace("&", "/").split("/") if part.strip()]
     has_youtube = any("youtube" in part for part in parts)
     non_youtube = [part for part in parts if "youtube" not in part]
@@ -280,24 +288,91 @@ def youtube_evidence_weight(record: dict[str, Any], has_curated_prior: bool) -> 
         return 1.0
     if has_youtube:
         return 0.65
-    return 0.35
+    if any(token in platform for token in ("tiktok", "instagram", "twitch", "podcast", "social platform", "streaming platform")):
+        return 0.35
+    return 0.50
 
 
-def blend_creator_metrics(
+def career_signal_metrics(record: dict[str, Any], direct: dict[str, float]) -> dict[str, float]:
+    """Extract a slower career signal from verified production without recent growth."""
+    audience = clamp(direct.get("audience", 50.0), 0, 100)
+    achievements = clamp(direct.get("achievements", audience), 0, 100)
+    consistency = clamp(direct.get("consistency", 50.0), 0, 100)
+    runway = clamp(direct.get("careerRunway", career_runway(record)), 0, 100)
+    return {
+        "audience": round(audience, 1),
+        "performance": round(clamp(audience * 0.65 + consistency * 0.35, 0, 100), 1),
+        "achievements": round(achievements, 1),
+        "potential": round(clamp(runway * 0.55 + 50.0 * 0.45, 0, 100), 1),
+        "consistency": round(consistency, 1),
+        "careerRunway": round(runway, 1),
+        "availability": round(clamp(direct.get("availability", 80.0), 0, 100), 1),
+    }
+
+
+def normalized_metric_dict(metrics: dict[str, Any]) -> dict[str, float]:
+    keys = ("audience", "performance", "achievements", "potential", "consistency", "careerRunway", "availability")
+    return {key: round(clamp(metrics.get(key, 50.0 if key != "availability" else 80.0), 0, 100), 1) for key in keys}
+
+
+def persistent_career_baseline(
+    record: dict[str, Any],
+    direct: dict[str, float] | None,
+    curated_prior: dict[str, float] | None,
+) -> tuple[dict[str, float], str]:
+    """Return a slow-moving career baseline independent of discovery order."""
+    stored = record.get("creatorCareerBaselineMetrics")
+    if isinstance(stored, dict):
+        baseline = normalized_metric_dict(stored)
+        source = "persisted verified career baseline"
+    elif curated_prior:
+        baseline = normalized_metric_dict(curated_prior)
+        source = "curated cross-platform career prior"
+    elif direct:
+        baseline = career_signal_metrics(record, direct)
+        source = "verified production career signal"
+    else:
+        baseline = normalized_metric_dict(provisional_metrics(record))
+        source = "conservative identity/activity career prior"
+
+    if direct:
+        signal = career_signal_metrics(record, direct)
+        refresh = CAREER_BASELINE_REFRESH_WEIGHT
+        baseline = {
+            key: round(
+                clamp(
+                    baseline.get(key, 50.0) * (1.0 - refresh)
+                    + signal.get(key, baseline.get(key, 50.0)) * refresh,
+                    0,
+                    100,
+                ),
+                1,
+            )
+            for key in baseline
+        }
+    return baseline, source
+
+
+def blend_career_and_recent(
+    baseline: dict[str, float],
     direct: dict[str, float],
-    prior: dict[str, float] | None,
     youtube_weight: float,
 ) -> dict[str, float]:
-    if not prior or youtube_weight >= 0.999:
-        return {key: round(clamp(value, 0, 100), 1) for key, value in direct.items()}
-    weight = clamp(youtube_weight, 0.0, 1.0)
-    keys = set(direct) | set(prior)
-    output: dict[str, float] = {}
-    for key in keys:
-        direct_value = clamp(direct.get(key, prior.get(key, 50.0)), 0, 100)
-        prior_value = clamp(prior.get(key, direct_value), 0, 100)
-        output[key] = round(direct_value * weight + prior_value * (1.0 - weight), 1)
-    return output
+    effective_recent = RECENT_PRODUCTION_WEIGHT * clamp(youtube_weight, 0.0, 1.0)
+    effective_career = 1.0 - effective_recent
+    keys = set(baseline) | set(direct)
+    return {
+        key: round(
+            clamp(
+                baseline.get(key, direct.get(key, 50.0)) * effective_career
+                + direct.get(key, baseline.get(key, 50.0)) * effective_recent,
+                0,
+                100,
+            ),
+            1,
+        )
+        for key in keys
+    }
 
 
 def event_multiplier(record: dict[str, Any]) -> float:
@@ -352,24 +427,29 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
         if evidence:
             direct_metrics = verified_metrics(record, evidence, median_pool, recent_pool)
             curated_prior = curated_creator_prior(record)
+            career_baseline, baseline_source = persistent_career_baseline(record, direct_metrics, curated_prior)
             youtube_weight = youtube_evidence_weight(record, curated_prior is not None)
-            metrics = blend_creator_metrics(direct_metrics, curated_prior, youtube_weight)
+            metrics = blend_career_and_recent(career_baseline, direct_metrics, youtube_weight)
+            effective_recent_weight = round(RECENT_PRODUCTION_WEIGHT * youtube_weight, 3)
             video_count = int(evidence["videoCount"])
             confidence = clamp(0.80 + min(0.08, max(0, video_count - 3) * 0.015) + (0.03 if evidence.get("checkedAt") else 0), 0.80, 0.92)
-            if curated_prior is not None and youtube_weight < 1.0:
+            if youtube_weight < 1.0:
                 confidence = min(confidence, 0.88)
             record["pricingConfidence"] = round(confidence, 2)
             record["dataConfidence"] = max(number(record.get("dataConfidence"), 0), round(confidence, 2))
-            if curated_prior is not None and youtube_weight < 1.0:
-                record["pricingDataStatus"] = "Evidence enriched — platform-aware Creator blend (verified YouTube + curated cross-platform prior)"
-            else:
-                record["pricingDataStatus"] = "Evidence enriched — verified Creator production (YouTube RSS)"
+            record["pricingDataStatus"] = "Evidence enriched — persistent Creator career baseline + recent verified production"
+            record["creatorCareerBaselineMetrics"] = career_baseline
+            record["creatorCareerBaselineSource"] = baseline_source
+            record["creatorCareerBaselineVersion"] = CAREER_BASELINE_VERSION
             record["creatorPlatformEvidencePolicy"] = {
                 "primaryPlatformLabel": str(record.get("teamOrPlatform") or ""),
-                "youtubeProductionWeight": round(youtube_weight, 2),
-                "crossPlatformPriorWeight": round(1.0 - youtube_weight, 2) if curated_prior is not None else 0.0,
+                "careerFundamentalWeight": CAREER_FUNDAMENTAL_WEIGHT,
+                "recentProductionSleeveWeight": RECENT_PRODUCTION_WEIGHT,
+                "youtubeCentralityWithinRecentSleeve": round(youtube_weight, 2),
+                "effectiveRecentYouTubeWeight": effective_recent_weight,
+                "effectiveCareerBaselineWeight": round(1.0 - effective_recent_weight, 3),
                 "curatedPriorAvailable": curated_prior is not None,
-                "principle": "Verified YouTube production is weighted by platform centrality; no unverified TikTok, Twitch, Instagram, or podcast counts are invented.",
+                "principle": "Career fundamentals are slow-moving; recent verified YouTube production updates only the recent sleeve and is discounted when YouTube is not the primary platform. No unverified cross-platform counts are invented.",
             }
             record["modelType"] = "Creator production model"
             record["creatorProductionEvidence"] = {
@@ -389,18 +469,29 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
                 record["verifiedCreatorPlatforms"] = sorted(set([*(record.get("verifiedCreatorPlatforms") or []), "YouTube"]))
             verified_count += 1
         elif str(record.get("sourceNamespace") or "") == "wikidata-creator" or str(record.get("pricingDataStatus") or "").startswith("Provisional"):
-            metrics = provisional_metrics(record)
+            metrics, baseline_source = persistent_career_baseline(record, None, None)
+            record["creatorCareerBaselineMetrics"] = metrics
+            record["creatorCareerBaselineSource"] = baseline_source
+            record["creatorCareerBaselineVersion"] = CAREER_BASELINE_VERSION
             record["pricingConfidence"] = round(clamp(record.get("pricingConfidence", 0.40), 0.32, 0.50), 2)
-            record["pricingDataStatus"] = "Provisional — creator identity/activity evidence only; platform production unverified"
-            record["modelType"] = "Creator provisional prior"
+            record["pricingDataStatus"] = "Provisional — persistent conservative career baseline; platform production unverified"
+            record["modelType"] = "Creator provisional career baseline"
             provisional_count += 1
         else:
-            existing = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
-            metrics = {key: round(clamp(existing.get(key, 50.0), 0, 100), 1) for key in ("audience", "performance", "achievements", "potential", "consistency")}
-            metrics["careerRunway"] = round(clamp(existing.get("careerRunway", career_runway(record)), 0, 100), 1)
-            metrics["availability"] = round(clamp(existing.get("availability", 80.0), 0, 100), 1)
-            if not str(record.get("pricingDataStatus") or ""):
-                record["pricingDataStatus"] = "Curated Creator prior — direct platform production evidence pending"
+            curated_prior = curated_creator_prior(record)
+            if curated_prior:
+                metrics, baseline_source = persistent_career_baseline(record, None, curated_prior)
+                record["creatorCareerBaselineMetrics"] = metrics
+                record["creatorCareerBaselineSource"] = baseline_source
+                record["creatorCareerBaselineVersion"] = CAREER_BASELINE_VERSION
+                record["pricingDataStatus"] = "Curated Creator career baseline — direct platform production evidence pending"
+            else:
+                existing = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
+                metrics = {key: round(clamp(existing.get(key, 50.0), 0, 100), 1) for key in ("audience", "performance", "achievements", "potential", "consistency")}
+                metrics["careerRunway"] = round(clamp(existing.get("careerRunway", career_runway(record)), 0, 100), 1)
+                metrics["availability"] = round(clamp(existing.get("availability", 80.0), 0, 100), 1)
+                if not str(record.get("pricingDataStatus") or ""):
+                    record["pricingDataStatus"] = "Creator career baseline — direct platform production evidence pending"
 
         record["activeMetrics"] = metrics
         raw = active_score(metrics)
@@ -484,7 +575,7 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
             "creatorPeerScore": round(peer_score, 1),
             "universalCareerScore": score,
             "eventMultiplier": round(multiplier, 6),
-            "principle": "Fundamental price = demonstrated creator production + modest career runway; price movement = verified new production versus expectation.",
+            "principle": "Fundamental price = persistent career baseline plus a 30% recent-production sleeve; live price movement = verified new production versus expectation.",
         }
         output.append(record)
 
