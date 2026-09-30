@@ -12,6 +12,7 @@ from reprice_creator_fundamentals import (  # noqa: E402
     MODEL_VERSION,
     active_score,
     reprice_records,
+    youtube_evidence_weight,
 )
 
 
@@ -150,6 +151,72 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         }
         repriced, _ = reprice_records(records, manifest)
         self.assertEqual(repriced[0]["marketPrice"], repriced[1]["marketPrice"])
+
+    def test_platform_aware_weighting_distinguishes_youtube_centrality(self):
+        youtube = {
+            "benchmarkRank": 1,
+            "benchmarkPoolSize": 100,
+            "teamOrPlatform": "YouTube",
+        }
+        mixed = {
+            "benchmarkRank": 3,
+            "benchmarkPoolSize": 100,
+            "teamOrPlatform": "Twitch / YouTube",
+        }
+        secondary = {
+            "benchmarkRank": 24,
+            "benchmarkPoolSize": 100,
+            "teamOrPlatform": "TikTok / Podcasting",
+        }
+        discovered = {
+            "sourceNamespace": "wikidata-creator",
+            "teamOrPlatform": "Digital platforms",
+        }
+        self.assertEqual(youtube_evidence_weight(youtube, True), 1.0)
+        self.assertEqual(youtube_evidence_weight(mixed, True), 0.65)
+        self.assertEqual(youtube_evidence_weight(secondary, True), 0.35)
+        self.assertEqual(youtube_evidence_weight(discovered, False), 1.0)
+
+    def test_secondary_youtube_does_not_overwrite_curated_creator_prior(self):
+        records = [dict(
+            self.records[0],
+            name="Secondary Platform Creator",
+            benchmarkRank=10,
+            benchmarkPoolSize=100,
+            teamOrPlatform="TikTok / Podcasting",
+        )]
+        weak_manifest = {
+            "videoSnapshots": {
+                "v1": {"recordId": "cur-large", "channelId": "UC-X", "views": 5_000, "publishedAt": "2026-09-10T12:00:00Z"},
+                "v2": {"recordId": "cur-large", "channelId": "UC-X", "views": 4_000, "publishedAt": "2026-09-03T12:00:00Z"},
+                "v3": {"recordId": "cur-large", "channelId": "UC-X", "views": 3_000, "publishedAt": "2026-08-27T12:00:00Z"},
+            },
+            "performanceState": {
+                "cur-large:v1": {"effectiveRatio": 0.4, "checkedAt": "2026-09-15T12:00:00Z"},
+            },
+        }
+        repriced, _ = reprice_records(records, weak_manifest)
+        creator = repriced[0]
+        policy = creator["creatorPlatformEvidencePolicy"]
+        self.assertEqual(policy["youtubeProductionWeight"], 0.35)
+        self.assertEqual(policy["crossPlatformPriorWeight"], 0.65)
+        self.assertTrue(creator["pricingDataStatus"].startswith("Evidence enriched — platform-aware"))
+        self.assertGreater(creator["careerScore"], 55.0)
+
+    def test_youtube_first_creator_remains_direct_evidence_driven(self):
+        records = [dict(
+            self.records[0],
+            name="YouTube First Creator",
+            benchmarkRank=1,
+            benchmarkPoolSize=100,
+            teamOrPlatform="YouTube",
+        )]
+        repriced, _ = reprice_records(records, self.manifest)
+        creator = repriced[0]
+        policy = creator["creatorPlatformEvidencePolicy"]
+        self.assertEqual(policy["youtubeProductionWeight"], 1.0)
+        self.assertEqual(policy["crossPlatformPriorWeight"], 0.0)
+        self.assertTrue(creator["pricingDataStatus"].startswith("Evidence enriched — verified Creator production"))
 
     def test_active_score_uses_all_six_creator_components(self):
         metrics = {
