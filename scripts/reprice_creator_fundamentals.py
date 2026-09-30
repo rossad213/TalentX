@@ -74,9 +74,6 @@ def creator_2026_anchor_map() -> dict[str, dict[str, Any]]:
     return output
 
 
-CREATOR_2026_ANCHORS = creator_2026_anchor_map()
-
-
 def number(value: Any, default: float = 0.0) -> float:
     try:
         parsed = float(value)
@@ -92,6 +89,9 @@ def load_json(path: Path, fallback: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return fallback
+
+
+CREATOR_2026_ANCHORS = creator_2026_anchor_map()
 
 
 def parse_time(value: Any) -> datetime | None:
