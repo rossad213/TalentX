@@ -40,6 +40,7 @@ MODEL_VERSION = "creator-fundamentals-v2.3-career-baseline"
 CAREER_FUNDAMENTAL_WEIGHT = 0.70
 RECENT_PRODUCTION_WEIGHT = 0.30
 CAREER_BASELINE_REFRESH_WEIGHT = 0.10
+CAREER_BASELINE_MIN_REFRESH_DAYS = 7
 CAREER_BASELINE_VERSION = "creator-career-baseline-v1"
 
 CREATOR_WEIGHTS: dict[str, float] = {
@@ -319,23 +320,44 @@ def persistent_career_baseline(
     record: dict[str, Any],
     direct: dict[str, float] | None,
     curated_prior: dict[str, float] | None,
-) -> tuple[dict[str, float], str]:
-    """Return a slow-moving career baseline independent of discovery order."""
+    evidence_checked_at: Any = None,
+) -> tuple[dict[str, float], str, str | None]:
+    """Return a slow-moving career baseline independent of discovery order.
+
+    Verified career state refreshes at most weekly. This prevents a scheduled
+    workflow from repeatedly applying the same short-window production evidence
+    several times per day.
+    """
     stored = record.get("creatorCareerBaselineMetrics")
+    stored_update = parse_time(record.get("creatorCareerBaselineUpdatedAt"))
+    observation = parse_time(evidence_checked_at) or datetime.now(timezone.utc)
+
     if isinstance(stored, dict):
         baseline = normalized_metric_dict(stored)
         source = "persisted verified career baseline"
+        updated_at = record.get("creatorCareerBaselineUpdatedAt")
     elif curated_prior:
         baseline = normalized_metric_dict(curated_prior)
         source = "curated cross-platform career prior"
+        updated_at = None
     elif direct:
         baseline = career_signal_metrics(record, direct)
         source = "verified production career signal"
+        updated_at = observation.replace(microsecond=0).isoformat().replace("+00:00", "Z")
     else:
         baseline = normalized_metric_dict(provisional_metrics(record))
         source = "conservative identity/activity career prior"
+        updated_at = observation.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-    if direct:
+    refresh_due = (
+        direct is not None
+        and (
+            not isinstance(stored, dict)
+            or stored_update is None
+            or (observation - stored_update).total_seconds() >= CAREER_BASELINE_MIN_REFRESH_DAYS * 86400
+        )
+    )
+    if refresh_due and not (direct is not None and not isinstance(stored, dict) and not curated_prior):
         signal = career_signal_metrics(record, direct)
         refresh = CAREER_BASELINE_REFRESH_WEIGHT
         baseline = {
@@ -350,7 +372,10 @@ def persistent_career_baseline(
             )
             for key in baseline
         }
-    return baseline, source
+        updated_at = observation.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    elif direct is not None and updated_at is None:
+        updated_at = observation.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return baseline, source, str(updated_at) if updated_at else None
 
 
 def blend_career_and_recent(
@@ -427,7 +452,9 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
         if evidence:
             direct_metrics = verified_metrics(record, evidence, median_pool, recent_pool)
             curated_prior = curated_creator_prior(record)
-            career_baseline, baseline_source = persistent_career_baseline(record, direct_metrics, curated_prior)
+            career_baseline, baseline_source, baseline_updated_at = persistent_career_baseline(
+                record, direct_metrics, curated_prior, evidence.get("checkedAt")
+            )
             youtube_weight = youtube_evidence_weight(record, curated_prior is not None)
             metrics = blend_career_and_recent(career_baseline, direct_metrics, youtube_weight)
             effective_recent_weight = round(RECENT_PRODUCTION_WEIGHT * youtube_weight, 3)
@@ -441,6 +468,8 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
             record["creatorCareerBaselineMetrics"] = career_baseline
             record["creatorCareerBaselineSource"] = baseline_source
             record["creatorCareerBaselineVersion"] = CAREER_BASELINE_VERSION
+            if baseline_updated_at:
+                record["creatorCareerBaselineUpdatedAt"] = baseline_updated_at
             record["creatorPlatformEvidencePolicy"] = {
                 "primaryPlatformLabel": str(record.get("teamOrPlatform") or ""),
                 "careerFundamentalWeight": CAREER_FUNDAMENTAL_WEIGHT,
@@ -469,10 +498,12 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
                 record["verifiedCreatorPlatforms"] = sorted(set([*(record.get("verifiedCreatorPlatforms") or []), "YouTube"]))
             verified_count += 1
         elif str(record.get("sourceNamespace") or "") == "wikidata-creator" or str(record.get("pricingDataStatus") or "").startswith("Provisional"):
-            metrics, baseline_source = persistent_career_baseline(record, None, None)
+            metrics, baseline_source, baseline_updated_at = persistent_career_baseline(record, None, None)
             record["creatorCareerBaselineMetrics"] = metrics
             record["creatorCareerBaselineSource"] = baseline_source
             record["creatorCareerBaselineVersion"] = CAREER_BASELINE_VERSION
+            if baseline_updated_at:
+                record["creatorCareerBaselineUpdatedAt"] = baseline_updated_at
             record["pricingConfidence"] = round(clamp(record.get("pricingConfidence", 0.40), 0.32, 0.50), 2)
             record["pricingDataStatus"] = "Provisional — persistent conservative career baseline; platform production unverified"
             record["modelType"] = "Creator provisional career baseline"
@@ -480,10 +511,12 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
         else:
             curated_prior = curated_creator_prior(record)
             if curated_prior:
-                metrics, baseline_source = persistent_career_baseline(record, None, curated_prior)
+                metrics, baseline_source, baseline_updated_at = persistent_career_baseline(record, None, curated_prior)
                 record["creatorCareerBaselineMetrics"] = metrics
                 record["creatorCareerBaselineSource"] = baseline_source
                 record["creatorCareerBaselineVersion"] = CAREER_BASELINE_VERSION
+                if baseline_updated_at:
+                    record["creatorCareerBaselineUpdatedAt"] = baseline_updated_at
                 record["pricingDataStatus"] = "Curated Creator career baseline — direct platform production evidence pending"
             else:
                 existing = record.get("activeMetrics") if isinstance(record.get("activeMetrics"), dict) else {}
