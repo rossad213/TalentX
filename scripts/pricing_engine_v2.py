@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.9-actor-anchor-aware-elite-scale"
+ACTOR_MODEL_VERSION = "6.10-actor-idempotent-elite-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -739,10 +739,12 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         # reviewed benchmark. Confidence remains descriptive; verified outcomes
         # move the live market through the event ledger.
         fair = actor_career_fair
-    elif is_actor(result) and is_curated_non_athlete(result) and v1_fundamental is not None and v1_fundamental > 0:
-        # The baseline's reviewed Actor benchmark is the current profession prior.
-        # Generic V2 evidence must not re-invert that ordering after publication.
-        actor_curated_prior = round(v1_fundamental, 2)
+    elif is_actor(result) and is_curated_non_athlete(result):
+        # Rebuild the reviewed Actor prior from career score every time. Using a
+        # previously written fundamentalValue here compounds the elite scale on
+        # repeated rebuilds, so curated Actor pricing must be idempotent.
+        curated_score = clamp(result.get("careerScore", 0), 0, 100)
+        actor_curated_prior = round(2.0 + 180.0 * (curated_score / 100.0) ** 2, 2)
         fair = actor_curated_prior
     if is_actor(result):
         fair = round(fair * actor_elite_multiplier * actor_legacy_multiplier, 2)
