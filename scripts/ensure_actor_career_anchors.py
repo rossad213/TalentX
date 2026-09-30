@@ -26,6 +26,12 @@ def apply_anchor_metadata(record: dict, candidate: dict, recent_cutoff: int) -> 
     result["statusSource"] = "Wikidata Actor occupation and career-anchor coverage list"
     result.pop("benchmarkRank", None)
     result.pop("benchmarkPoolSize", None)
+    if candidate.get("currentMarketEligible") is True:
+        result["careerStatus"] = str(candidate.get("careerStatus") or "Active")
+        result["marketSegment"] = "Current"
+        result["careerStage"] = "Active career"
+        result["searchText"] = str(result.get("searchText") or "").replace("legacy retired", "current active")
+        return result
     work_end = candidate.get("workEndYear")
     if isinstance(work_end, int) and work_end < recent_cutoff:
         result["careerStatus"] = "Retired / legacy"
@@ -77,6 +83,8 @@ def main() -> int:
         if r.get("sourceRecordId") or r.get("wikidataSourceRecordId")
     }
     for candidate in candidates:
+        if candidate.get("currentMarketEligible") is False:
+            continue
         name_key = normalize(str(candidate.get("name") or ""))
         qid = str(candidate.get("qid") or "")
         existing_index = by_qid.get(qid)
