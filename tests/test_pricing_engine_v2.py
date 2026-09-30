@@ -260,7 +260,7 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),82)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.7-actor-verified-career-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.8-actor-career-anchor-elite-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],82.0)
 
@@ -297,6 +297,26 @@ class PricingEngineV2Tests(unittest.TestCase):
         priced=apply_v2(actor)
         self.assertEqual(priced['pricingV2']['actorVerifiedCareerAchievementBonus'],1.0)
         self.assertEqual(priced['pricingV2']['actorCareerScaleScore'],87.0)
+
+
+    def test_actor_elite_scale_only_lifts_top_career_band(self):
+        middle=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q1',
+            careerScore=90.0,pricingConfidence=.90,dataConfidence=.90,priceEvents=[])
+        elite=self.music_record(
+            primaryCategory='Actor',nonAthleteRosterVersion='1.0.0',
+            benchmarkRank=1,benchmarkPoolSize=100,
+            careerScore=95.0,fundamentalValue=164.45,marketPrice=164.45)
+        mid_priced=apply_v2(middle)
+        elite_priced=apply_v2(elite)
+        self.assertEqual(mid_priced['pricingV2']['actorEliteScaleMultiplier'],1.0)
+        self.assertEqual(elite_priced['pricingV2']['actorEliteScaleMultiplier'],1.20)
+        self.assertEqual(elite_priced['fairValue'],round(164.45*1.20,2))
+
+    def test_actor_elite_scale_does_not_touch_non_actor_categories(self):
+        music=apply_v2(self.music_record(
+            careerScore=95.0,fundamentalValue=164.45,marketPrice=164.45))
+        self.assertIsNone(music['pricingV2'].get('actorEliteScaleMultiplier'))
 
     def test_direct_actor_evidence_refines_confidence_without_market_scale_haircut(self):
         base=self.music_record(
