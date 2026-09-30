@@ -26,13 +26,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from build_non_athlete_catalog import metrics_from_rank
 from discover_creators_only import creator_metrics
 from pricing_model import clamp
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "market" / "creators.json"
 DEFAULT_YOUTUBE_MANIFEST = ROOT / "data" / "creator_youtube_manifest.json"
-MODEL_VERSION = "creator-fundamentals-v2.1-authoritative"
+MODEL_VERSION = "creator-fundamentals-v2.2-platform-aware"
 
 # The Creator model agreed for TalentX. Existing generic field names retain their
 # storage compatibility while their Creator meaning is explicitly defined here.
@@ -250,6 +251,55 @@ def active_score(metrics: dict[str, Any]) -> float:
     return round(sum(clamp(metrics.get(key), 0, 100) * weight for key, weight in CREATOR_WEIGHTS.items()), 1)
 
 
+def curated_creator_prior(record: dict[str, Any]) -> dict[str, float] | None:
+    """Rebuild the deterministic curated Creator prior when benchmark metadata exists."""
+    try:
+        rank = int(record.get("benchmarkRank"))
+        pool = int(record.get("benchmarkPoolSize"))
+    except (TypeError, ValueError):
+        return None
+    if rank <= 0 or pool <= 0:
+        return None
+    prior = metrics_from_rank("Creator", str(record.get("name") or ""), rank, pool)
+    prior["careerRunway"] = career_runway(record)
+    prior["availability"] = clamp(prior.get("availability", 80.0), 0, 100)
+    return {key: round(clamp(value, 0, 100), 1) for key, value in prior.items()}
+
+
+def youtube_evidence_weight(record: dict[str, Any], has_curated_prior: bool) -> float:
+    """Weight verified YouTube production by how central YouTube is to the creator."""
+    if not has_curated_prior:
+        return 1.0
+    platform = str(record.get("teamOrPlatform") or "").strip().lower()
+    if not platform:
+        return 0.65
+    parts = [part.strip() for part in platform.replace("&", "/").split("/") if part.strip()]
+    has_youtube = any("youtube" in part for part in parts)
+    non_youtube = [part for part in parts if "youtube" not in part]
+    if has_youtube and not non_youtube:
+        return 1.0
+    if has_youtube:
+        return 0.65
+    return 0.35
+
+
+def blend_creator_metrics(
+    direct: dict[str, float],
+    prior: dict[str, float] | None,
+    youtube_weight: float,
+) -> dict[str, float]:
+    if not prior or youtube_weight >= 0.999:
+        return {key: round(clamp(value, 0, 100), 1) for key, value in direct.items()}
+    weight = clamp(youtube_weight, 0.0, 1.0)
+    keys = set(direct) | set(prior)
+    output: dict[str, float] = {}
+    for key in keys:
+        direct_value = clamp(direct.get(key, prior.get(key, 50.0)), 0, 100)
+        prior_value = clamp(prior.get(key, direct_value), 0, 100)
+        output[key] = round(direct_value * weight + prior_value * (1.0 - weight), 1)
+    return output
+
+
 def event_multiplier(record: dict[str, Any]) -> float:
     multiplier = 1.0
     events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
@@ -300,12 +350,27 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
         record_id = str(record.get("id") or "")
         evidence = features.get(record_id)
         if evidence:
-            metrics = verified_metrics(record, evidence, median_pool, recent_pool)
+            direct_metrics = verified_metrics(record, evidence, median_pool, recent_pool)
+            curated_prior = curated_creator_prior(record)
+            youtube_weight = youtube_evidence_weight(record, curated_prior is not None)
+            metrics = blend_creator_metrics(direct_metrics, curated_prior, youtube_weight)
             video_count = int(evidence["videoCount"])
             confidence = clamp(0.80 + min(0.08, max(0, video_count - 3) * 0.015) + (0.03 if evidence.get("checkedAt") else 0), 0.80, 0.92)
+            if curated_prior is not None and youtube_weight < 1.0:
+                confidence = min(confidence, 0.88)
             record["pricingConfidence"] = round(confidence, 2)
             record["dataConfidence"] = max(number(record.get("dataConfidence"), 0), round(confidence, 2))
-            record["pricingDataStatus"] = "Evidence enriched — verified Creator production (YouTube RSS)"
+            if curated_prior is not None and youtube_weight < 1.0:
+                record["pricingDataStatus"] = "Evidence enriched — platform-aware Creator blend (verified YouTube + curated cross-platform prior)"
+            else:
+                record["pricingDataStatus"] = "Evidence enriched — verified Creator production (YouTube RSS)"
+            record["creatorPlatformEvidencePolicy"] = {
+                "primaryPlatformLabel": str(record.get("teamOrPlatform") or ""),
+                "youtubeProductionWeight": round(youtube_weight, 2),
+                "crossPlatformPriorWeight": round(1.0 - youtube_weight, 2) if curated_prior is not None else 0.0,
+                "curatedPriorAvailable": curated_prior is not None,
+                "principle": "Verified YouTube production is weighted by platform centrality; no unverified TikTok, Twitch, Instagram, or podcast counts are invented.",
+            }
             record["modelType"] = "Creator production model"
             record["creatorProductionEvidence"] = {
                 "provider": "YouTube channel RSS media:statistics",
