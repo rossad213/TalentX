@@ -33,7 +33,8 @@ from pricing_model import clamp
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CATALOG = ROOT / "data" / "market" / "creators.json"
 DEFAULT_YOUTUBE_MANIFEST = ROOT / "data" / "creator_youtube_manifest.json"
-MODEL_VERSION = "creator-fundamentals-v2.3-career-baseline"
+DEFAULT_2026_ANCHORS = ROOT / "data" / "creator_career_anchors_2026.json"
+MODEL_VERSION = "creator-fundamentals-v2.4-ranking-stability"
 
 # The Creator model agreed for TalentX. Existing generic field names retain their
 # storage compatibility while their Creator meaning is explicitly defined here.
@@ -42,6 +43,9 @@ RECENT_PRODUCTION_WEIGHT = 0.30
 CAREER_BASELINE_REFRESH_WEIGHT = 0.10
 CAREER_BASELINE_MIN_REFRESH_DAYS = 7
 CAREER_BASELINE_VERSION = "creator-career-baseline-v1"
+EVENT_HALF_LIFE_DAYS = 14.0
+UNVERIFIED_CURATED_SHRINK_WEIGHT = 0.18
+UNVERIFIED_CURATED_SHRINK_TARGET = 80.0
 
 CREATOR_WEIGHTS: dict[str, float] = {
     "audience": 0.30,       # verified audience / reach production
@@ -51,6 +55,26 @@ CREATOR_WEIGHTS: dict[str, float] = {
     "consistency": 0.10,    # output and performance consistency
     "careerRunway": 0.05,   # career runway / stage
 }
+
+
+def normalize_name(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def creator_2026_anchor_map() -> dict[str, dict[str, Any]]:
+    payload = load_json(DEFAULT_2026_ANCHORS, {})
+    anchors = payload.get("anchors") if isinstance(payload, dict) else []
+    output: dict[str, dict[str, Any]] = {}
+    for item in anchors if isinstance(anchors, list) else []:
+        if not isinstance(item, dict):
+            continue
+        key = normalize_name(item.get("name"))
+        if key:
+            output[key] = dict(item)
+    return output
+
+
+CREATOR_2026_ANCHORS = creator_2026_anchor_map()
 
 
 def number(value: Any, default: float = 0.0) -> float:
@@ -258,7 +282,7 @@ def active_score(metrics: dict[str, Any]) -> float:
 
 
 def curated_creator_prior(record: dict[str, Any]) -> dict[str, float] | None:
-    """Rebuild the deterministic curated Creator prior when benchmark metadata exists."""
+    """Rebuild the curated Creator prior, applying only verified current anchors."""
     try:
         rank = int(record.get("benchmarkRank"))
         pool = int(record.get("benchmarkPoolSize"))
@@ -266,6 +290,19 @@ def curated_creator_prior(record: dict[str, Any]) -> dict[str, float] | None:
         return None
     if rank <= 0 or pool <= 0:
         return None
+
+    anchor = CREATOR_2026_ANCHORS.get(normalize_name(record.get("name")))
+    if anchor:
+        try:
+            anchor_rank = int(anchor.get("rank"))
+        except (TypeError, ValueError):
+            anchor_rank = rank
+        if anchor_rank > 0:
+            rank = anchor_rank
+            # Keep the existing 100-person TalentX benchmark scale so a partial
+            # 2026 anchor set does not masquerade as a complete 50-person roster.
+            pool = max(pool, 100)
+
     prior = metrics_from_rank("Creator", str(record.get("name") or ""), rank, pool)
     prior["careerRunway"] = career_runway(record)
     prior["availability"] = clamp(prior.get("availability", 80.0), 0, 100)
@@ -400,16 +437,25 @@ def blend_career_and_recent(
     }
 
 
-def event_multiplier(record: dict[str, Any]) -> float:
+def event_multiplier(record: dict[str, Any], as_of: datetime | None = None) -> float:
+    """Apply verified live events with exponential mean reversion to fundamentals."""
     multiplier = 1.0
+    now = as_of or datetime.now(timezone.utc)
     events = record.get("priceEvents") if isinstance(record.get("priceEvents"), list) else []
     for event in events:
-        if not isinstance(event, dict):
+        if not isinstance(event, dict) or event.get("historicalBackfill"):
             continue
         move = number(event.get("movePct"), 0.0)
         if move <= -99.0:
             continue
-        factor = 1.0 + move / 100.0
+        when = parse_time(event.get("startedAt") or event.get("time") or event.get("date"))
+        if when is None:
+            decay = 0.50
+        else:
+            age_days = max(0.0, (now - when).total_seconds() / 86400.0)
+            decay = 0.5 ** (age_days / EVENT_HALF_LIFE_DAYS)
+        effective_move = move * decay
+        factor = 1.0 + effective_move / 100.0
         if factor > 0 and math.isfinite(factor):
             multiplier *= factor
     return multiplier
@@ -555,6 +601,20 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
             score_cap = 97.0
         else:
             score_cap = 92.0
+        if status.startswith("Curated Creator career baseline"):
+            universal = (
+                universal * (1.0 - UNVERIFIED_CURATED_SHRINK_WEIGHT)
+                + UNVERIFIED_CURATED_SHRINK_TARGET * UNVERIFIED_CURATED_SHRINK_WEIGHT
+            )
+            record["creatorEvidenceUncertainty"] = {
+                "directProductionVerified": False,
+                "shrinkWeight": UNVERIFIED_CURATED_SHRINK_WEIGHT,
+                "shrinkTargetScore": UNVERIFIED_CURATED_SHRINK_TARGET,
+                "principle": "Missing direct platform evidence increases uncertainty; it must not preserve an undiluted elite prior.",
+            }
+        else:
+            record.pop("creatorEvidenceUncertainty", None)
+
         score = round(min(score_cap, universal), 1)
         confidence = clamp(record.get("pricingConfidence", record.get("dataConfidence", 0.50)), 0, 1)
         confidence_factor = 0.92 + 0.08 * confidence
@@ -608,7 +668,9 @@ def reprice_records(records: list[dict[str, Any]], manifest: dict[str, Any]) -> 
             "creatorPeerScore": round(peer_score, 1),
             "universalCareerScore": score,
             "eventMultiplier": round(multiplier, 6),
-            "principle": "Fundamental price = persistent career baseline plus a 30% recent-production sleeve; live price movement = verified new production versus expectation.",
+            "eventHalfLifeDays": EVENT_HALF_LIFE_DAYS,
+            "currentCareerAnchor2026": CREATOR_2026_ANCHORS.get(normalize_name(record.get("name"))),
+            "principle": "Fundamental price = persistent career baseline plus a 30% recent-production sleeve; verified live events decay toward fundamentals instead of compounding permanently.",
         }
         output.append(record)
 
