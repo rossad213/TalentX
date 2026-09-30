@@ -53,12 +53,27 @@ jobs:
           rm -rf _sports _prior_soccer
           mkdir -p _sports _prior_soccer data
 
-          sports_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/sports-market-refresh.yml/runs?status=completed&per_page=30")"
-          sports_id="$(printf '%s' "$sports_meta" | jq -r '[.workflow_runs[] | select(.conclusion == "success")][0].id // empty')"
-          test -n "$sports_id" || { echo "No successful Sports market artifact exists."; exit 1; }
-          gh run download "$sports_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _sports
-          sports_state="$(find _sports -name sports.json -print -quit)"
+          sports_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/sports-market-refresh.yml/runs?status=success&per_page=100")"
+          sports_id=""
+          sports_state=""
+          while read -r candidate_id; do
+            [ -n "$candidate_id" ] || continue
+            rm -rf _sports
+            mkdir -p _sports
+            if gh run download "$candidate_id" -R "$GITHUB_REPOSITORY" -n talentx-sports-market -D _sports >/dev/null 2>&1; then
+              candidate_state="$(find _sports -name sports.json -print -quit)"
+              if [ -n "$candidate_state" ]; then
+                sports_id="$candidate_id"
+                sports_state="$candidate_state"
+                break
+              fi
+            fi
+            echo "WARNING: successful Sports run ${candidate_id} has no usable talentx-sports-market artifact; trying older success."
+          done < <(printf '%s' "$sports_meta" | jq -r '.workflow_runs | sort_by(.created_at) | reverse[] | .id')
+
+          test -n "$sports_id" || { echo "No downloadable successful Sports market artifact exists."; exit 1; }
           test -n "$sports_state" || { echo "Sports artifact missing sports.json"; exit 1; }
+          echo "Restored Sports state from run ${sports_id}."
           cp "$sports_state" data/sports.json
 
           soccer_meta="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/soccer-history-refresh.yml/runs?status=completed&per_page=30" || true)"
