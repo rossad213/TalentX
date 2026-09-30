@@ -321,14 +321,14 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         record = {
             "priceEvents": [
                 {"movePct": 10.0, "startedAt": "2026-09-30T00:00:00Z"},
-                {"movePct": 10.0, "startedAt": "2026-09-16T00:00:00Z"},
+                {"movePct": 10.0, "startedAt": "2026-09-20T00:00:00Z"},
             ]
         }
         as_of = __import__("datetime").datetime(2026, 9, 30, tzinfo=__import__("datetime").timezone.utc)
         multiplier = event_multiplier(record, as_of=as_of)
-        # Today contributes 10%; a 14-day-old event contributes half its move.
+        # Today contributes 10%; a 10-day-old event contributes half its move.
         self.assertAlmostEqual(multiplier, 1.10 * 1.05, places=6)
-        self.assertEqual(EVENT_HALF_LIFE_DAYS, 14.0)
+        self.assertEqual(EVENT_HALF_LIFE_DAYS, 10.0)
 
     def test_historical_backfill_does_not_move_live_creator_price(self):
         record = {
