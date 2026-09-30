@@ -8,6 +8,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from reprice_creator_fundamentals import (  # noqa: E402
+    CAREER_BASELINE_MIN_REFRESH_DAYS,
     CAREER_FUNDAMENTAL_WEIGHT,
     RECENT_PRODUCTION_WEIGHT,
     CREATOR_WEIGHTS,
@@ -288,6 +289,28 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         self.assertEqual(policy["youtubeCentralityWithinRecentSleeve"], 0.35)
         self.assertEqual(policy["effectiveRecentYouTubeWeight"], 0.105)
         self.assertEqual(policy["effectiveCareerBaselineWeight"], 0.895)
+
+    def test_same_evidence_does_not_reapply_career_baseline_refresh(self):
+        records = [dict(
+            self.records[0],
+            name="Persistent Creator",
+            benchmarkRank=5,
+            benchmarkPoolSize=100,
+            teamOrPlatform="YouTube",
+        )]
+        first, _ = reprice_records(records, self.manifest)
+        first_creator = first[0]
+        second, _ = reprice_records(first, self.manifest)
+        second_creator = second[0]
+        self.assertEqual(
+            first_creator["creatorCareerBaselineMetrics"],
+            second_creator["creatorCareerBaselineMetrics"],
+        )
+        self.assertEqual(
+            first_creator["creatorCareerBaselineUpdatedAt"],
+            second_creator["creatorCareerBaselineUpdatedAt"],
+        )
+        self.assertEqual(CAREER_BASELINE_MIN_REFRESH_DAYS, 7)
 
     def test_active_score_uses_all_six_creator_components(self):
         metrics = {
