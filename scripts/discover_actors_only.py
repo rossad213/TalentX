@@ -146,6 +146,19 @@ SELECT DISTINCT ?person ?personLabel ?sitelinks ?birth ?workStart ?workEnd ?coun
         for item in anchors
         if isinstance(item, dict)
     }
+    # Overlay reviewed eligibility/status metadata on every exact anchor,
+    # including rows that came back from SPARQL or wbgetentities.
+    for qid, row in list(by_qid.items()):
+        item = anchors_by_qid.get(qid)
+        if not item:
+            continue
+        row["currentMarketEligible"] = item.get("currentMarketEligible", True)
+        if "careerStatus" in item:
+            row["careerStatus"] = item.get("careerStatus")
+        if "statusNote" in item:
+            row["statusNote"] = item.get("statusNote")
+        if item.get("currentMarketEligible") is True and item.get("workEndYear") is None:
+            row["workEndYear"] = None
     for qid in qids:
         if qid in by_qid:
             continue
@@ -221,6 +234,8 @@ def main() -> int:
 
     selected = []
     for candidate in merged_candidates:
+        if candidate.get("actorCareerAnchor") and candidate.get("currentMarketEligible") is False:
+            continue
         key = normalize(str(candidate.get("name") or ""))
         qid = str(candidate.get("qid") or "")
         if not key or key in existing_names or qid in existing_source_ids:
