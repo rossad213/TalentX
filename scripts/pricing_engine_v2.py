@@ -25,7 +25,7 @@ from soccer_metric_calibration import (
 MODEL_VERSION = "6.0-tennis-mature-ranking-scale"
 MOTORSPORT_MODEL_VERSION = "6.1-motorsport-verified-race-ledger"
 MUSIC_MODEL_VERSION = "6.2-music-evidence-confidence"
-ACTOR_MODEL_VERSION = "6.7-actor-verified-career-scale"
+ACTOR_MODEL_VERSION = "6.8-actor-career-anchor-elite-scale"
 NFL_MODEL_VERSION = "6.4-nfl-career-tier-scale"
 MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING = 62.0
 
@@ -260,9 +260,24 @@ def actor_career_scale_fair_value(record: dict[str, Any]) -> float | None:
     score = actor_career_scale_score(record)
     if score is None:
         return None
-    # Same curve used by the reviewed non-athlete benchmark:
-    # rank-1 score 95 -> $164.45; score 61.2 -> $69.42.
     return round(2.0 + 180.0 * (score / 100.0) ** 2, 2)
+
+
+def actor_effective_career_score(record: dict[str, Any], discovery_score: float | None = None) -> float:
+    """Comparable career score for both curated and source-discovered Actors."""
+    if discovery_score is not None:
+        return clamp(discovery_score)
+    return clamp(record.get("careerScore", 0), 0, 100)
+
+
+def actor_elite_scale_multiplier(score: float) -> float:
+    """Lift only the elite Actor tier onto the broader TalentX market scale."""
+    score = clamp(score)
+    if score <= 90.0:
+        return 1.0
+    # Middle-market Actor values already align well cross-category. Only the
+    # 90-95 elite band receives a gradual lift, topping out at +20%.
+    return round(min(1.20, 1.0 + (score - 90.0) * 0.04), 4)
 
 
 def motorsport_verified_race_count(record: dict[str, Any]) -> int:
@@ -690,6 +705,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
     actor_career_score = actor_career_scale_score(result)
     actor_career_bonus = actor_verified_career_achievement_bonus(result)
     actor_career_fair = actor_career_scale_fair_value(result)
+    actor_effective_score = actor_effective_career_score(result, actor_career_score)
+    actor_elite_multiplier = actor_elite_scale_multiplier(actor_effective_score) if is_actor(result) else 1.0
     actor_curated_prior = None
     fair = career_fair
     if is_actor_discovery(result) and actor_career_fair is not None:
@@ -702,6 +719,8 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         # Generic V2 evidence must not re-invert that ordering after publication.
         actor_curated_prior = round(v1_fundamental, 2)
         fair = actor_curated_prior
+    if is_actor(result):
+        fair = round(fair * actor_elite_multiplier, 2)
     if is_unverified_motorsport_discovery(result):
         fair = round(min(fair, MOTORSPORT_UNVERIFIED_FAIR_VALUE_CEILING), 2)
     if rookie_anchor is not None and rookie_influence > 0:
@@ -790,6 +809,12 @@ def apply_v2(record: dict[str, Any]) -> dict[str, Any]:
         ),
         "actorCareerScaleFairValue": (
             actor_career_fair if is_actor_discovery(result) else None
+        ),
+        "actorEffectiveCareerScore": (
+            actor_effective_score if is_actor(result) else None
+        ),
+        "actorEliteScaleMultiplier": (
+            actor_elite_multiplier if is_actor(result) else None
         ),
         "actorCuratedBaselinePrior": (
             actor_curated_prior if is_actor(result) and is_curated_non_athlete(result) else None
