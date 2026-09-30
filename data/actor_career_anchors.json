@@ -1,22 +1,46 @@
 {
-  "version": "1.0",
-  "purpose": "Actor career anchors that complement the current-star benchmark. These entries guarantee coverage only; they do not assign editorial benchmark ranks or override verified career evidence.",
+  "version": "1.1",
+  "purpose": "Actor career anchors that complement the current-star benchmark. QIDs are authoritative identity sources; fallback metadata guarantees coverage when Wikidata endpoints return partial batches. These entries do not assign editorial benchmark ranks.",
   "anchors": [
     {
       "name": "Meryl Streep",
-      "wikidataQid": "Q873"
+      "wikidataQid": "Q873",
+      "birthYear": 1949,
+      "workStartYear": 1975,
+      "workEndYear": null,
+      "country": "United States",
+      "role": "Actress",
+      "discipline": "Film & Stage"
     },
     {
       "name": "Daniel Day-Lewis",
-      "wikidataQid": "Q166389"
+      "wikidataQid": "Q166389",
+      "birthYear": 1957,
+      "workStartYear": 1971,
+      "workEndYear": null,
+      "country": "United Kingdom",
+      "role": "Actor",
+      "discipline": "Film & Stage"
     },
     {
       "name": "Jack Nicholson",
-      "wikidataQid": "Q39792"
+      "wikidataQid": "Q39792",
+      "birthYear": 1937,
+      "workStartYear": 1957,
+      "workEndYear": 2010,
+      "country": "United States",
+      "role": "Actor",
+      "discipline": "Film"
     },
     {
       "name": "Dustin Hoffman",
-      "wikidataQid": "Q42930"
+      "wikidataQid": "Q42930",
+      "birthYear": 1937,
+      "workStartYear": 1960,
+      "workEndYear": null,
+      "country": "United States",
+      "role": "Actor",
+      "discipline": "Film & Stage"
     }
   ]
 }
