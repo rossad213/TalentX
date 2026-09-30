@@ -106,6 +106,32 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         self.assertEqual(provisional["activeMetrics"]["audience"], 50.0)
         self.assertEqual(provisional["activeMetrics"]["performance"], 50.0)
 
+    def test_creator_fundamental_is_authoritative_fair_value(self):
+        records = [dict(self.records[0], fairValue=999.0, pricingV2={"genericFairValue": 12.34})]
+        repriced, _ = reprice_records(records, self.manifest)
+        creator = repriced[0]
+        self.assertEqual(creator["fairValue"], creator["fundamentalValue"])
+        self.assertEqual(
+            creator["pricingV2"]["creatorAuthoritativeFundamental"],
+            creator["fundamentalValue"],
+        )
+        self.assertEqual(
+            creator["pricingV2"]["creatorAuthoritativeModelVersion"],
+            MODEL_VERSION,
+        )
+
+    def test_source_discovered_creator_loses_curated_benchmark_metadata(self):
+        records = [dict(
+            self.records[2],
+            benchmarkRank=999,
+            benchmarkPoolSize=1000,
+        )]
+        repriced, _ = reprice_records(records, {})
+        creator = repriced[0]
+        self.assertNotIn("benchmarkRank", creator)
+        self.assertNotIn("benchmarkPoolSize", creator)
+        self.assertIn("Source-discovered", creator["rankingStatus"])
+
     def test_identical_evidence_can_legitimately_tie(self):
         records = [dict(self.records[0], id="a", name="A"), dict(self.records[0], id="b", name="B")]
         manifest = {
