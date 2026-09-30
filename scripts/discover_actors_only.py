@@ -94,6 +94,51 @@ SELECT DISTINCT ?person ?personLabel ?sitelinks ?birth ?workStart ?workEnd ?coun
         prior = by_qid.get(qid)
         if prior is None or sitelinks > int(prior.get("sitelinks") or 0):
             by_qid[qid] = candidate
+    # Wikidata Query Service can occasionally return a partial exact-ID batch.
+    # Fill any missing anchors from the entity API so coverage is deterministic.
+    missing = [qid for qid in qids if qid not in by_qid]
+    if missing:
+        api = session.get(
+            "https://www.wikidata.org/w/api.php",
+            params={
+                "action": "wbgetentities",
+                "ids": "|".join(missing),
+                "props": "labels|claims|sitelinks",
+                "languages": "en",
+                "format": "json",
+            },
+            timeout=timeout,
+        )
+        api.raise_for_status()
+        entities = api.json().get("entities", {})
+        def claim_year(entity, prop):
+            claims = entity.get("claims", {}).get(prop, [])
+            for claim in claims:
+                try:
+                    value = claim["mainsnak"]["datavalue"]["value"]["time"]
+                except (KeyError, TypeError):
+                    continue
+                year = parse_year(value)
+                if year is not None:
+                    return year
+            return None
+        for qid in missing:
+            entity = entities.get(qid, {})
+            label = entity.get("labels", {}).get("en", {}).get("value")
+            if not label:
+                continue
+            by_qid[qid] = {
+                "qid": qid,
+                "name": str(label),
+                "sitelinks": len(entity.get("sitelinks", {})),
+                "birthYear": claim_year(entity, "P569"),
+                "workStartYear": claim_year(entity, "P2031"),
+                "workEndYear": claim_year(entity, "P2032"),
+                "country": "Not listed",
+                "role": "Actor",
+                "discipline": "Acting",
+                "actorCareerAnchor": True,
+            }
     order = {qid: index for index, qid in enumerate(qids)}
     return sorted(by_qid.values(), key=lambda row: order.get(str(row.get("qid")), 9999))
 
