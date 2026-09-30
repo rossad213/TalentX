@@ -69,10 +69,24 @@ def main() -> int:
     verified_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     additions = []
+    updated_existing = 0
+    by_name = {normalize(str(r.get("name") or "")): i for i, r in enumerate(records)}
+    by_qid = {
+        str(r.get("sourceRecordId") or r.get("wikidataSourceRecordId") or ""): i
+        for i, r in enumerate(records)
+        if r.get("sourceRecordId") or r.get("wikidataSourceRecordId")
+    }
     for candidate in candidates:
         name_key = normalize(str(candidate.get("name") or ""))
         qid = str(candidate.get("qid") or "")
-        if not name_key or name_key in existing_names or qid in existing_source_ids:
+        existing_index = by_qid.get(qid)
+        if existing_index is None:
+            existing_index = by_name.get(name_key)
+        if existing_index is not None:
+            records[existing_index] = apply_anchor_metadata(records[existing_index], candidate, recent_cutoff)
+            updated_existing += 1
+            continue
+        if not name_key:
             continue
         record = make_record(
             candidate,
@@ -95,10 +109,14 @@ def main() -> int:
             calibration_reference=records + additions,
         )
         records.extend(priced_additions)
+    if additions or updated_existing:
         args.catalog.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
     found = [str(c.get("name") or "") for c in candidates]
-    print(f"Actor career anchors fetched: {len(candidates)}; added: {len(additions)}; names: {', '.join(found)}")
+    print(
+        f"Actor career anchors fetched: {len(candidates)}; added: {len(additions)}; "
+        f"existing marked: {updated_existing}; names: {', '.join(found)}"
+    )
     return 0
 
 
