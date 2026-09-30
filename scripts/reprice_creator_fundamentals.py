@@ -373,6 +373,13 @@ def persistent_career_baseline(
         baseline = normalized_metric_dict(stored)
         source = "persisted verified career baseline"
         updated_at = record.get("creatorCareerBaselineUpdatedAt")
+        if curated_prior and CREATOR_2026_ANCHORS.get(normalize_name(record.get("name"))):
+            anchor_prior = normalized_metric_dict(curated_prior)
+            baseline = {
+                key: round(max(baseline.get(key, 0.0), anchor_prior.get(key, 0.0)), 1)
+                for key in set(baseline) | set(anchor_prior)
+            }
+            source = "persisted career baseline + verified 2026 career anchor"
     elif curated_prior:
         baseline = normalized_metric_dict(curated_prior)
         source = "curated cross-platform career prior"
