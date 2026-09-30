@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "purpose": "Actor career anchors that complement the current-star benchmark. These entries guarantee coverage only; they do not assign editorial benchmark ranks or override verified career evidence.",
+  "anchors": [
+    {
+      "name": "Meryl Streep",
+      "wikidataQid": "Q873"
+    },
+    {
+      "name": "Daniel Day-Lewis",
+      "wikidataQid": "Q166389"
+    },
+    {
+      "name": "Jack Nicholson",
+      "wikidataQid": "Q39792"
+    },
+    {
+      "name": "Dustin Hoffman",
+      "wikidataQid": "Q42930"
+    }
+  ]
+}
