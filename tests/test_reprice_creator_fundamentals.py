@@ -11,9 +11,13 @@ from reprice_creator_fundamentals import (  # noqa: E402
     CAREER_BASELINE_MIN_REFRESH_DAYS,
     CAREER_FUNDAMENTAL_WEIGHT,
     RECENT_PRODUCTION_WEIGHT,
+    EVENT_HALF_LIFE_DAYS,
+    UNVERIFIED_CURATED_SHRINK_WEIGHT,
     CREATOR_WEIGHTS,
     MODEL_VERSION,
     active_score,
+    curated_creator_prior,
+    event_multiplier,
     reprice_records,
     youtube_evidence_weight,
 )
@@ -312,6 +316,70 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
             second_creator["creatorCareerBaselineUpdatedAt"],
         )
         self.assertEqual(CAREER_BASELINE_MIN_REFRESH_DAYS, 7)
+
+    def test_creator_events_decay_toward_fundamental(self):
+        record = {
+            "priceEvents": [
+                {"movePct": 10.0, "startedAt": "2026-09-30T00:00:00Z"},
+                {"movePct": 10.0, "startedAt": "2026-09-16T00:00:00Z"},
+            ]
+        }
+        as_of = __import__("datetime").datetime(2026, 9, 30, tzinfo=__import__("datetime").timezone.utc)
+        multiplier = event_multiplier(record, as_of=as_of)
+        # Today contributes 10%; a 14-day-old event contributes half its move.
+        self.assertAlmostEqual(multiplier, 1.10 * 1.05, places=6)
+        self.assertEqual(EVENT_HALF_LIFE_DAYS, 14.0)
+
+    def test_historical_backfill_does_not_move_live_creator_price(self):
+        record = {
+            "priceEvents": [
+                {"movePct": 50.0, "startedAt": "2026-09-30T00:00:00Z", "historicalBackfill": True}
+            ]
+        }
+        as_of = __import__("datetime").datetime(2026, 9, 30, tzinfo=__import__("datetime").timezone.utc)
+        self.assertEqual(event_multiplier(record, as_of=as_of), 1.0)
+
+    def test_verified_2026_dhar_mann_anchor_strengthens_curated_prior(self):
+        anchored = {
+            "name": "Dhar Mann",
+            "benchmarkRank": 17,
+            "benchmarkPoolSize": 100,
+            "age": 42,
+        }
+        unanchored = {
+            "name": "Unanchored Creator",
+            "benchmarkRank": 17,
+            "benchmarkPoolSize": 100,
+            "age": 42,
+        }
+        anchored_prior = curated_creator_prior(anchored)
+        unanchored_prior = curated_creator_prior(unanchored)
+        self.assertIsNotNone(anchored_prior)
+        self.assertIsNotNone(unanchored_prior)
+        self.assertGreater(active_score(anchored_prior), active_score(unanchored_prior))
+
+    def test_missing_direct_evidence_is_shrunk_toward_neutral_elite_score(self):
+        record = {
+            "id": "cur-curated",
+            "name": "Curated Missing Evidence",
+            "primaryCategory": "Creator",
+            "benchmarkRank": 1,
+            "benchmarkPoolSize": 100,
+            "teamOrPlatform": "Podcasting",
+            "pricingConfidence": 0.70,
+            "dataConfidence": 0.70,
+            "marketPrice": 100.0,
+            "priceEvents": [],
+            "trend": [100.0] * 18,
+        }
+        repriced, _ = reprice_records([record], {})
+        creator = repriced[0]
+        self.assertIn("creatorEvidenceUncertainty", creator)
+        self.assertEqual(
+            creator["creatorEvidenceUncertainty"]["shrinkWeight"],
+            UNVERIFIED_CURATED_SHRINK_WEIGHT,
+        )
+        self.assertLess(creator["careerScore"], 92.0)
 
     def test_active_score_uses_all_six_creator_components(self):
         metrics = {
