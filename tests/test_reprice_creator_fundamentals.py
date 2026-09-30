@@ -8,6 +8,8 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from reprice_creator_fundamentals import (  # noqa: E402
+    CAREER_FUNDAMENTAL_WEIGHT,
+    RECENT_PRODUCTION_WEIGHT,
     CREATOR_WEIGHTS,
     MODEL_VERSION,
     active_score,
@@ -176,7 +178,7 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         self.assertEqual(youtube_evidence_weight(youtube, True), 1.0)
         self.assertEqual(youtube_evidence_weight(mixed, True), 0.65)
         self.assertEqual(youtube_evidence_weight(secondary, True), 0.35)
-        self.assertEqual(youtube_evidence_weight(discovered, False), 1.0)
+        self.assertEqual(youtube_evidence_weight(discovered, False), 0.50)
 
     def test_secondary_youtube_does_not_overwrite_curated_creator_prior(self):
         records = [dict(
@@ -199,9 +201,11 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         repriced, _ = reprice_records(records, weak_manifest)
         creator = repriced[0]
         policy = creator["creatorPlatformEvidencePolicy"]
-        self.assertEqual(policy["youtubeProductionWeight"], 0.35)
-        self.assertEqual(policy["crossPlatformPriorWeight"], 0.65)
-        self.assertTrue(creator["pricingDataStatus"].startswith("Evidence enriched — platform-aware"))
+        self.assertEqual(policy["youtubeCentralityWithinRecentSleeve"], 0.35)
+        self.assertEqual(policy["recentProductionSleeveWeight"], RECENT_PRODUCTION_WEIGHT)
+        self.assertEqual(policy["effectiveRecentYouTubeWeight"], 0.105)
+        self.assertEqual(policy["effectiveCareerBaselineWeight"], 0.895)
+        self.assertTrue(creator["pricingDataStatus"].startswith("Evidence enriched — persistent Creator career baseline"))
         self.assertGreater(creator["careerScore"], 55.0)
 
     def test_youtube_first_creator_remains_direct_evidence_driven(self):
@@ -215,9 +219,75 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         repriced, _ = reprice_records(records, self.manifest)
         creator = repriced[0]
         policy = creator["creatorPlatformEvidencePolicy"]
-        self.assertEqual(policy["youtubeProductionWeight"], 1.0)
-        self.assertEqual(policy["crossPlatformPriorWeight"], 0.0)
-        self.assertTrue(creator["pricingDataStatus"].startswith("Evidence enriched — verified Creator production"))
+        self.assertEqual(policy["youtubeCentralityWithinRecentSleeve"], 1.0)
+        self.assertEqual(policy["recentProductionSleeveWeight"], RECENT_PRODUCTION_WEIGHT)
+        self.assertEqual(policy["effectiveRecentYouTubeWeight"], 0.30)
+        self.assertEqual(policy["effectiveCareerBaselineWeight"], 0.70)
+        self.assertTrue(creator["pricingDataStatus"].startswith("Evidence enriched — persistent Creator career baseline"))
+
+    def test_creator_v23_uses_seventy_thirty_career_recent_split(self):
+        self.assertEqual(CAREER_FUNDAMENTAL_WEIGHT, 0.70)
+        self.assertEqual(RECENT_PRODUCTION_WEIGHT, 0.30)
+        records = [dict(
+            self.records[0],
+            name="Stable YouTube Creator",
+            benchmarkRank=5,
+            benchmarkPoolSize=100,
+            teamOrPlatform="YouTube",
+        )]
+        repriced, _ = reprice_records(records, self.manifest)
+        creator = repriced[0]
+        policy = creator["creatorPlatformEvidencePolicy"]
+        self.assertEqual(policy["effectiveCareerBaselineWeight"], 0.70)
+        self.assertEqual(policy["effectiveRecentYouTubeWeight"], 0.30)
+        self.assertIn("creatorCareerBaselineMetrics", creator)
+
+    def test_persisted_career_baseline_limits_one_refresh_slump(self):
+        strong_baseline = {
+            "audience": 90.0,
+            "performance": 88.0,
+            "achievements": 90.0,
+            "potential": 80.0,
+            "consistency": 88.0,
+            "careerRunway": 80.0,
+            "availability": 80.0,
+        }
+        records = [dict(
+            self.records[0],
+            name="Established Creator",
+            teamOrPlatform="YouTube",
+            creatorCareerBaselineMetrics=strong_baseline,
+            creatorCareerBaselineVersion="creator-career-baseline-v1",
+        )]
+        weak_manifest = {
+            "videoSnapshots": {
+                "v1": {"recordId": "cur-large", "channelId": "UC-X", "views": 5_000, "publishedAt": "2026-09-10T12:00:00Z"},
+                "v2": {"recordId": "cur-large", "channelId": "UC-X", "views": 4_000, "publishedAt": "2026-09-03T12:00:00Z"},
+                "v3": {"recordId": "cur-large", "channelId": "UC-X", "views": 3_000, "publishedAt": "2026-08-27T12:00:00Z"},
+            },
+            "performanceState": {
+                "cur-large:v1": {"effectiveRatio": 0.35, "checkedAt": "2026-09-15T12:00:00Z"},
+            },
+        }
+        repriced, _ = reprice_records(records, weak_manifest)
+        creator = repriced[0]
+        self.assertGreater(creator["activeMetrics"]["audience"], 70.0)
+        self.assertGreater(creator["careerScore"], 65.0)
+        self.assertEqual(creator["creatorCareerBaselineSource"], "persisted verified career baseline")
+
+    def test_discovered_non_youtube_creator_no_longer_gets_full_youtube_weight(self):
+        records = [dict(
+            self.records[0],
+            name="Discovered Podcaster",
+            teamOrPlatform="Podcast platforms",
+        )]
+        repriced, _ = reprice_records(records, self.manifest)
+        creator = repriced[0]
+        policy = creator["creatorPlatformEvidencePolicy"]
+        self.assertFalse(policy["curatedPriorAvailable"])
+        self.assertEqual(policy["youtubeCentralityWithinRecentSleeve"], 0.35)
+        self.assertEqual(policy["effectiveRecentYouTubeWeight"], 0.105)
+        self.assertEqual(policy["effectiveCareerBaselineWeight"], 0.895)
 
     def test_active_score_uses_all_six_creator_components(self):
         metrics = {
