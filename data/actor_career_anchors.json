@@ -1,5 +1,5 @@
 {
-  "version": "1.2",
+  "version": "1.3",
   "purpose": "Actor career anchors complement the current-star benchmark by protecting established career stature without assigning editorial ranks. QIDs are identity sources; fallback metadata is used only when Wikidata endpoint batches are incomplete.",
   "anchors": [
     {
@@ -20,7 +20,10 @@
       "workEndYear": null,
       "country": "United Kingdom",
       "role": "Actor",
-      "discipline": "Film & Stage"
+      "discipline": "Film & Stage",
+      "currentMarketEligible": true,
+      "careerStatus": "Active",
+      "statusNote": "Returned to acting after prior retirement; keep eligible for Current Actor market."
     },
     {
       "name": "Jack Nicholson",
@@ -30,7 +33,10 @@
       "workEndYear": 2010,
       "country": "United States",
       "role": "Actor",
-      "discipline": "Film"
+      "discipline": "Film",
+      "currentMarketEligible": false,
+      "careerStatus": "Retired / legacy",
+      "statusNote": "Career anchor only; exclude from Current catalog."
     },
     {
       "name": "Dustin Hoffman",
