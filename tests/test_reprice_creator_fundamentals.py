@@ -381,6 +381,39 @@ class RepriceCreatorFundamentalsTests(unittest.TestCase):
         )
         self.assertLess(creator["careerScore"], 92.0)
 
+    def test_verified_anchor_immediately_strengthens_persisted_dhar_baseline(self):
+        record = {
+            "id": "cur-dhar-mann",
+            "name": "Dhar Mann",
+            "primaryCategory": "Creator",
+            "benchmarkRank": 17,
+            "benchmarkPoolSize": 100,
+            "teamOrPlatform": "YouTube",
+            "pricingConfidence": 0.88,
+            "dataConfidence": 0.88,
+            "age": 42,
+            "marketPrice": 120.0,
+            "trend": [120.0] * 18,
+            "priceEvents": [],
+            "creatorCareerBaselineMetrics": {
+                "audience": 76.0,
+                "performance": 75.0,
+                "achievements": 77.0,
+                "potential": 70.0,
+                "consistency": 76.0,
+                "careerRunway": 60.0,
+                "availability": 80.0,
+            },
+            "creatorCareerBaselineUpdatedAt": "2026-09-30T00:00:00Z",
+        }
+        repriced, _ = reprice_records([record], {})
+        creator = repriced[0]
+        self.assertEqual(
+            creator["creatorCareerBaselineSource"],
+            "persisted career baseline + verified 2026 career anchor",
+        )
+        self.assertGreater(creator["creatorCareerBaselineMetrics"]["audience"], 76.0)
+
     def test_active_score_uses_all_six_creator_components(self):
         metrics = {
             "audience": 100,
