@@ -260,7 +260,7 @@ class PricingEngineV2Tests(unittest.TestCase):
             yearsActive=35,pricingConfidence=.92,dataConfidence=.92,priceEvents=[])
         self.assertLessEqual(evidence_confidence(actor),82)
         priced=apply_v2(actor)
-        self.assertEqual(priced['pricingModelVersion'],'6.8-actor-career-anchor-elite-scale')
+        self.assertEqual(priced['pricingModelVersion'],'6.9-actor-anchor-aware-elite-scale')
         self.assertEqual(priced['pricingV2']['actorIdentityConfidenceScore'],90.0)
         self.assertEqual(priced['pricingV2']['actorPricingEvidenceCeiling'],82.0)
 
@@ -317,6 +317,29 @@ class PricingEngineV2Tests(unittest.TestCase):
         music=apply_v2(self.music_record(
             careerScore=95.0,fundamentalValue=164.45,marketPrice=164.45))
         self.assertIsNone(music['pricingV2'].get('actorEliteScaleMultiplier'))
+
+
+    def test_legacy_actor_anchor_uses_actor_career_metrics_not_generic_legacy_placeholder(self):
+        actor=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q166389',
+            actorCareerAnchor=True,marketSegment='Legacy',careerStatus='Retired / legacy',
+            careerScore=45.0,
+            activeMetrics={"performance":88,"achievements":92,"consistency":88,"potential":34,"availability":78,"audience":81},
+            priceEvents=[
+                {'eventKey':'award:1','eventType':'award','name':'Award: Academy Award for Best Actor','verified':True},
+                {'eventKey':'award:2','eventType':'award','name':'Award: Best Actor performance','verified':True},
+            ])
+        priced=apply_v2(actor)
+        self.assertGreater(priced['pricingV2']['actorCareerScaleScore'],88.0)
+        self.assertEqual(priced['pricingV2']['actorLegacyMarketMultiplier'],0.85)
+        self.assertGreater(priced['fairValue'],110.0)
+
+    def test_active_actor_is_not_given_legacy_discount(self):
+        actor=self.music_record(
+            primaryCategory='Actor',sourceNamespace='wikidata-non-athlete',sourceRecordId='Q873',
+            actorCareerAnchor=True,marketSegment='Current',careerScore=86.0,priceEvents=[])
+        priced=apply_v2(actor)
+        self.assertEqual(priced['pricingV2']['actorLegacyMarketMultiplier'],1.0)
 
     def test_direct_actor_evidence_refines_confidence_without_market_scale_haircut(self):
         base=self.music_record(
