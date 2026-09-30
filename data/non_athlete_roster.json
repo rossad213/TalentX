@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "targetPerCategory": 100,
   "selectionMethod": "Curated broad-market roster. Rank is a temporary editorial benchmark used only until profession-specific evidence feeds are available.",
   "selectionSources": [
@@ -15,8 +15,9 @@
     },
     {
       "category": "Creator",
-      "name": "Forbes Top Creators 2025",
-      "url": "https://www.forbes.com/sites/stevenbertoni/2025/06/16/forbes-top-creators-2025/"
+      "name": "TalentX curated Creator benchmark informed by Forbes Top Creators 2025",
+      "url": "https://www.forbes.com/sites/stevenbertoni/2025/06/16/forbes-top-creators-2025/",
+      "note": "This is an editorial TalentX benchmark, not a reproduction of Forbes' published rank order. Current verified 2026 anchors are maintained separately in data/creator_career_anchors_2026.json."
     }
   ],
   "categories": {
