@@ -139,6 +139,32 @@ SELECT DISTINCT ?person ?personLabel ?sitelinks ?birth ?workStart ?workEnd ?coun
                 "discipline": "Acting",
                 "actorCareerAnchor": True,
             }
+    # Final deterministic fallback from the reviewed anchor file itself.
+    # This is used only when Wikidata endpoints return a partial exact-ID batch.
+    anchors_by_qid = {
+        str(item.get("wikidataQid") or ""): item
+        for item in anchors
+        if isinstance(item, dict)
+    }
+    for qid in qids:
+        if qid in by_qid:
+            continue
+        item = anchors_by_qid.get(qid, {})
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        by_qid[qid] = {
+            "qid": qid,
+            "name": name,
+            "sitelinks": 80,
+            "birthYear": item.get("birthYear"),
+            "workStartYear": item.get("workStartYear"),
+            "workEndYear": item.get("workEndYear"),
+            "country": str(item.get("country") or "Not listed"),
+            "role": str(item.get("role") or "Actor"),
+            "discipline": str(item.get("discipline") or "Acting"),
+            "actorCareerAnchor": True,
+        }
     order = {qid: index for index, qid in enumerate(qids)}
     return sorted(by_qid.values(), key=lambda row: order.get(str(row.get("qid")), 9999))
 
